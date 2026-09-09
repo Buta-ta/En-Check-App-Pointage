@@ -1,0 +1,2973 @@
+// lib/screens/pointage_screen.dart
+// ═══════════════════════════════════════════════════════════
+// 📱 PAGE POINTAGE
+// ═══════════════════════════════════════════════════════════
+
+import 'dart:typed_data';
+import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'dart:async';
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../theme/app_theme.dart';
+import '../widgets/logo_empreinte.dart';
+import '../widgets/qr_scanner_widget.dart';
+import '../widgets/qr_photo_scanner_widget.dart';
+import '../widgets/pin_photo_widget.dart';
+import '../widgets/web_camera_widget.dart';
+import '../services/supabase_service.dart';
+import '../services/local_database.dart';
+import '../services/connectivity_service.dart';
+import '../services/theme_service.dart';
+import '../services/sync_service.dart';
+import '../services/photo_service_interface.dart';
+import '../services/geofencing_service.dart';
+import 'historique_screen.dart';
+import 'face_enrollment_screen.dart';
+import 'face_pointage_screen.dart';
+import '../services/face_recognition_service_provider.dart';
+import 'package:geolocator/geolocator.dart'
+if (dart.library.html) '../stubs/geolocator_stub.dart';
+
+class PointageScreen extends StatefulWidget {
+  const PointageScreen({super.key});
+
+  @override
+  State<PointageScreen> createState() => _PointageScreenState();
+}
+
+class _PointageScreenState extends State<PointageScreen> {
+  String? _modeSelectionne;
+
+  // 🔢 PIN
+  String numeroMatricule = '';
+  String codePin = '';
+  bool afficherPin = false;
+
+  // ⚙️ État général
+  bool chargement = false;
+  bool syncEnCours = false;
+  bool chargementEntreprises = true;
+  String heureActuelle = '';
+  String dateActuelle = '';
+  Timer? _timer;
+  int pointagesEnAttente = 0;
+
+  // 📷 Scanners
+  bool _showScanner = false;
+  bool _showPhotoScanner = false;
+  bool _showPinPhoto = false;
+
+  // 🌐 Web Camera
+  bool _showWebCamera = false;
+  String _webCameraRaison = 'pointage';
+  Map<String, dynamic>? _pendingEmployeeWebCamera;
+
+  // 🔐 Modules
+  bool _moduleQRActif = false;
+  bool _modulePhotoActif = false;
+  bool _moduleGeofencingActif = false;
+  bool _moduleRecoFacialeActif = false;
+
+  // 🤖 Mode personnel
+  bool _faceEnrolled = false;
+  bool _faceApproved = false;
+  String? _faceEmployeeId;
+  String? _faceEmployeeName;
+
+  // 🤖 Mode tablette
+  bool _kioskMode = false;
+  String _kioskPhase = 'pointage';
+  List<Map<String, dynamic>> _kioskEmployeesNonEnroles = [];
+  int _kioskEnrolementIndex = 0;
+
+  // 🤖 État écrans
+  bool _showFacePointage = false;
+  bool _showFaceEnrollment = false;
+
+  Map<String, dynamic> _faceConfig = {
+    'confidence_threshold': 0.80,
+    'liveness_required': true,
+    'admin_approval_required': true,
+    'fallback_allowed': true,
+    'max_attempts': 3,
+    'kiosk_mode_enabled': false,
+    'pointage_mode': 'free',
+  };
+
+  Map<String, dynamic>? _employeeEnAttente;
+
+  // 🌍 Geofencing
+  dynamic _currentPosition;
+  Map<String, dynamic>? _verificationZone;
+  bool _gpsVerifie = false;
+
+  // 📊 Données
+  Map<String, dynamic>? entrepriseSelectionnee;
+  Map<String, dynamic>? _employeeSchedule;
+  Map<String, dynamic>? _pendingEmployee;
+  Map<String, dynamic>? _dernierEmployePointe;
+
+  @override
+  void initState() {
+    super.initState();
+    _mettreAJourHeure();
+    _compterPointagesEnAttente();
+    _timer = Timer.periodic(
+        const Duration(seconds: 1), (timer) => _mettreAJourHeure());
+    _initialiserApp();
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // 🚀 INITIALISATION
+  // ═══════════════════════════════════════════════════════════
+
+  Future<void> _initialiserApp() async {
+    await _chargerModulesLocaux();
+    await _chargerEntrepriseLocale();
+    if (_moduleRecoFacialeActif && entrepriseSelectionnee != null) {
+      await _chargerConfigRecoFacialeEnLigne();
+    }
+  }
+
+  Future<void> _chargerModulesLocaux() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _moduleQRActif = prefs.getBool('module_qr_scanner') ?? false;
+      _modulePhotoActif = prefs.getBool('module_photo_pointage') ?? false;
+      _moduleGeofencingActif =
+          prefs.getBool('module_geolocalisation') ?? false;
+      _moduleRecoFacialeActif =
+          prefs.getBool('module_reconnaissance_faciale') ?? false;
+      _faceEnrolled = prefs.getBool('face_enrolled') ?? false;
+      _faceApproved = prefs.getBool('face_approved') ?? false;
+      _faceEmployeeId = prefs.getString('face_employee_id');
+      _faceEmployeeName = prefs.getString('face_employee_name');
+    });
+
+    if (_moduleRecoFacialeActif) {
+      final configCache = await LocalDatabase.getConfigFaciale();
+      if (configCache != null && mounted) {
+        setState(() {
+          _faceConfig = configCache;
+          _kioskMode = configCache['kiosk_mode_enabled'] as bool? ?? false;
+        });
+      }
+      FaceRecognitionService.initialiser();
+    }
+  }
+
+  Future<void> _chargerConfigRecoFacialeEnLigne() async {
+    if (!ConnectivityService.isOnline) return;
+    if (entrepriseSelectionnee == null) return;
+
+    try {
+      final config = await SupabaseService.getConfigRecoFaciale(
+          entrepriseSelectionnee!['id']);
+      await LocalDatabase.sauvegarderConfigFaciale(config);
+      final kioskMode = config['kiosk_mode_enabled'] as bool? ?? false;
+
+      if (mounted) {
+        setState(() {
+          _faceConfig = config;
+          _kioskMode = kioskMode;
+        });
+      }
+
+      if (kioskMode) {
+        await _chargerTousEmbeddingsEntreprise();
+        await _detecterEmployesNonEnroles();
+      } else {
+        if (_faceEnrolled && !_faceApproved && _faceEmployeeId != null) {
+          await _verifierApprobationEnLigne();
+        }
+      }
+    } catch (e) {
+      // Garder cache
+    }
+  }
+
+  Future<void> _chargerTousEmbeddingsEntreprise() async {
+    if (!ConnectivityService.isOnline) return;
+    if (entrepriseSelectionnee == null) return;
+
+    try {
+      final enrollments = await SupabaseService.getTousEnrolementsApprouves(
+          entrepriseSelectionnee!['id']);
+
+      for (final enrollment in enrollments) {
+        final employeeId = enrollment['employee_id'] as String;
+        final embedding =
+        List<double>.from(enrollment['face_embedding'] as List);
+        await LocalDatabase.sauvegarderEmbedding(
+          employeeId: employeeId,
+          enterpriseId: entrepriseSelectionnee!['id'],
+          embedding: embedding,
+          enrollmentId: enrollment['id'],
+        );
+      }
+    } catch (e) {
+      print('❌ Erreur chargement embeddings: $e');
+    }
+  }
+
+  Future<void> _detecterEmployesNonEnroles() async {
+    if (entrepriseSelectionnee == null) return;
+
+    try {
+      final allEmployees = await SupabaseService.getEmployeesParEntreprise(
+          entrepriseSelectionnee!['id']);
+
+      final nonEnroles = <Map<String, dynamic>>[];
+      for (final emp in allEmployees.cast<Map<String, dynamic>>()) {
+        final embedding = await LocalDatabase.getEmbedding(emp['id']);
+        if (embedding == null) {
+          nonEnroles.add(emp);
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _kioskEmployeesNonEnroles = nonEnroles;
+          _kioskPhase = nonEnroles.isEmpty ? 'pointage' : 'enrolling';
+          _kioskEnrolementIndex = 0;
+        });
+      }
+    } catch (e) {
+      print('❌ Erreur détection non-enrôlés: $e');
+    }
+  }
+
+  Future<void> _chargerEntrepriseLocale() async {
+    final prefs = await SharedPreferences.getInstance();
+    final id = prefs.getString('enterprise_id');
+    final name = prefs.getString('enterprise_name');
+    final logo = prefs.getString('enterprise_logo');
+    final prefix = prefs.getString('matricule_prefix');
+
+    if (id != null) {
+      setState(() {
+        entrepriseSelectionnee = {
+          'id': id,
+          'name': name,
+          'logo_url': logo,
+          'matricule_prefix': prefix,
+        };
+        chargementEntreprises = false;
+      });
+    } else {
+      setState(() => chargementEntreprises = false);
+    }
+  }
+
+  Future<void> _verifierApprobationEnLigne() async {
+    if (!ConnectivityService.isOnline || _faceEmployeeId == null) return;
+
+    try {
+      final statutSupabase =
+      await SupabaseService.getStatutEnrolement(_faceEmployeeId!);
+      if (statutSupabase?['status'] == 'approved') {
+        final enrollment =
+        await SupabaseService.getEnrolementActif(_faceEmployeeId!);
+        if (enrollment != null && entrepriseSelectionnee != null) {
+          final embedding =
+          List<double>.from(enrollment['face_embedding'] as List);
+          await LocalDatabase.sauvegarderEmbedding(
+            employeeId: _faceEmployeeId!,
+            enterpriseId: entrepriseSelectionnee!['id'],
+            embedding: embedding,
+            enrollmentId: enrollment['id'],
+          );
+          await LocalDatabase.sauvegarderStatutEnrolement(
+            employeeId: _faceEmployeeId!,
+            status: 'approved',
+            enrollmentId: enrollment['id'],
+          );
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setBool('face_approved', true);
+          if (mounted) setState(() => _faceApproved = true);
+        }
+      }
+    } catch (e) {
+      // Silencieux
+    }
+  }
+
+  Future<void> _compterPointagesEnAttente() async {
+    final count = await LocalDatabase.compterPointagesPending();
+    setState(() => pointagesEnAttente = count);
+  }
+
+  void _mettreAJourHeure() {
+    final now = DateTime.now();
+    final jours = [
+      'Dimanche', 'Lundi', 'Mardi', 'Mercredi',
+      'Jeudi', 'Vendredi', 'Samedi'
+    ];
+    final mois = [
+      'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
+      'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre',
+    ];
+    if (mounted) {
+      setState(() {
+        heureActuelle =
+        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+        dateActuelle =
+        '${jours[now.weekday % 7]} ${now.day} ${mois[now.month - 1]}';
+      });
+    }
+  }
+
+  String get matriculeComplet {
+    final prefix = entrepriseSelectionnee?['matricule_prefix'] ?? '';
+    if (numeroMatricule.isEmpty) return '$prefix-____';
+    return '$prefix-$numeroMatricule';
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // 🌍 GPS
+  // ═══════════════════════════════════════════════════════════
+
+  Future<bool> _verifierPositionGPS() async {
+    if (!_moduleGeofencingActif || entrepriseSelectionnee == null) return true;
+
+    setState(() => chargement = true);
+
+    try {
+      _currentPosition = await GeofencingService.obtenirPosition();
+      if (_currentPosition == null) {
+        _afficherErreur(
+            'Impossible d\'obtenir votre position GPS.\nActivez le GPS.');
+        setState(() => chargement = false);
+        return false;
+      }
+
+      _verificationZone = await GeofencingService.verifierZone(
+        enterpriseId: entrepriseSelectionnee!['id'],
+        position: _currentPosition!,
+      );
+
+      setState(() {
+        _gpsVerifie = true;
+        chargement = false;
+      });
+
+      if (_verificationZone!['autorise'] == false) {
+        _afficherErreurGeofencing(_verificationZone!);
+        return false;
+      }
+
+      return true;
+    } catch (e) {
+      setState(() {
+        chargement = false;
+        _gpsVerifie = true;
+      });
+      return true;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // 🔄 SYNC
+  // ═══════════════════════════════════════════════════════════
+
+  Future<void> _lancerSynchronisation() async {
+    if (!ConnectivityService.isOnline) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Pas de connexion internet')));
+      return;
+    }
+    setState(() => syncEnCours = true);
+    await SyncService.synchroniserAutomatique();
+    await PhotoService.syncPhotosEnAttente();
+    await _compterPointagesEnAttente();
+    setState(() => syncEnCours = false);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Synchronisation terminée'),
+        backgroundColor: EnCheckColors.succes,
+      ));
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // 🤖 LOGIQUE RECONNAISSANCE FACIALE
+  // ═══════════════════════════════════════════════════════════
+
+  Future<void> _onBoutonFaceClique() async {
+    if (_moduleGeofencingActif) {
+      final gpsOk = await _verifierPositionGPS();
+      if (!gpsOk) return;
+    }
+
+    if (_kioskMode) {
+      await _lancerPointageFacialKiosk1vN();
+    } else {
+      if (_faceEnrolled && _faceApproved && _faceEmployeeId != null) {
+        await _lancerPointageFacialDirect();
+      } else if (_faceEnrolled && !_faceApproved) {
+        await _verifierApprobationEnLigne();
+        if (_faceApproved) {
+          await _lancerPointageFacialDirect();
+        } else {
+          _afficherDialogEnAttente();
+        }
+      } else {
+        _afficherDialogIdentificationPourEnrolement();
+      }
+    }
+  }
+
+  Future<void> _lancerPointageFacialKiosk1vN() async {
+    final tousEmbeddings =
+    await LocalDatabase.getTousEmbeddings(entrepriseSelectionnee!['id']);
+
+    if (tousEmbeddings.isEmpty) {
+      _afficherErreur(
+          'Aucun employé enrôlé. Veuillez d\'abord enrôler les employés.');
+      return;
+    }
+
+    setState(() {
+      _employeeEnAttente = {
+        'id': '',
+        'first_name': '',
+        'last_name': '',
+        'enterprise_id': entrepriseSelectionnee!['id'],
+      };
+      _showFacePointage = true;
+    });
+  }
+
+  void _lancerEnrolementKioskSuivant() {
+    if (_kioskEnrolementIndex >= _kioskEmployeesNonEnroles.length) {
+      setState(() => _kioskPhase = 'pointage');
+      return;
+    }
+
+    final employee = _kioskEmployeesNonEnroles[_kioskEnrolementIndex];
+    setState(() {
+      _employeeEnAttente = employee;
+      _showFaceEnrollment = true;
+    });
+  }
+
+  void _onEnrolementKioskComplete() async {
+    setState(() {
+      _showFaceEnrollment = false;
+      _kioskEnrolementIndex++;
+    });
+
+    await _chargerTousEmbeddingsEntreprise();
+
+    if (_kioskEnrolementIndex >= _kioskEmployeesNonEnroles.length) {
+      setState(() => _kioskPhase = 'pointage');
+    } else {
+      _lancerEnrolementKioskSuivant();
+    }
+  }
+
+  Future<void> _lancerPointageFacialDirect() async {
+    if (_faceEmployeeId == null) return;
+
+    final embeddingData = await LocalDatabase.getEmbedding(_faceEmployeeId!);
+
+    if (embeddingData == null) {
+      if (ConnectivityService.isOnline) {
+        final enrollment =
+        await SupabaseService.getEnrolementActif(_faceEmployeeId!);
+        if (enrollment != null && entrepriseSelectionnee != null) {
+          final embedding =
+          List<double>.from(enrollment['face_embedding'] as List);
+          await LocalDatabase.sauvegarderEmbedding(
+            employeeId: _faceEmployeeId!,
+            enterpriseId: entrepriseSelectionnee!['id'],
+            embedding: embedding,
+            enrollmentId: enrollment['id'],
+          );
+        } else {
+          _afficherErreur(
+              'Profil facial introuvable. Veuillez vous ré-enrôler.');
+          return;
+        }
+      } else {
+        _afficherErreur('Profil facial non disponible hors ligne.');
+        return;
+      }
+    }
+
+    final nameParts = (_faceEmployeeName ?? '').split(' ');
+    final employee = {
+      'id': _faceEmployeeId,
+      'first_name': nameParts.isNotEmpty ? nameParts.first : '',
+      'last_name': nameParts.length > 1 ? nameParts.skip(1).join(' ') : '',
+      'enterprise_id': entrepriseSelectionnee!['id'],
+    };
+
+    setState(() {
+      _employeeEnAttente = employee;
+      _showFacePointage = true;
+    });
+  }
+
+  void _afficherDialogIdentificationPourEnrolement() {
+    final matriculeController = TextEditingController();
+    final pinController = TextEditingController();
+    bool afficherPinLocal = false;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) => AlertDialog(
+          backgroundColor: Theme.of(context).cardColor,
+          shape:
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: EnCheckColors.terreChaude.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.person_outline,
+                    color: EnCheckColors.terreChaude, size: 24),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Première connexion',
+                        style: TextStyle(
+                            color: EnCheckColors.terreChaude,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16)),
+                    Text('Identifiez-vous pour l\'enrôlement',
+                        style: TextStyle(
+                            color: EnCheckColors.gris,
+                            fontSize: 12,
+                            fontWeight: FontWeight.normal)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                afficherPinLocal
+                    ? 'Entrez votre code PIN'
+                    : 'Entrez votre matricule',
+                style: TextStyle(
+                    color: Theme.of(context).textTheme.bodyMedium?.color,
+                    fontSize: 14),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller:
+                afficherPinLocal ? pinController : matriculeController,
+                obscureText: afficherPinLocal,
+                keyboardType: TextInputType.number,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 24,
+                  letterSpacing: 8,
+                  fontWeight: FontWeight.bold,
+                  color: Theme.of(context).textTheme.bodyLarge?.color,
+                ),
+                decoration: InputDecoration(
+                  hintText: afficherPinLocal ? '● ● ● ●' : 'Matricule',
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(
+                        color: EnCheckColors.terreChaude, width: 2),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Annuler',
+                  style: TextStyle(color: EnCheckColors.gris)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: EnCheckColors.terreChaude,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+              ),
+              onPressed: () async {
+                if (!afficherPinLocal) {
+                  if (matriculeController.text.isEmpty) return;
+                  setModalState(() => afficherPinLocal = true);
+                } else {
+                  if (pinController.text.length < 4) return;
+                  Navigator.pop(ctx);
+                  await _identifierEtEnroler(
+                      matriculeController.text, pinController.text);
+                }
+              },
+              child: Text(afficherPinLocal ? 'Valider' : 'Suivant'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _identifierEtEnroler(String matricule, String pin) async {
+    setState(() => chargement = true);
+
+    try {
+      final matriculeCompletSaisi =
+          '${entrepriseSelectionnee!['matricule_prefix']}-$matricule';
+
+      Map<String, dynamic>? employee;
+      final estHorsLigne = !ConnectivityService.isOnline;
+
+      if (estHorsLigne) {
+        employee = await LocalDatabase.verifierEmployeeCache(
+            entrepriseSelectionnee!['id'], matriculeCompletSaisi, pin);
+      } else {
+        employee = await SupabaseService.verifierEmployee(
+            entrepriseSelectionnee!['id'], matriculeCompletSaisi, pin);
+      }
+
+      if (employee == null) {
+        setState(() => chargement = false);
+        _afficherErreur('Matricule ou PIN incorrect');
+        return;
+      }
+
+      String statut = 'none';
+      if (ConnectivityService.isOnline) {
+        final statutSupabase =
+        await SupabaseService.getStatutEnrolement(employee['id']);
+        if (statutSupabase != null) {
+          statut = statutSupabase['status'];
+
+          if (statut == 'approved') {
+            final enrollment =
+            await SupabaseService.getEnrolementActif(employee['id']);
+            if (enrollment != null) {
+              final embedding =
+              List<double>.from(enrollment['face_embedding'] as List);
+              await LocalDatabase.sauvegarderEmbedding(
+                employeeId: employee['id'],
+                enterpriseId: entrepriseSelectionnee!['id'],
+                embedding: embedding,
+                enrollmentId: enrollment['id'],
+              );
+            }
+            await _sauvegarderEmployeLocal(employee, approved: true);
+            setState(() {
+              chargement = false;
+              _employeeEnAttente = employee;
+              _showFacePointage = true;
+            });
+            return;
+          } else if (statut == 'pending') {
+            await _sauvegarderEmployeLocal(employee, approved: false);
+            setState(() => chargement = false);
+            _afficherDialogEnAttente();
+            return;
+          }
+        }
+      }
+
+      setState(() {
+        chargement = false;
+        _employeeEnAttente = employee;
+        _showFaceEnrollment = true;
+      });
+    } catch (e) {
+      setState(() => chargement = false);
+      _afficherErreur('Erreur: $e');
+    }
+  }
+
+  Future<void> _sauvegarderEmployeLocal(
+      Map<String, dynamic> employee, {
+        required bool approved,
+      }) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('face_employee_id', employee['id']);
+    await prefs.setString('face_employee_name',
+        '${employee['first_name']} ${employee['last_name']}');
+    await prefs.setBool('face_enrolled', true);
+    await prefs.setBool('face_approved', approved);
+
+    if (mounted) {
+      setState(() {
+        _faceEmployeeId = employee['id'];
+        _faceEmployeeName =
+        '${employee['first_name']} ${employee['last_name']}';
+        _faceEnrolled = true;
+        _faceApproved = approved;
+      });
+    }
+  }
+
+  void _afficherDialogEnAttente() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(context).cardColor,
+        shape:
+        RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.hourglass_top, color: EnCheckColors.terreChaude),
+            SizedBox(width: 10),
+            Text('En attente de validation'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Votre enrôlement facial est en attente de validation.',
+              style: TextStyle(fontSize: 15, height: 1.5),
+            ),
+            if (_faceConfig['fallback_allowed'] == true) ...[
+              const SizedBox(height: 12),
+              const Text(
+                'Vous pouvez utiliser un autre mode en attendant.',
+                style: TextStyle(
+                    fontSize: 13, color: EnCheckColors.gris, height: 1.4),
+              ),
+            ],
+          ],
+        ),
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: EnCheckColors.terreChaude,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Compris'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // ✅ SUCCÈS FACIAL
+  // ═══════════════════════════════════════════════════════════
+
+  void _afficherSuccesFacial(Map<String, dynamic> result) {
+    final estEntree = result['check_type'] == 'in';
+    final emp = result['employee'] as Map<String, dynamic>?;
+    final nomAffiche = emp != null
+        ? '${emp['first_name']} ${emp['last_name']}'
+        : (_faceEmployeeName ?? '');
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(context).cardColor,
+        shape:
+        RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Icon(estEntree ? Icons.login : Icons.logout,
+                color: EnCheckColors.succes, size: 30),
+            const SizedBox(width: 10),
+            Text(
+              estEntree ? 'ENTRÉE' : 'SORTIE',
+              style: const TextStyle(
+                  color: EnCheckColors.succes,
+                  fontWeight: FontWeight.w300,
+                  letterSpacing: 2),
+            ),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.person,
+                  size: 60, color: EnCheckColors.terreChaude),
+              const SizedBox(height: 12),
+              Text(
+                nomAffiche,
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                  color: Theme.of(context).textTheme.bodyLarge?.color,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Pointage enregistré à $heureActuelle',
+                style: TextStyle(
+                    color: Theme.of(context).textTheme.bodyMedium?.color),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: EnCheckColors.succes.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.check_circle,
+                        color: EnCheckColors.succes, size: 18),
+                    SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        'Reconnu par reconnaissance faciale',
+                        style: TextStyle(
+                            color: EnCheckColors.succes,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (result['is_within_zone'] != null) ...[
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: (result['is_within_zone'] == true
+                        ? EnCheckColors.succes
+                        : EnCheckColors.erreur)
+                        .withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: result['is_within_zone'] == true
+                          ? EnCheckColors.succes
+                          : EnCheckColors.erreur,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        result['is_within_zone'] == true
+                            ? Icons.location_on
+                            : Icons.location_off,
+                        color: result['is_within_zone'] == true
+                            ? EnCheckColors.succes
+                            : EnCheckColors.erreur,
+                        size: 18,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        result['is_within_zone'] == true
+                            ? 'Dans la zone autorisée'
+                            : 'Hors zone',
+                        style: TextStyle(
+                          color: result['is_within_zone'] == true
+                              ? EnCheckColors.succes
+                              : EnCheckColors.erreur,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              if (result['offline'] == true) ...[
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: EnCheckColors.terreChaude.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(Icons.wifi_off,
+                          color: EnCheckColors.terreChaude, size: 16),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Sauvegardé hors-ligne. Sera synchronisé.',
+                          style: TextStyle(
+                              color: EnCheckColors.terreChaude, fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          if (_dernierEmployePointe != null)
+            TextButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) =>
+                        HistoriqueScreen(employee: _dernierEmployePointe!),
+                  ),
+                );
+              },
+              child: Text('HISTORIQUE',
+                  style: TextStyle(
+                      color: Theme.of(context).textTheme.bodyLarge?.color,
+                      letterSpacing: 2)),
+            ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              setState(() {
+                _modeSelectionne = null;
+                _employeeEnAttente = null;
+                _gpsVerifie = false;
+                _currentPosition = null;
+                _verificationZone = null;
+              });
+            },
+            child: const Text('FERMER',
+                style: TextStyle(
+                    color: EnCheckColors.terreChaude, letterSpacing: 2)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // 🖥️ BUILD
+  // ═══════════════════════════════════════════════════════════
+
+  @override
+  Widget build(BuildContext context) {
+    // ── Mode tablette : phase enrôlement ──
+    if (_kioskMode &&
+        _kioskPhase == 'enrolling' &&
+        _kioskEmployeesNonEnroles.isNotEmpty &&
+        !_showFaceEnrollment &&
+        !_showFacePointage) {
+      return _buildKioskEnrolementScreen();
+    }
+
+    // ── Écran reco faciale ──
+    if (_showFacePointage && _employeeEnAttente != null) {
+      return FacePointageScreen(
+        employee: _employeeEnAttente!,
+        enterpriseId: entrepriseSelectionnee!['id'],
+        config: _faceConfig,
+        moduleGeofencingActif: _moduleGeofencingActif,
+        positionGPS: _currentPosition,
+        verificationZone: _verificationZone,
+        kioskMode: _kioskMode,
+        onPointageComplete: (result) async {
+          Map<String, dynamic>? employeeComplet;
+          final empId = result['employee_id'] as String?;
+          if (empId != null && empId.isNotEmpty) {
+            try {
+              if (ConnectivityService.isOnline) {
+                employeeComplet =
+                await SupabaseService.getEmployeeParId(empId);
+              }
+              employeeComplet ??= result['employee'];
+            } catch (_) {
+              employeeComplet = result['employee'];
+            }
+          } else {
+            employeeComplet = _employeeEnAttente;
+          }
+
+          setState(() {
+            _showFacePointage = false;
+            _dernierEmployePointe = employeeComplet;
+            _modeSelectionne = null;
+            _gpsVerifie = false;
+            _currentPosition = null;
+            _verificationZone = null;
+          });
+
+          await _compterPointagesEnAttente();
+          if (mounted) _afficherSuccesFacial(result);
+        },
+        onCancel: () {
+          setState(() {
+            _showFacePointage = false;
+            _employeeEnAttente = null;
+            _modeSelectionne = null;
+            _gpsVerifie = false;
+            _currentPosition = null;
+            _verificationZone = null;
+          });
+        },
+        onFallback: _faceConfig['fallback_allowed'] == true &&
+            _faceConfig['pointage_mode'] != 'face_exclusive'
+            ? () {
+          setState(() {
+            _showFacePointage = false;
+            _employeeEnAttente = null;
+            _modeSelectionne = 'pin';
+          });
+        }
+            : null,
+      );
+    }
+
+    // ── Écran enrôlement ──
+    if (_showFaceEnrollment && _employeeEnAttente != null) {
+      return FaceEnrollmentScreen(
+        employee: _employeeEnAttente!,
+        enterpriseId: entrepriseSelectionnee!['id'],
+        adminApprovalRequired:
+        _faceConfig['admin_approval_required'] as bool? ?? true,
+        onEnrollmentComplete: () async {
+          if (_kioskMode) {
+            _onEnrolementKioskComplete();
+          } else {
+            await _sauvegarderEmployeLocal(
+              _employeeEnAttente!,
+              approved:
+              !(_faceConfig['admin_approval_required'] as bool? ?? true),
+            );
+            setState(() {
+              _showFaceEnrollment = false;
+              _employeeEnAttente = null;
+              _modeSelectionne = null;
+            });
+          }
+        },
+        onCancel: () {
+          setState(() {
+            _showFaceEnrollment = false;
+            _employeeEnAttente = null;
+            _modeSelectionne = null;
+          });
+        },
+      );
+    }
+
+    // ── Scanner QR simple ──
+    if (_showScanner) {
+      return QRScannerWidget(
+        onScanned: _onQRScanned,
+        onClose: () => setState(() {
+          _showScanner = false;
+          _modeSelectionne = null;
+        }),
+      );
+    }
+
+    // ── Scanner QR + Photo ──
+    if (_showPhotoScanner) {
+      return QRPhotoScannerWidget(
+        onCompleted: _onQRPhotoCompleted,
+        onClose: () => setState(() {
+          _showPhotoScanner = false;
+          _modeSelectionne = null;
+        }),
+      );
+    }
+
+    // ── PIN + Photo (Mobile) ──
+    if (_showPinPhoto && _pendingEmployee != null) {
+      return PinPhotoWidget(
+        employeeName: _pendingEmployee!['first_name'] ?? '',
+        onPhotoTaken: (photoBytes) => _onPinPhotoTaken(photoBytes),
+        onCancel: () {
+          setState(() {
+            _showPinPhoto = false;
+            _pendingEmployee = null;
+            _modeSelectionne = null;
+          });
+        },
+      );
+    }
+
+    // ── Web Camera (Web uniquement) ──
+    if (_showWebCamera && _pendingEmployeeWebCamera != null && kIsWeb) {
+      return WebCameraWidget(
+        employeeName:
+        '${_pendingEmployeeWebCamera!['first_name']} ${_pendingEmployeeWebCamera!['last_name']}',
+        raison: _webCameraRaison,
+        onPhotoTaken: (photoBytes) async {
+          final employee = _pendingEmployeeWebCamera!;
+          final estHorsLigne = !ConnectivityService.isOnline;
+
+          setState(() {
+            _showWebCamera = false;
+            _pendingEmployeeWebCamera = null;
+          });
+
+          // Déterminer la méthode selon la raison
+          String method;
+          switch (_webCameraRaison) {
+            case 'qr':
+              method = 'qr_photo';
+              break;
+            case 'pin':
+            default:
+              method = 'pin_photo';
+              break;
+          }
+
+          await _traiterPointage(
+            employee,
+            method,
+            estHorsLigne,
+            photoBytes,
+          );
+
+          setState(() {
+            numeroMatricule = '';
+            codePin = '';
+            afficherPin = false;
+            _modeSelectionne = null;
+            _gpsVerifie = false;
+            _currentPosition = null;
+            _verificationZone = null;
+          });
+        },
+        onCancel: () {
+          setState(() {
+            _showWebCamera = false;
+            _pendingEmployeeWebCamera = null;
+            _modeSelectionne = null;
+          });
+        },
+      );
+    }
+
+    final bool estEnLigne = ConnectivityService.isOnline;
+    final themeService = Provider.of<ThemeService>(context);
+
+    return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      body: SafeArea(
+        child: chargementEntreprises
+            ? const Center(
+            child: CircularProgressIndicator(
+                color: EnCheckColors.terreChaude))
+            : Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 500),
+            child: SingleChildScrollView(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 30),
+                child: Column(
+                  children: [
+                    const SizedBox(height: 20),
+                    _buildHeader(estEnLigne, themeService),
+                    const SizedBox(height: 30),
+                    const LogoEmpreinte(taille: 100),
+                    const SizedBox(height: 20),
+                    Text(
+                      'EN-CHECK',
+                      style: EnCheckTextStyles.titrePrincipal.copyWith(
+                        color: Theme.of(context)
+                            .textTheme
+                            .bodyLarge
+                            ?.color,
+                      ),
+                    ),
+                    const SizedBox(height: 25),
+                    _buildCarteEntreprise(),
+                    const SizedBox(height: 30),
+                    Text(
+                      heureActuelle,
+                      style: EnCheckTextStyles.grosChiffres.copyWith(
+                        color: Theme.of(context)
+                            .textTheme
+                            .bodyLarge
+                            ?.color,
+                      ),
+                    ),
+                    Text(dateActuelle,
+                        style: EnCheckTextStyles.titreSecondaire),
+                    if (_moduleGeofencingActif || _kioskMode) ...[
+                      const SizedBox(height: 16),
+                      _buildIndicateursModules(),
+                    ],
+                    const SizedBox(height: 40),
+                    _buildZonePointage(),
+                    const SizedBox(height: 30),
+                    _buildSeparateur(),
+                    const SizedBox(height: 20),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // 📱 ÉCRAN ENRÔLEMENT TABLETTE
+  // ═══════════════════════════════════════════════════════════
+
+  Widget _buildKioskEnrolementScreen() {
+    final total = _kioskEmployeesNonEnroles.length;
+    final restants = total - _kioskEnrolementIndex;
+    final employee = _kioskEnrolementIndex < total
+        ? _kioskEmployeesNonEnroles[_kioskEnrolementIndex]
+        : null;
+
+    return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(30),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 80,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: EnCheckColors.terreChaude.withOpacity(0.15),
+                    border:
+                    Border.all(color: EnCheckColors.terreChaude, width: 2),
+                  ),
+                  child: const Icon(Icons.tablet_android,
+                      color: EnCheckColors.terreChaude, size: 40),
+                ),
+                const SizedBox(height: 24),
+                const Text(
+                  'MODE TABLETTE',
+                  style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 2),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Phase d\'enrôlement : $restants employé${restants > 1 ? 's' : ''} restant${restants > 1 ? 's' : ''}',
+                  style:
+                  const TextStyle(color: EnCheckColors.gris, fontSize: 14),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 30),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: LinearProgressIndicator(
+                    value: total > 0 ? _kioskEnrolementIndex / total : 0,
+                    backgroundColor:
+                    EnCheckColors.terreChaude.withOpacity(0.1),
+                    valueColor: const AlwaysStoppedAnimation<Color>(
+                        EnCheckColors.terreChaude),
+                    minHeight: 8,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '$_kioskEnrolementIndex / $total enrôlé${_kioskEnrolementIndex > 1 ? 's' : ''}',
+                  style:
+                  const TextStyle(color: EnCheckColors.gris, fontSize: 12),
+                ),
+                const SizedBox(height: 40),
+                if (employee != null) ...[
+                  Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).cardColor,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                          color: EnCheckColors.terreChaude.withOpacity(0.2)),
+                    ),
+                    child: Column(
+                      children: [
+                        const Text('Employé suivant à enrôler :',
+                            style: TextStyle(
+                                color: EnCheckColors.gris, fontSize: 13)),
+                        const SizedBox(height: 8),
+                        Text(
+                          '${employee['first_name']} ${employee['last_name']}',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color:
+                            Theme.of(context).textTheme.bodyLarge?.color,
+                          ),
+                        ),
+                        Text(employee['matricule'] ?? '',
+                            style: const TextStyle(
+                                color: EnCheckColors.gris, fontSize: 13)),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: _lancerEnrolementKioskSuivant,
+                      icon: const Icon(Icons.face_retouching_natural),
+                      label: const Text('Enrôler cet employé',
+                          style: TextStyle(
+                              fontSize: 16, fontWeight: FontWeight.bold)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: EnCheckColors.terreChaude,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16)),
+                      ),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                if (_kioskEnrolementIndex > 0)
+                  TextButton(
+                    onPressed: () =>
+                        setState(() => _kioskPhase = 'pointage'),
+                    child: const Text(
+                      'Passer au pointage (enrôlement partiel)',
+                      style: TextStyle(
+                          color: EnCheckColors.gris, fontSize: 14),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // 🎯 ZONE DE POINTAGE
+  // ═══════════════════════════════════════════════════════════
+
+  Widget _buildZonePointage() {
+    if (!_moduleRecoFacialeActif) return _buildModeClassique();
+
+    if (_modeSelectionne == 'pin') return _buildModePIN();
+    if (_modeSelectionne == 'qr') return _buildModeQR();
+
+    final pointageMode = _faceConfig['pointage_mode'] as String? ?? 'free';
+
+    if (pointageMode == 'face_exclusive') {
+      return _buildBoutonFaceScan(onTap: _onBoutonFaceClique);
+    }
+
+    if (pointageMode == 'face_required') {
+      return Column(
+        children: [
+          _buildBoutonFaceScan(onTap: _onBoutonFaceClique),
+        ],
+      );
+    }
+
+    return _buildEcranSelectionMode();
+  }
+
+  Widget _buildEcranSelectionMode() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'CHOISISSEZ VOTRE MODE DE POINTAGE',
+          textAlign: TextAlign.center,
+          style: EnCheckTextStyles.titreSecondaire.copyWith(
+            letterSpacing: 1.5,
+            fontSize: 11,
+          ),
+        ),
+        const SizedBox(height: 20),
+        _buildBoutonFaceScan(onTap: _onBoutonFaceClique),
+        if (_faceConfig['fallback_allowed'] == true) ...[
+          const SizedBox(height: 16),
+          _buildBoutonModeSecondaire(
+            label: 'CODE PIN',
+            icon: Icons.pin_outlined,
+            onTap: () => setState(() => _modeSelectionne = 'pin'),
+          ),
+        ],
+        if (_moduleQRActif && _faceConfig['fallback_allowed'] == true) ...[
+          const SizedBox(height: 12),
+          _buildBoutonModeSecondaire(
+            label: 'SCANNER QR',
+            icon: Icons.qr_code_scanner,
+            onTap: () => setState(() => _modeSelectionne = 'qr'),
+          ),
+        ],
+        if (_kioskMode) ...[
+          const SizedBox(height: 20),
+          _buildBoutonEnrolerNouvelEmploye(),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildModeClassique() {
+    if (_moduleQRActif && _modulePhotoActif) return _buildModeQRPhoto();
+    if (_moduleQRActif) return _buildModeQRSimple();
+    if (_modulePhotoActif) return _buildModePINPhoto();
+    return _buildModePINSimple();
+  }
+
+  Widget _buildBoutonEnrolerNouvelEmploye() {
+    return GestureDetector(
+      onTap: () async {
+        await _detecterEmployesNonEnroles();
+        if (_kioskEmployeesNonEnroles.isEmpty) {
+          _afficherErreur(
+              'Tous les employés sont déjà enrôlés.\nAucun nouvel employé à enrôler.');
+          return;
+        }
+        setState(() {
+          _kioskPhase = 'enrolling';
+          _kioskEnrolementIndex = 0;
+        });
+      },
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
+        decoration: BoxDecoration(
+          color: Colors.indigo.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.indigo.withOpacity(0.3)),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.person_add_outlined,
+                color: Colors.indigo.shade300, size: 22),
+            const SizedBox(width: 10),
+            Text(
+              'Enrôler un nouvel employé',
+              style: TextStyle(
+                color: Colors.indigo.shade300,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // 🤖 BOUTON FACE SCAN
+  // ═══════════════════════════════════════════════════════════
+
+  Widget _buildBoutonFaceScan({required VoidCallback onTap}) {
+    String subtitle;
+    if (_kioskMode) {
+      subtitle = 'Approchez-vous pour être reconnu';
+    } else if (_faceEnrolled && _faceApproved) {
+      subtitle = _faceEmployeeName != null
+          ? 'Bonjour $_faceEmployeeName'
+          : 'Pointage par reconnaissance faciale';
+    } else if (_faceEnrolled && !_faceApproved) {
+      subtitle = 'Enrôlement en attente de validation';
+    } else {
+      subtitle = 'Première utilisation : identification requise';
+    }
+
+    return GestureDetector(
+      onTap: chargement ? null : onTap,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 24),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [EnCheckColors.brunProfond, Color(0xFF2D1F0E)],
+          ),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(
+              color: EnCheckColors.terreChaude.withOpacity(0.5), width: 1.5),
+          boxShadow: [
+            BoxShadow(
+              color: EnCheckColors.terreChaude.withOpacity(0.2),
+              blurRadius: 20,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Column(
+          children: [
+            Container(
+              width: 88,
+              height: 88,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: EnCheckColors.terreChaude.withOpacity(0.08),
+                border: Border.all(
+                    color: EnCheckColors.terreChaude.withOpacity(0.3),
+                    width: 1.5),
+              ),
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  ..._buildScanCorners(),
+                  Icon(
+                    _kioskMode
+                        ? Icons.people
+                        : (_faceEnrolled && _faceApproved
+                        ? Icons.person
+                        : Icons.person_add_outlined),
+                    color: EnCheckColors.terreChaude,
+                    size: 42,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 18),
+            const Text(
+              'RECONNAISSANCE FACIALE',
+              style: TextStyle(
+                  color: EnCheckColors.terreChaude,
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 2),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              subtitle,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                  color: EnCheckColors.sableDore.withOpacity(0.7),
+                  fontSize: 12),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              height: 1,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    Colors.transparent,
+                    EnCheckColors.orDoux.withOpacity(0.6),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Container(
+              padding:
+              const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              decoration: BoxDecoration(
+                color: EnCheckColors.terreChaude.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                    color: EnCheckColors.terreChaude.withOpacity(0.25)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    _kioskMode
+                        ? Icons.people_outline
+                        : (_faceEnrolled && _faceApproved
+                        ? Icons.shield_outlined
+                        : _faceEnrolled
+                        ? Icons.hourglass_top
+                        : Icons.info_outline),
+                    color: EnCheckColors.terreChaude,
+                    size: 13,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    _kioskMode
+                        ? 'Mode tablette — identification auto'
+                        : (_faceEnrolled && _faceApproved
+                        ? 'Biométrie sécurisée'
+                        : _faceEnrolled
+                        ? 'En attente de validation'
+                        : 'Enrôlement requis'),
+                    style: const TextStyle(
+                        color: EnCheckColors.terreChaude,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _buildScanCorners() {
+    return [
+      Positioned(top: 10, left: 10, child: _buildCoin(topLeft: true)),
+      Positioned(top: 10, right: 10, child: _buildCoin(topRight: true)),
+      Positioned(bottom: 10, left: 10, child: _buildCoin(bottomLeft: true)),
+      Positioned(
+          bottom: 10, right: 10, child: _buildCoin(bottomRight: true)),
+    ];
+  }
+
+  Widget _buildCoin({
+    bool topLeft = false,
+    bool topRight = false,
+    bool bottomLeft = false,
+    bool bottomRight = false,
+  }) {
+    return Container(
+      width: 10,
+      height: 10,
+      decoration: BoxDecoration(
+        border: Border(
+          top: (topLeft || topRight)
+              ? BorderSide(
+              color: EnCheckColors.orDoux.withOpacity(0.8), width: 2)
+              : BorderSide.none,
+          bottom: (bottomLeft || bottomRight)
+              ? BorderSide(
+              color: EnCheckColors.orDoux.withOpacity(0.8), width: 2)
+              : BorderSide.none,
+          left: (topLeft || bottomLeft)
+              ? BorderSide(
+              color: EnCheckColors.orDoux.withOpacity(0.8), width: 2)
+              : BorderSide.none,
+          right: (topRight || bottomRight)
+              ? BorderSide(
+              color: EnCheckColors.orDoux.withOpacity(0.8), width: 2)
+              : BorderSide.none,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBoutonModeSecondaire({
+    required String label,
+    required IconData icon,
+    required VoidCallback onTap,
+    String? subtitle,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
+        decoration: BoxDecoration(
+          color: Theme.of(context).cardColor,
+          borderRadius: BorderRadius.circular(16),
+          border:
+          Border.all(color: EnCheckColors.terreChaude.withOpacity(0.2)),
+          boxShadow: [
+            BoxShadow(
+                color: Colors.black.withOpacity(0.07),
+                blurRadius: 10,
+                offset: const Offset(0, 4)),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: EnCheckColors.terreChaude.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: EnCheckColors.terreChaude, size: 22),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: Theme.of(context).textTheme.bodyLarge?.color,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                  if (subtitle != null)
+                    Text(subtitle,
+                        style: const TextStyle(
+                            color: EnCheckColors.gris, fontSize: 11)),
+                ],
+              ),
+            ),
+            Icon(Icons.arrow_forward_ios,
+                color: EnCheckColors.terreChaude.withOpacity(0.5), size: 16),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // 📱 MODES PIN / QR
+  // ═══════════════════════════════════════════════════════════
+
+  Widget _buildModePIN() {
+    return Column(
+      children: [
+        if (_moduleRecoFacialeActif) ...[
+          _buildBoutonRetour(() {
+            setState(() {
+              _modeSelectionne = null;
+              numeroMatricule = '';
+              codePin = '';
+              afficherPin = false;
+            });
+          }),
+          const SizedBox(height: 16),
+        ],
+        _buildInputCard(),
+        const SizedBox(height: 20),
+        if (chargement)
+          const Padding(
+            padding: EdgeInsets.all(20),
+            child:
+            CircularProgressIndicator(color: EnCheckColors.terreChaude),
+          )
+        else
+          _buildClavier(),
+      ],
+    );
+  }
+
+  Widget _buildModeQR() {
+    return Column(
+      children: [
+        if (_moduleRecoFacialeActif) ...[
+          _buildBoutonRetour(() => setState(() => _modeSelectionne = null)),
+          const SizedBox(height: 16),
+        ],
+        _buildQRIcon(),
+        const SizedBox(height: 30),
+        Text(
+          'Présentez votre badge',
+          style: TextStyle(
+              color: Theme.of(context).textTheme.bodyLarge?.color,
+              fontSize: 22,
+              fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 40),
+        if (chargement)
+          const CircularProgressIndicator(color: EnCheckColors.terreChaude)
+        else
+          _buildBoutonScanner(
+            _modulePhotoActif ? 'SCANNER (avec photo)' : 'SCANNER MON BADGE',
+                () {
+              if (_modulePhotoActif) {
+                setState(() => _showPhotoScanner = true);
+              } else {
+                setState(() => _showScanner = true);
+              }
+            },
+          ),
+      ],
+    );
+  }
+
+  Widget _buildModePINSimple() {
+    return Column(
+      children: [
+        _buildInputCard(),
+        const SizedBox(height: 20),
+        if (chargement)
+          const Padding(
+            padding: EdgeInsets.all(20),
+            child:
+            CircularProgressIndicator(color: EnCheckColors.terreChaude),
+          )
+        else
+          _buildClavier(),
+      ],
+    );
+  }
+
+  Widget _buildModePINPhoto() {
+    return Column(
+      children: [
+        _buildPhotoIndicator(),
+        const SizedBox(height: 20),
+        _buildInputCard(),
+        const SizedBox(height: 20),
+        if (chargement)
+          const Padding(
+            padding: EdgeInsets.all(20),
+            child:
+            CircularProgressIndicator(color: EnCheckColors.terreChaude),
+          )
+        else
+          _buildClavier(),
+      ],
+    );
+  }
+
+  Widget _buildModeQRSimple() {
+    return Column(
+      children: [
+        _buildQRIcon(),
+        const SizedBox(height: 30),
+        Text(
+          'Présentez votre badge',
+          style: TextStyle(
+              color: Theme.of(context).textTheme.bodyLarge?.color,
+              fontSize: 22,
+              fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 40),
+        if (chargement)
+          const CircularProgressIndicator(color: EnCheckColors.terreChaude)
+        else
+          _buildBoutonScanner('SCANNER MON BADGE', () {
+            setState(() => _showScanner = true);
+          }),
+      ],
+    );
+  }
+
+  Widget _buildModeQRPhoto() {
+    return Column(
+      children: [
+        _buildPhotoIndicator(),
+        const SizedBox(height: 20),
+        _buildQRIcon(),
+        const SizedBox(height: 30),
+        Text(
+          'Présentez votre badge',
+          style: TextStyle(
+              color: Theme.of(context).textTheme.bodyLarge?.color,
+              fontSize: 22,
+              fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 40),
+        if (chargement)
+          const CircularProgressIndicator(color: EnCheckColors.terreChaude)
+        else
+          _buildBoutonScanner('SCANNER MON BADGE', () {
+            setState(() => _showPhotoScanner = true);
+          }),
+      ],
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // 🧩 WIDGETS COMMUNS
+  // ═══════════════════════════════════════════════════════════
+
+  Widget _buildIndicateursModules() {
+    return Wrap(
+      alignment: WrapAlignment.center,
+      spacing: 10,
+      runSpacing: 8,
+      children: [
+        if (_moduleGeofencingActif)
+          Container(
+            padding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              color: EnCheckColors.terreChaude.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                  color: EnCheckColors.terreChaude.withOpacity(0.35)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  _gpsVerifie
+                      ? (_verificationZone?['is_within_zone'] == true
+                      ? Icons.location_on
+                      : _verificationZone?['is_within_zone'] == false
+                      ? Icons.location_off
+                      : Icons.my_location)
+                      : Icons.gps_not_fixed,
+                  color: _gpsVerifie
+                      ? (_verificationZone?['is_within_zone'] == true
+                      ? EnCheckColors.succes
+                      : _verificationZone?['is_within_zone'] == false
+                      ? EnCheckColors.erreur
+                      : EnCheckColors.terreChaude)
+                      : EnCheckColors.terreChaude,
+                  size: 16,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  _gpsVerifie
+                      ? (_verificationZone?['is_within_zone'] == true
+                      ? 'Dans la zone ✓'
+                      : _verificationZone?['is_within_zone'] == false
+                      ? 'Hors zone ⚠'
+                      : 'GPS vérifié')
+                      : 'Géolocalisation active',
+                  style: TextStyle(
+                    color: _gpsVerifie
+                        ? (_verificationZone?['is_within_zone'] == true
+                        ? EnCheckColors.succes
+                        : _verificationZone?['is_within_zone'] == false
+                        ? EnCheckColors.erreur
+                        : EnCheckColors.terreChaude)
+                        : EnCheckColors.terreChaude,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        if (_kioskMode)
+          Container(
+            padding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.indigo.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(20),
+              border:
+              Border.all(color: Colors.indigo.withOpacity(0.35)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.tablet_android,
+                    color: Colors.indigo.shade300, size: 16),
+                const SizedBox(width: 6),
+                Text(
+                  'Mode tablette',
+                  style: TextStyle(
+                      color: Colors.indigo.shade300,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildBoutonRetour(VoidCallback onTap) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: Theme.of(context).cardColor,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+                color: EnCheckColors.terreChaude.withOpacity(0.3)),
+          ),
+          child: const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.arrow_back_ios,
+                  color: EnCheckColors.terreChaude, size: 14),
+              SizedBox(width: 4),
+              Text('Retour',
+                  style: TextStyle(
+                      color: EnCheckColors.terreChaude, fontSize: 13)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPhotoIndicator() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        color: EnCheckColors.terreChaude.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(20),
+        border:
+        Border.all(color: EnCheckColors.terreChaude.withOpacity(0.3)),
+      ),
+      child: const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.camera_alt, color: EnCheckColors.terreChaude, size: 18),
+          SizedBox(width: 8),
+          Text('Photo de pointage activée',
+              style: TextStyle(
+                  color: EnCheckColors.terreChaude,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildQRIcon() {
+    return Container(
+      width: 150,
+      height: 150,
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(30),
+        boxShadow: [
+          BoxShadow(
+            color: EnCheckColors.terreChaude.withOpacity(0.2),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: const Icon(Icons.qr_code_2,
+          size: 100, color: EnCheckColors.terreChaude),
+    );
+  }
+
+  Widget _buildBoutonScanner(String text, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 20),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+              colors: [EnCheckColors.terreChaude, EnCheckColors.orDoux]),
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+                color: EnCheckColors.terreChaude.withOpacity(0.4),
+                blurRadius: 15,
+                offset: const Offset(0, 8)),
+          ],
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.qr_code_scanner,
+                color: EnCheckColors.blanc, size: 32),
+            const SizedBox(width: 15),
+            Text(text,
+                style: const TextStyle(
+                    color: EnCheckColors.blanc,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeader(bool estEnLigne, ThemeService themeService) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Row(
+          children: [
+            Container(
+              padding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: estEnLigne ? EnCheckColors.succes : EnCheckColors.erreur,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(estEnLigne ? Icons.wifi : Icons.wifi_off,
+                      color: EnCheckColors.blanc, size: 16),
+                  const SizedBox(width: 5),
+                  Text(estEnLigne ? 'En ligne' : 'Hors-ligne',
+                      style: const TextStyle(
+                          color: EnCheckColors.blanc, fontSize: 12)),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            GestureDetector(
+              onTap: syncEnCours ? null : _lancerSynchronisation,
+              child: Container(
+                padding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: EnCheckColors.terreChaude,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  children: [
+                    if (syncEnCours)
+                      const SizedBox(
+                        width: 12,
+                        height: 12,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white),
+                      )
+                    else
+                      const Icon(Icons.sync,
+                          color: EnCheckColors.blanc, size: 16),
+                    const SizedBox(width: 5),
+                    Text(
+                      pointagesEnAttente > 0
+                          ? '$pointagesEnAttente en attente'
+                          : 'Sync',
+                      style: const TextStyle(
+                          color: EnCheckColors.blanc,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+        GestureDetector(
+          onTap: () => themeService.toggleTheme(),
+          child: Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Theme.of(context).cardColor,
+              borderRadius: BorderRadius.circular(10),
+              boxShadow: [
+                BoxShadow(
+                    color: Colors.black.withOpacity(0.1), blurRadius: 5),
+              ],
+            ),
+            child: Icon(
+              themeService.isDarkMode ? Icons.light_mode : Icons.dark_mode,
+              color: EnCheckColors.terreChaude,
+              size: 20,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCarteEntreprise() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(15),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.1),
+              blurRadius: 10,
+              offset: const Offset(0, 3)),
+        ],
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          if (entrepriseSelectionnee?['logo_url'] != null &&
+              entrepriseSelectionnee!['logo_url'].toString().isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(right: 10),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.network(
+                  entrepriseSelectionnee!['logo_url'],
+                  height: 30,
+                  width: 30,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => const Icon(Icons.business,
+                      color: EnCheckColors.terreChaude),
+                ),
+              ),
+            )
+          else
+            const Padding(
+              padding: EdgeInsets.only(right: 10),
+              child: Icon(Icons.business, color: EnCheckColors.terreChaude),
+            ),
+          Flexible(
+            child: Text(
+              entrepriseSelectionnee?['name'] ?? 'Entreprise non chargée',
+              style: TextStyle(
+                color: Theme.of(context).textTheme.bodyLarge?.color,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInputCard() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.1),
+              blurRadius: 15,
+              offset: const Offset(0, 5)),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(afficherPin ? 'CODE PIN' : 'MATRICULE',
+                  style: EnCheckTextStyles.titreSecondaire),
+              if (afficherPin)
+                GestureDetector(
+                  onTap: () => setState(() {
+                    afficherPin = false;
+                    codePin = '';
+                  }),
+                  child: const Text('← Retour',
+                      style: TextStyle(
+                          color: EnCheckColors.terreChaude, fontSize: 14)),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Center(
+            child: Text(
+              afficherPin
+                  ? (codePin.isEmpty ? '● ● ● ●' : '● ' * codePin.length)
+                  : matriculeComplet,
+              style: TextStyle(
+                color: Theme.of(context).textTheme.bodyLarge?.color,
+                fontSize: 28,
+                fontWeight: FontWeight.w300,
+                letterSpacing: afficherPin ? 8 : 4,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildClavier() {
+    return Column(
+      children: [
+        _construireLigneClavier(['1', '2', '3']),
+        const SizedBox(height: 12),
+        _construireLigneClavier(['4', '5', '6']),
+        const SizedBox(height: 12),
+        _construireLigneClavier(['7', '8', '9']),
+        const SizedBox(height: 12),
+        _construireLigneClavier(['⌫', '0', '✓']),
+      ],
+    );
+  }
+
+  Widget _construireLigneClavier(List<String> touches) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      children: touches.map((t) => _construireTouche(t)).toList(),
+    );
+  }
+
+  Widget _construireTouche(String touche) {
+    Color couleurFond;
+    Color couleurTexte;
+
+    if (touche == '✓') {
+      couleurFond = EnCheckColors.terreChaude;
+      couleurTexte = EnCheckColors.blanc;
+    } else if (touche == '⌫') {
+      couleurFond = Theme.of(context).cardColor == EnCheckColors.blanc
+          ? EnCheckColors.brunProfond
+          : EnCheckColors.gris;
+      couleurTexte = EnCheckColors.blanc;
+    } else {
+      couleurFond = Theme.of(context).cardColor;
+      couleurTexte = Theme.of(context).textTheme.bodyLarge?.color ??
+          EnCheckColors.brunProfond;
+    }
+
+    return GestureDetector(
+      onTap: () => _onToucheAppuyee(touche),
+      child: Container(
+        width: 70,
+        height: 70,
+        decoration: BoxDecoration(
+          color: couleurFond,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+                color: Colors.black.withOpacity(0.1),
+                blurRadius: 10,
+                offset: const Offset(0, 4)),
+          ],
+        ),
+        child: Center(
+          child: Text(touche,
+              style: TextStyle(
+                  color: couleurTexte,
+                  fontSize: 24,
+                  fontWeight: FontWeight.w400)),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSeparateur() {
+    return Container(
+      height: 3,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            Theme.of(context).scaffoldBackgroundColor,
+            EnCheckColors.sableDore,
+            EnCheckColors.terreChaude,
+            EnCheckColors.sableDore,
+            Theme.of(context).scaffoldBackgroundColor,
+          ],
+        ),
+        borderRadius: BorderRadius.circular(2),
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // 🎯 CLAVIER
+  // ═══════════════════════════════════════════════════════════
+
+  void _onToucheAppuyee(String touche) {
+    if (chargement) return;
+    setState(() {
+      if (touche == '⌫') {
+        if (afficherPin && codePin.isNotEmpty) {
+          codePin = codePin.substring(0, codePin.length - 1);
+        } else if (!afficherPin && numeroMatricule.isNotEmpty) {
+          numeroMatricule =
+              numeroMatricule.substring(0, numeroMatricule.length - 1);
+        }
+      } else if (touche == '✓') {
+        if (!afficherPin) {
+          if (numeroMatricule.isNotEmpty) afficherPin = true;
+        } else {
+          if (codePin.length >= 4) _validerPointagePIN();
+        }
+      } else {
+        if (afficherPin && codePin.length < 4) {
+          codePin += touche;
+        } else if (!afficherPin && numeroMatricule.length < 6) {
+          numeroMatricule += touche;
+        }
+      }
+    });
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // 📱 VALIDATION PIN
+  // ═══════════════════════════════════════════════════════════
+
+  Future<void> _validerPointagePIN() async {
+    if (entrepriseSelectionnee == null) return;
+
+    if (_moduleGeofencingActif) {
+      final gpsOk = await _verifierPositionGPS();
+      if (!gpsOk) return;
+    }
+
+    setState(() => chargement = true);
+
+    try {
+      Map<String, dynamic>? employee;
+      final estHorsLigne = !ConnectivityService.isOnline;
+
+      if (estHorsLigne) {
+        employee = await LocalDatabase.verifierEmployeeCache(
+            entrepriseSelectionnee!['id'], matriculeComplet, codePin);
+      } else {
+        employee = await SupabaseService.verifierEmployee(
+            entrepriseSelectionnee!['id'], matriculeComplet, codePin);
+      }
+
+      if (employee != null) {
+        _extraireSchedule(employee);
+
+        if (_modulePhotoActif && !_moduleQRActif) {
+          if (kIsWeb) {
+            // ── Web → WebCameraWidget ──
+            setState(() {
+              _pendingEmployeeWebCamera = employee;
+              _webCameraRaison = 'pin';
+              _showWebCamera = true;
+              chargement = false;
+            });
+          } else {
+            // ── Mobile → PinPhotoWidget natif ──
+            setState(() {
+              _pendingEmployee = employee;
+              _showPinPhoto = true;
+              chargement = false;
+            });
+          }
+        } else {
+          await _traiterPointage(employee, 'pin', estHorsLigne, null);
+          setState(() {
+            chargement = false;
+            numeroMatricule = '';
+            codePin = '';
+            afficherPin = false;
+            _modeSelectionne = null;
+            _gpsVerifie = false;
+            _currentPosition = null;
+            _verificationZone = null;
+          });
+        }
+      } else {
+        _afficherErreur('Matricule ou PIN incorrect');
+        setState(() => chargement = false);
+      }
+    } catch (e) {
+      _afficherErreur('Erreur: $e');
+      setState(() => chargement = false);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // 📷 CALLBACKS
+  // ═══════════════════════════════════════════════════════════
+
+  Future<void> _onPinPhotoTaken(Uint8List? photoBytes) async {
+    setState(() => _showPinPhoto = false);
+    if (_pendingEmployee != null) {
+      final estHorsLigne = !ConnectivityService.isOnline;
+      await _traiterPointage(
+          _pendingEmployee!, 'pin_photo', estHorsLigne, photoBytes);
+    }
+    setState(() {
+      _pendingEmployee = null;
+      numeroMatricule = '';
+      codePin = '';
+      afficherPin = false;
+      _modeSelectionne = null;
+      _gpsVerifie = false;
+      _currentPosition = null;
+      _verificationZone = null;
+    });
+  }
+
+  void _onQRScanned(String code) {
+    setState(() => _showScanner = false);
+    _validerPointageQR(code, null);
+  }
+
+  void _onQRPhotoCompleted(String qrCode, Uint8List? photoBytes) {
+    setState(() => _showPhotoScanner = false);
+
+    if (kIsWeb && _modulePhotoActif) {
+      // ── Web : QR validé → WebCameraWidget pour la photo ──
+      _validerPointageQRPuisPhoto(qrCode);
+    } else {
+      // ── Mobile : photo déjà dans photoBytes ──
+      _validerPointageQR(qrCode, photoBytes);
+    }
+  }
+
+  // ── QR validé sur Web → chercher l'employé puis ouvrir WebCameraWidget ──
+  Future<void> _validerPointageQRPuisPhoto(String qrCode) async {
+    if (entrepriseSelectionnee == null) return;
+
+    if (_moduleGeofencingActif) {
+      final gpsOk = await _verifierPositionGPS();
+      if (!gpsOk) return;
+    }
+
+    setState(() => chargement = true);
+
+    try {
+      final estHorsLigne = !ConnectivityService.isOnline;
+      Map<String, dynamic>? employee;
+
+      if (estHorsLigne) {
+        employee = await LocalDatabase.verifierEmployeeParQR(
+            entrepriseSelectionnee!['id'], qrCode);
+      } else {
+        employee = await SupabaseService.verifierEmployeeParQR(
+            entrepriseSelectionnee!['id'], qrCode);
+      }
+
+      if (employee == null) {
+        _afficherErreur('Badge non reconnu');
+        setState(() => chargement = false);
+        return;
+      }
+
+      _extraireSchedule(employee);
+
+      // QR validé → ouvrir WebCameraWidget
+      setState(() {
+        chargement = false;
+        _pendingEmployeeWebCamera = employee;
+        _webCameraRaison = 'qr';
+        _showWebCamera = true;
+      });
+    } catch (e) {
+      _afficherErreur('Erreur: $e');
+      setState(() => chargement = false);
+    }
+  }
+
+  Future<void> _validerPointageQR(
+      String qrCode, Uint8List? photoBytes) async {
+    if (entrepriseSelectionnee == null) return;
+
+    if (_moduleGeofencingActif) {
+      final gpsOk = await _verifierPositionGPS();
+      if (!gpsOk) return;
+    }
+
+    setState(() => chargement = true);
+
+    try {
+      final estHorsLigne = !ConnectivityService.isOnline;
+      Map<String, dynamic>? employee;
+
+      if (estHorsLigne) {
+        employee = await LocalDatabase.verifierEmployeeParQR(
+            entrepriseSelectionnee!['id'], qrCode);
+      } else {
+        employee = await SupabaseService.verifierEmployeeParQR(
+            entrepriseSelectionnee!['id'], qrCode);
+      }
+
+      if (employee != null) {
+        _extraireSchedule(employee);
+        final method = photoBytes != null ? 'qr_photo' : 'qr_code';
+        await _traiterPointage(employee, method, estHorsLigne, photoBytes);
+      } else {
+        _afficherErreur('Badge non reconnu');
+      }
+    } catch (e) {
+      _afficherErreur('Erreur: $e');
+    }
+
+    setState(() {
+      chargement = false;
+      _modeSelectionne = null;
+      _gpsVerifie = false;
+      _currentPosition = null;
+      _verificationZone = null;
+    });
+  }
+
+  void _extraireSchedule(Map<String, dynamic> employee) {
+    final rawSchedules = employee['employee_schedules'];
+    if (rawSchedules is List && rawSchedules.isNotEmpty) {
+      _employeeSchedule = rawSchedules.first;
+    } else if (rawSchedules is Map) {
+      _employeeSchedule = rawSchedules as Map<String, dynamic>;
+    } else {
+      _employeeSchedule = null;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // ✅ TRAITER POINTAGE PIN/QR
+  // ═══════════════════════════════════════════════════════════
+
+  Future<void> _traiterPointage(
+      Map<String, dynamic> employee,
+      String method,
+      bool estHorsLigne,
+      Uint8List? photoBytes,
+      ) async {
+    try {
+      String typePointage = 'in';
+      try {
+        final dernierPointage =
+        await LocalDatabase.dernierPointageCombine(employee['id']);
+        if (dernierPointage?['check_type'] == 'in') typePointage = 'out';
+      } catch (_) {}
+
+      bool success;
+      String? pointageId;
+
+      if (estHorsLigne) {
+        await LocalDatabase.sauvegarderPointagePending(
+          employeeId: employee['id'],
+          enterpriseId: entrepriseSelectionnee!['id'],
+          checkType: typePointage,
+          method: method,
+        );
+        if (photoBytes != null) {
+          await PhotoService.sauvegarderLocalement(
+            photoBytes: photoBytes,
+            enterpriseId: entrepriseSelectionnee!['id'],
+            employeeId: employee['id'],
+          );
+        }
+        success = true;
+      } else {
+        pointageId = await GeofencingService.enregistrerPointageAvecGeo(
+          employeeId: employee['id'],
+          enterpriseId: employee['enterprise_id'],
+          checkType: typePointage,
+          method: method,
+          position: _currentPosition,
+          verificationZone: _verificationZone,
+        );
+        success = pointageId != null;
+
+        if (success && photoBytes != null && pointageId != null) {
+          await PhotoService.uploadEtEnregistrer(
+            photoBytes: photoBytes,
+            enterpriseId: entrepriseSelectionnee!['id'],
+            employeeId: employee['id'],
+            pointageId: pointageId,
+          );
+        }
+      }
+
+      if (success) {
+        if (!estHorsLigne) SyncService.synchroniserPointages();
+        await _compterPointagesEnAttente();
+        if (mounted) {
+          _afficherSucces(employee['first_name'], employee['last_name'],
+              typePointage, estHorsLigne, employee, photoBytes);
+        }
+      } else {
+        if (mounted) _afficherErreur('Erreur lors de l\'enregistrement');
+      }
+    } catch (e) {
+      if (mounted) _afficherErreur('Erreur inattendue : $e');
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // ✅ DIALOG SUCCÈS PIN/QR
+  // ═══════════════════════════════════════════════════════════
+
+  String? _getEmployeeScheduleInfo() {
+    if (_employeeSchedule == null) return null;
+    if (_employeeSchedule!['use_custom_hours'] == true) {
+      final start = _employeeSchedule!['custom_start_time']
+          ?.toString()
+          .substring(0, 5) ??
+          '--:--';
+      final end = _employeeSchedule!['custom_end_time']
+          ?.toString()
+          .substring(0, 5) ??
+          '--:--';
+      return '$start - $end';
+    }
+    if (_employeeSchedule!['work_schedules'] != null) {
+      final schedule = _employeeSchedule!['work_schedules'];
+      final start =
+          schedule['start_time']?.toString().substring(0, 5) ?? '--:--';
+      final end = schedule['end_time']?.toString().substring(0, 5) ?? '--:--';
+      return '${schedule['name'] ?? 'Planning'} ($start - $end)';
+    }
+    return null;
+  }
+
+  void _afficherSucces(
+      String prenom,
+      String nom,
+      String type,
+      bool horsLigne,
+      Map<String, dynamic> employee,
+      Uint8List? photoBytes,
+      ) {
+    final estEntree = type == 'in';
+    final horaires = _getEmployeeScheduleInfo();
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: Theme.of(context).cardColor,
+        shape:
+        RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Icon(estEntree ? Icons.login : Icons.logout,
+                color: EnCheckColors.succes, size: 30),
+            const SizedBox(width: 10),
+            Text(
+              estEntree ? 'ENTRÉE' : 'SORTIE',
+              style: const TextStyle(
+                  color: EnCheckColors.succes,
+                  fontWeight: FontWeight.w300,
+                  letterSpacing: 2),
+            ),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (photoBytes != null) ...[
+                Center(
+                  child: Container(
+                    width: 100,
+                    height: 130,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(12),
+                      border:
+                      Border.all(color: EnCheckColors.succes, width: 3),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(9),
+                      child: Image.memory(photoBytes, fit: BoxFit.cover),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 15),
+              ],
+              Text(
+                'Bonjour $prenom $nom',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w500,
+                  color: Theme.of(context).textTheme.bodyLarge?.color,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Pointage enregistré à $heureActuelle',
+                style: TextStyle(
+                    color: Theme.of(context).textTheme.bodyMedium?.color),
+              ),
+              if (_verificationZone != null &&
+                  _verificationZone!['is_within_zone'] != null) ...[
+                const SizedBox(height: 15),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: (_verificationZone!['is_within_zone'] == true
+                        ? EnCheckColors.succes
+                        : EnCheckColors.erreur)
+                        .withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: _verificationZone!['is_within_zone'] == true
+                          ? EnCheckColors.succes
+                          : EnCheckColors.erreur,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        _verificationZone!['is_within_zone'] == true
+                            ? Icons.location_on
+                            : Icons.location_off,
+                        color: _verificationZone!['is_within_zone'] == true
+                            ? EnCheckColors.succes
+                            : EnCheckColors.erreur,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        _verificationZone!['is_within_zone'] == true
+                            ? 'Dans la zone autorisée'
+                            : 'Hors zone',
+                        style: TextStyle(
+                          color: _verificationZone!['is_within_zone'] == true
+                              ? EnCheckColors.succes
+                              : EnCheckColors.erreur,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              if (horaires != null) ...[
+                const SizedBox(height: 15),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: EnCheckColors.terreChaude.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.schedule,
+                          color: EnCheckColors.terreChaude, size: 20),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Vos horaires',
+                                style: TextStyle(
+                                    color: EnCheckColors.terreChaude,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold)),
+                            Text(horaires,
+                                style: const TextStyle(
+                                    color: EnCheckColors.terreChaude,
+                                    fontSize: 14)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              if (horsLigne) ...[
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: EnCheckColors.terreChaude.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(Icons.wifi_off,
+                          color: EnCheckColors.terreChaude, size: 20),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Sauvegardé hors-ligne.\nSera synchronisé automatiquement.',
+                          style: TextStyle(
+                              color: EnCheckColors.terreChaude, fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (context) =>
+                        HistoriqueScreen(employee: employee)),
+              );
+            },
+            child: Text('HISTORIQUE',
+                style: TextStyle(
+                    color: Theme.of(context).textTheme.bodyLarge?.color,
+                    letterSpacing: 2)),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              setState(() {
+                numeroMatricule = '';
+                codePin = '';
+                afficherPin = false;
+                _modeSelectionne = null;
+                _gpsVerifie = false;
+                _currentPosition = null;
+                _verificationZone = null;
+              });
+            },
+            child: const Text('FERMER',
+                style: TextStyle(
+                    color: EnCheckColors.terreChaude, letterSpacing: 2)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // ❌ ERREURS
+  // ═══════════════════════════════════════════════════════════
+
+  void _afficherErreurGeofencing(Map<String, dynamic> verification) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Theme.of(context).cardColor,
+        shape:
+        RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.location_off, color: EnCheckColors.erreur, size: 30),
+            SizedBox(width: 10),
+            Text('HORS ZONE',
+                style: TextStyle(
+                    color: EnCheckColors.erreur,
+                    fontWeight: FontWeight.w300,
+                    letterSpacing: 2)),
+          ],
+        ),
+        content: Text(
+          verification['message'] ?? 'Vous êtes hors de la zone autorisée',
+          style:
+          TextStyle(color: Theme.of(context).textTheme.bodyLarge?.color),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('COMPRIS',
+                style: TextStyle(
+                    color: EnCheckColors.terreChaude, letterSpacing: 2)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _afficherErreur(String message) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Theme.of(context).cardColor,
+        shape:
+        RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.error_outline, color: EnCheckColors.erreur, size: 30),
+            SizedBox(width: 10),
+            Text('ERREUR',
+                style: TextStyle(
+                    color: EnCheckColors.erreur,
+                    fontWeight: FontWeight.w300,
+                    letterSpacing: 2)),
+          ],
+        ),
+        content: Text(message,
+            style: TextStyle(
+                color: Theme.of(context).textTheme.bodyLarge?.color)),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              setState(() => codePin = '');
+            },
+            child: const Text('RÉESSAYER',
+                style: TextStyle(
+                    color: EnCheckColors.terreChaude, letterSpacing: 2)),
+          ),
+        ],
+      ),
+    );
+  }
+}

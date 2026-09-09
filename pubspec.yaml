@@ -1,0 +1,60 @@
+name: en_check
+description: "A new Flutter project."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.7.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Existants
+  cupertino_icons: ^1.0.8
+  supabase_flutter: ^2.8.4
+  crypto: ^3.0.6
+  path: ^1.9.0
+  connectivity_plus: ^6.1.1
+  shared_preferences: ^2.2.2
+  mobile_scanner: ^5.1.1
+  provider: ^6.1.1
+  flutter_launcher_icons: ^0.13.1
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+
+  # Photo pointage
+  camera: ^0.11.0+2
+  flutter_image_compress: ^2.3.0
+  path_provider: ^2.1.4
+  uuid: ^4.5.1
+  web: ^1.0.0
+
+  # Geofencing
+  geolocator: ^12.0.0
+
+  # 🤖 RECONNAISSANCE FACIALE
+  google_mlkit_face_detection: ^0.11.0
+  tflite_flutter: ^0.12.0
+  image: ^4.1.7
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/icon/icon.png
+    - assets/models/          # ← Dossier pour le modèle IA
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/icon/icon.png"
+  min_sdk_android: 21
+  adaptive_icon_background: "#E5D4C0"
+  adaptive_icon_foreground: "assets/icon/icon.png"
