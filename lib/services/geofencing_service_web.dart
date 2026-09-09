@@ -4,6 +4,7 @@
 import 'dart:async';
 import 'dart:html' as html;
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'trusted_punch_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:math' show cos, sqrt, asin, pi, sin;
 
@@ -59,13 +60,23 @@ class GeofencingService {
 
   static Future<List<Map<String, dynamic>>> chargerZones(String enterpriseId) async {
     try {
-      final response = await _supabase
-          .from('geofences')
-          .select()
-          .eq('enterprise_id', enterpriseId)
-          .eq('is_active', true)
-          .order('created_at');
-      return List<Map<String, dynamic>>.from(response);
+      // ⭐ LIVRAISON 16 — ⚠️ la lecture directe ne renvoyait RIEN (la table est
+      //    sous RLS sans règle de lecture) et le code concluait alors « aucune
+      //    zone » → « hors zone non bloquant » → TOUT pointage était autorisé.
+      //    Le contrôle de zone disparaissait sans le moindre message.
+      final reponse = await _supabase.rpc('encheck_zones_lister', params: {
+        'p_jeton': TrustedPunchService.jeton,
+      });
+
+      if (reponse is Map && reponse['ok'] == true) {
+        final zones = (reponse['zones'] as List? ?? [])
+            .map((z) => Map<String, dynamic>.from(z as Map))
+            .toList();
+        print('✅ ${zones.length} zone(s) de pointage chargée(s)');
+        return zones;
+      }
+      print('⚠️ Zones refusées par le serveur : ${reponse is Map ? reponse['reason'] : reponse}');
+      return [];
     } catch (e) {
       print('❌ Erreur chargement zones: $e');
       return [];
@@ -174,33 +185,23 @@ class GeofencingService {
     Map<String, dynamic>? verificationZone,
   }) async {
     try {
-      final Map<String, dynamic> data = {
-        'employee_id': employeeId,
-        'enterprise_id': enterpriseId,
-        'check_type': checkType,
-        'method': method,
-        'check_time': DateTime.now().toIso8601String(),
-      };
+      // ⭐ LIVRAISON 09 : le SERVEUR fixe l'heure, plus le navigateur
+      final resultat = await TrustedPunchService.pointer(
+        employeeId:     employeeId,
+        enterpriseId:   enterpriseId,
+        checkType:      checkType,
+        method:         method,
+        latitude:       position?.latitude,
+        longitude:      position?.longitude,
+        gpsAccuracy:    position?.accuracy,
+        geofenceId:     verificationZone?['geofence_id']     as String?,
+        distanceMeters: verificationZone?['distance_meters'] as int?,
+        isWithinZone:   verificationZone?['is_within_zone']  as bool?,
+      );
 
-      if (position != null) {
-        data['location_lat'] = position.latitude;
-        data['location_lng'] = position.longitude;
-        data['gps_accuracy'] = position.accuracy;
-      }
-
-      if (verificationZone != null) {
-        data['geofence_id'] = verificationZone['geofence_id'];
-        data['distance_meters'] = verificationZone['distance_meters'];
-        data['is_within_zone'] = verificationZone['is_within_zone'];
-      }
-
-      final response = await _supabase
-          .from('attendances')
-          .insert(data)
-          .select('id')
-          .single();
-
-      return response['id'] as String;
+      if (resultat['ok'] == true) return resultat['attendance_id'] as String?;
+      print('❌ Pointage refusé : ${resultat['reason']}');
+      return null;
     } catch (e) {
       print('❌ Erreur enregistrement pointage: $e');
       return null;

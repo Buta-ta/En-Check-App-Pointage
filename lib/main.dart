@@ -9,6 +9,7 @@ import 'services/connectivity_service.dart';
 import 'services/sync_service.dart';
 import 'services/theme_service.dart';
 import 'services/face_recognition_service_provider.dart';
+import 'services/trusted_punch_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -27,6 +28,9 @@ void main() async {
   await Hive.openBox('face_config');
   await Hive.openBox('face_enrollment_status');
 
+  // 🕐 LIVRAISON 09 : horloge de confiance (identifiant d'appareil + ancrage)
+  await TrustedPunchService.initialiser();
+
   await SupabaseService.initialize();
 
   await ConnectivityService.initialize();
@@ -39,6 +43,10 @@ void main() async {
       print('⚠️ FaceRecognitionService non disponible');
     }
   });
+
+  // 🕐 LIVRAISON 09 : prendre l'heure du serveur dès qu'on le peut.
+  //    Plus l'ancrage est frais, plus les pointages hors-ligne sont datés juste.
+  TrustedPunchService.contacterServeur();
 
   // Synchronisation automatique au démarrage
   await SyncService.synchroniserAutomatique();

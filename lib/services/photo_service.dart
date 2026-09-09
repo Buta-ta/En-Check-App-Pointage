@@ -8,6 +8,7 @@ import 'dart:io';                    // ✅ OK sur mobile uniquement
 import 'dart:typed_data';
 import 'package:camera/camera.dart'; // ✅ OK sur mobile uniquement
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'trusted_punch_service.dart';   // ⭐ LIVRAISON 14 : le jeton de session
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -164,10 +165,20 @@ class PhotoService {
     required String photoUrl,
   }) async {
     try {
-      await _supabase.from('pointages_photos').insert({
-        'pointage_id': pointageId,
-        'photo_url': photoUrl,
+      // ⭐ LIVRAISON 14 — l'écriture passe par le SERVEUR, avec le jeton de session.
+      //    Avant, la clé publique écrivait en direct : n'importe qui pouvait coller
+      //    une photo sur le pointage d'un autre. Le serveur vérifie désormais que
+      //    le pointage appartient bien au porteur du jeton.
+      final reponse = await _supabase.rpc('encheck_photo_enregistrer', params: {
+        'p_jeton':       TrustedPunchService.jeton,
+        'p_pointage_id': pointageId,
+        'p_photo_url':   photoUrl,
       });
+
+      if (reponse is Map && reponse['ok'] != true) {
+        print('⚠️ Photo refusée par le serveur : ${reponse['reason']}');
+        return false;
+      }
 
       print('✅ Photo enregistrée pour pointage: $pointageId');
       return true;

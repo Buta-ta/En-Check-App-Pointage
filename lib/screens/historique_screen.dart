@@ -3,6 +3,7 @@ import '../theme/app_theme.dart';
 import '../services/supabase_service.dart';
 import '../services/local_database.dart';
 import '../services/connectivity_service.dart';
+import '../services/heure_pointage.dart'; // ⭐ LIVRAISON 19 — conversion d'heure
 
 class HistoriqueScreen extends StatefulWidget {
   final Map<String, dynamic> employee;
@@ -50,14 +51,15 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
 
         // ✅ FUSION : Ajouter les pending, mais éviter les doublons si déjà synchronisés
         for (var localPointage in pendingData) {
-          // Vérifier si ce pointage existe déjà dans les données Supabase (par date approximative)
-          final existeDeja = tousLesPointages.any((p) {
-            final dateLocal = DateTime.parse(localPointage['check_time']);
-            final dateSupabase = DateTime.parse(p['check_time']);
-            // Si même type et différence < 2 secondes -> considéré comme doublon
-            return p['check_type'] == localPointage['check_type'] &&
-                dateLocal.difference(dateSupabase).inSeconds.abs() < 2;
-          });
+          // ⭐ LIVRAISON 19 — le doublon se détecte sur l'INSTANT RÉEL, et
+          //    d'abord sur la référence `client_ref` créée AU MOMENT du
+          //    pointage : c'est une égalité exacte, insensible au réglage du
+          //    téléphone comme aux quelques secondes qui séparent l'ancrage
+          //    serveur de l'horloge de la tablette (l'ancienne règle « moins de
+          //    2 secondes » était trop courte pour ces cas-là).
+          final existeDeja = tousLesPointages.any(
+            (p) => HeurePointage.memePointage(localPointage, p),
+          );
 
           if (!existeDeja) {
             tousLesPointages.add(localPointage);
@@ -68,11 +70,9 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
       }
 
       // 3. Trier par date (plus récent en premier)
-      tousLesPointages.sort((a, b) {
-        final dateA = DateTime.parse(a['check_time']);
-        final dateB = DateTime.parse(b['check_time']);
-        return dateB.compareTo(dateA);
-      });
+      // ⭐ LIVRAISON 19 — sur l'instant réel, avec la même règle que partout
+      //    ailleurs dans l'application (services/heure_pointage.dart).
+      tousLesPointages.sort(HeurePointage.parInstantDecroissant);
 
       setState(() {
         pointages = tousLesPointages;
@@ -311,9 +311,10 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
     Map<String, List<Map<String, dynamic>>> parJour = {};
 
     for (var pointage in pointages) {
-      final dateTime = DateTime.parse(pointage['check_time']);
-      final jour =
-          '${dateTime.year}-${dateTime.month.toString().padLeft(2, '0')}-${dateTime.day.toString().padLeft(2, '0')}';
+      // ⭐ LIVRAISON 19 — la journée se découpe sur minuit LOCAL. Avant, elle se
+      //    découpait sur minuit UTC : un pointage de 00:30 à Cotonou était rangé
+      //    dans la veille, et le total d'heures de la journée avec lui.
+      final jour = HeurePointage.jourDePointage(pointage);
 
       if (!parJour.containsKey(jour)) {
         parJour[jour] = [];
@@ -339,11 +340,11 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
   // ⏰ CALCULER LES HEURES TRAVAILLÉES (CORRECTION FINALE - PRÉCISION SECONDES)
   // ═══════════════════════════════════════════════════════════
   Map<String, dynamic> _calculerHeures(List<Map<String, dynamic>> pointagesJour) {
-    pointagesJour.sort((a, b) {
-      final dateA = DateTime.parse(a['check_time']);
-      final dateB = DateTime.parse(b['check_time']);
-      return dateA.compareTo(dateB);
-    });
+    // ⭐ LIVRAISON 19 — tri sur l'instant réel, par la fonction commune :
+    //    une ligne du serveur (UTC) et une ligne encore en file d'attente
+    //    (heure murale de la tablette) se classent sur le même axe de temps.
+    //    Voir services/heure_pointage.dart.
+    pointagesJour.sort(HeurePointage.parInstantCroissant);
 
     Duration totalDuree = Duration.zero;
     List<Map<String, dynamic>> sessions = [];
@@ -352,7 +353,7 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
 
     for (var pointage in pointagesJour) {
       final type = pointage['check_type'];
-      final heure = DateTime.parse(pointage['check_time']);
+      final heure = HeurePointage.instant(pointage);
 
       if (type == 'in') {
         if (entreeEnCours != null) {
@@ -362,15 +363,21 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
         entreeEnCours = pointage;
       } else if (type == 'out') {
         if (entreeEnCours != null) {
-          final heureEntree = DateTime.parse(entreeEnCours['check_time']);
-          final duree = heure.difference(heureEntree);
-          totalDuree += duree;
+          final heureEntree = HeurePointage.instant(entreeEnCours);
+          // ⭐ LIVRAISON 19 — une durée ne se calcule qu'entre deux instants
+          //    lisibles : sinon on affiche « ? » au lieu d'un chiffre faux.
+          if (heure != null && heureEntree != null) {
+            final duree = heure.difference(heureEntree);
+            totalDuree += duree;
 
-          sessions.add({
-            'entree': entreeEnCours,
-            'sortie': pointage,
-            'duree': duree
-          });
+            sessions.add({
+              'entree': entreeEnCours,
+              'sortie': pointage,
+              'duree': duree
+            });
+          } else {
+            sessions.add({'entree': entreeEnCours, 'sortie': pointage, 'duree': null});
+          }
           entreeEnCours = null;
         } else {
           sessions.add({'entree': null, 'sortie': pointage, 'duree': null});
@@ -396,7 +403,10 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
   String _formaterDuree(Duration duree) {
     final totalSecondes = duree.inSeconds;
 
-    if (totalSecondes == 0) return '0sec';
+    // ⭐ LIVRAISON 19 — une durée négative signale des pointages incohérents
+    //    (une sortie datée avant son entrée) : on n'affiche JAMAIS un temps
+    //    négatif à un employé.
+    if (totalSecondes <= 0) return '0sec';
 
     final heures = totalSecondes ~/ 3600;
     final minutes = (totalSecondes % 3600) ~/ 60;
@@ -417,20 +427,21 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
     return '${heures}h${minutes.toString().padLeft(2, '0')}min ${secondes}sec';
   }
 
-  String _formaterHeure(String dateTimeStr) {
-    // ✅ CORRECTION : Parsing sans conversion UTC/Local
-    // Si la chaîne n'a pas de "Z", DateTime.parse() la considère comme locale
-    final dateTime = DateTime.parse(dateTimeStr);
-
-    return '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}:${dateTime.second.toString().padLeft(2, '0')}';
-  }
+  // ⭐ LIVRAISON 19 — la conversion d'heure ne se fait PLUS ici : elle vit dans
+  //    un seul fichier (services/heure_pointage.dart). L'ancienne version
+  //    affichait l'heure telle quelle, donc « 07:30 » pour un pointage de 08:30
+  //    à Cotonou (UTC+1) — et l'inverse à Montréal (UTC-4).
   Widget _construireJour(String jour, List<Map<String, dynamic>> pointagesJour) {
-    final date = DateTime.parse(jour);
+    final date = DateTime.tryParse(jour);
     final maintenant = DateTime.now();
     final hier = DateTime(maintenant.year, maintenant.month, maintenant.day - 1);
 
     String titreJour;
-    if (date.year == maintenant.year &&
+    if (date == null) {
+      // ⭐ LIVRAISON 19 — horodatage illisible : on le DIT, au lieu de le ranger
+      //    au hasard dans la journée d'aujourd'hui.
+      titreJour = 'Journée inconnue';
+    } else if (date.year == maintenant.year &&
         date.month == maintenant.month &&
         date.day == maintenant.day) {
       titreJour = "Aujourd'hui";
@@ -546,8 +557,10 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
     final sortie = session['sortie'];
     final duree = session['duree'] as Duration?;
 
-    final heureEntree = entree != null ? _formaterHeure(entree['check_time']) : '--:--:--';
-    final heureSortie = sortie != null ? _formaterHeure(sortie['check_time']) : '--:--:--';
+    // ⭐ LIVRAISON 19 — heure locale de la tablette, quelle que soit l'origine
+    //    de la ligne (serveur en UTC ou file d'attente à l'heure murale).
+    final heureEntree = entree != null ? HeurePointage.heureDePointage(entree) : '--:--:--';
+    final heureSortie = sortie != null ? HeurePointage.heureDePointage(sortie) : '--:--:--';
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),

@@ -1,5 +1,8 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'security_service.dart';
+import 'trusted_punch_service.dart';
+import 'local_database.dart';   // ⭐ LIVRAISON 13 : vérificateur hors-ligne
+import 'dart:convert';
 import 'dart:typed_data';
 
 class SupabaseService {
@@ -52,7 +55,10 @@ class SupabaseService {
   static Future<List<dynamic>> getEmployeesParEntreprise(String enterpriseId) async {
     try {
       final response = await client
-          .from('employees')
+          // ⭐ LIVRAISON 13 — on lit la VUE PUBLIQUE, pas la table : elle expose
+          //    tout sauf les hachages. La 12b a fermé `pin_hash` à la clé publique ;
+          //    un `select('*')` sur la table échouerait donc.
+          .from('employees_public')
           .select('*, employee_schedules(*, work_schedules(*))')
           .eq('enterprise_id', enterpriseId)
           .eq('is_active', true);
@@ -68,27 +74,58 @@ class SupabaseService {
   // ═══════════════════════════════════════════════════════════
   // 🔐 VÉRIFIER EMPLOYÉ (PIN)
   // ═══════════════════════════════════════════════════════════
+  // ⭐ LIVRAISON 11 — LE PIN EST VÉRIFIÉ PAR LE SERVEUR.
+  //
+  // Avant : l'application hachait le PIN elle-même et envoyait le HACHAGE
+  // comme mot de passe. Or le sel du hachage est écrit en dur dans
+  // l'application et identique pour tous : un PIN de 4 chiffres se retrouvait
+  // en 11 millisecondes. Un hachage lisible valait donc le PIN en clair.
+  //
+  // Maintenant : le PIN part tel quel, il ne circule que sur HTTPS vers la
+  // seule fonction qui sait le comparer, la vérification a lieu dans la base
+  // avec un sel unique par employé — et la réponse ne contient jamais
+  // pin_hash, password_hash ni qr_token.
   static Future<Map<String, dynamic>?> verifierEmployee(
       String enterpriseId,
       String matricule,
       String pin,
       ) async {
     try {
-      final pinHash = SecurityService.hasherPin(pin);
+      final reponse = await client.rpc('encheck_employee_login', params: {
+        'p_enterprise_id': enterpriseId,
+        'p_matricule': matricule,
+        'p_pin': pin,
+        // ⭐ LIVRAISON 12 : le jeton que le serveur va remettre sera lié à CET
+        //    appareil. Rejouer ce jeton depuis un autre appareil est refusé.
+        'p_device_id': await TrustedPunchService.deviceId(),
+      });
 
-      final response = await client
-          .from('employees')
-          .select('*, enterprises(*), employee_schedules(*, work_schedules(*))')
-          .eq('enterprise_id', enterpriseId)
-          .eq('matricule', matricule)
-          .eq('pin_hash', pinHash)
-          .eq('is_active', true)
-          .maybeSingle();
+      final resultat = reponse is String
+          ? jsonDecode(reponse) as Map<String, dynamic>
+          : Map<String, dynamic>.from(reponse as Map);
 
-      if (response == null) return null;
-      return _normaliserEmployee(response);
+      if (resultat['ok'] != true) {
+        // Motifs : identifiants_incorrects, trop_de_tentatives,
+        // pin_non_configure, identifiants_manquants, entreprise_manquante.
+        print('Connexion refuse: ' + resultat['raison'].toString());
+        return null;
+      }
+
+      // ⭐ LIVRAISON 13 — le PIN vient d'être PROUVÉ par le serveur : c'est le
+      //    bon moment pour fabriquer le vérificateur hors-ligne de CET appareil.
+      //    Le hachage du serveur, lui, ne descend jamais ici.
+      final empLocal = Map<String, dynamic>.from(resultat['employee'] as Map);
+      await LocalDatabase.memoriserVerificateur(empLocal['id'] as String, pin);
+
+      // ⭐ LIVRAISON 12 — le serveur vient de remettre un jeton de session : c'est
+      //    lui qui portera l'identité au moment du pointage. On le range dans la
+      //    boîte locale, où il survivra aux redémarrages.
+      await TrustedPunchService.enregistrerJeton(resultat['jeton'] as String?);
+
+      return _normaliserEmployee(
+          Map<String, dynamic>.from(resultat['employee'] as Map));
     } catch (e) {
-      print('Erreur vérification: $e');
+      print('Erreur verification: ' + e.toString());
       return null;
     }
   }
@@ -96,33 +133,59 @@ class SupabaseService {
   // ═══════════════════════════════════════════════════════════
   // 📷 VÉRIFIER EMPLOYÉ (QR CODE)
   // ═══════════════════════════════════════════════════════════
+  // ⭐ LIVRAISON 11 — LE BADGE PORTE UN VRAI SECRET.
+  //
+  // Avant : si le code scanné ne correspondait à aucun jeton, l'application
+  // réessayait avec le MATRICULE SEUL et acceptait. Comme le QR imprimé
+  // contenait justement le matricule, photographier un badge suffisait pour
+  // pointer à la place de son collègue.
+  //
+  // Maintenant : le badge porte son jeton (qr_token), qui est un secret et
+  // peut être remplacé. Un matricule seul est refusé — sauf si le PIN
+  // accompagne (paramètre optionnel `pin`, à transmettre depuis l'écran).
   static Future<Map<String, dynamic>?> verifierEmployeeParQR(
       String enterpriseId,
-      String qrCode,
-      ) async {
+      String qrCode, {
+      String? pin,
+    }) async {
     try {
-      var response = await client
-          .from('employees')
-          .select('*, enterprises(*), employee_schedules(*, work_schedules(*))')
-          .eq('enterprise_id', enterpriseId)
-          .eq('qr_token', qrCode)
-          .eq('is_active', true)
-          .maybeSingle();
+      final reponse = await client.rpc('encheck_employee_login_qr', params: {
+        'p_enterprise_id': enterpriseId,
+        'p_code': qrCode,
+        if (pin != null) 'p_pin': pin,
+        // ⭐ LIVRAISON 12 : le jeton sera lié à CET appareil.
+        'p_device_id': await TrustedPunchService.deviceId(),
+      });
 
-      if (response == null) {
-        response = await client
-            .from('employees')
-            .select('*, enterprises(*), employee_schedules(*, work_schedules(*))')
-            .eq('enterprise_id', enterpriseId)
-            .eq('matricule', qrCode)
-            .eq('is_active', true)
-            .maybeSingle();
+      final resultat = reponse is String
+          ? jsonDecode(reponse) as Map<String, dynamic>
+          : Map<String, dynamic>.from(reponse as Map);
+
+      if (resultat['ok'] != true) {
+        // « pin_requis » : le code scanné est un matricule, pas un jeton de
+        // badge. L'écran devrait alors demander le PIN et rappeler la méthode.
+        print('Badge refuse: ' + resultat['raison'].toString());
+        return null;
       }
 
-      if (response == null) return null;
-      return _normaliserEmployee(response);
+      // ⭐ LIVRAISON 13 — le badge vient d'être PROUVÉ : on retient de quoi le
+      //    reconnaître hors-ligne (l'empreinte du code, JAMAIS le code).
+      final empLocal = Map<String, dynamic>.from(resultat['employee'] as Map);
+      await LocalDatabase.memoriserVerificateur(empLocal['id'] as String, qrCode,
+          parQr: true);
+      if (pin != null && pin.isNotEmpty) {
+        await LocalDatabase.memoriserVerificateur(empLocal['id'] as String, pin);
+      }
+
+      // ⭐ LIVRAISON 12 — le serveur vient de remettre un jeton de session : c'est
+      //    lui qui portera l'identité au moment du pointage. On le range dans la
+      //    boîte locale, où il survivra aux redémarrages.
+      await TrustedPunchService.enregistrerJeton(resultat['jeton'] as String?);
+
+      return _normaliserEmployee(
+          Map<String, dynamic>.from(resultat['employee'] as Map));
     } catch (e) {
-      print('Erreur vérification QR: $e');
+      print('Erreur verification QR: ' + e.toString());
       return null;
     }
   }
@@ -135,20 +198,24 @@ class SupabaseService {
     required String enterpriseId,
     required String checkType,
     String method = 'pin',
-    String? checkTimeOverride,
+    int? delaiSecondes,
+    String? clientRef,
+    DateTime? ancreUtc,
   }) async {
     try {
-      final checkTime = checkTimeOverride ?? DateTime.now().toIso8601String();
+      // ⭐ LIVRAISON 09 : c'est le SERVEUR qui fixe l'heure du pointage.
+      //    Le téléphone ne peut plus que déclarer « il y a X secondes ».
+      final resultat = await TrustedPunchService.pointer(
+        employeeId:    employeeId,
+        enterpriseId:  enterpriseId,
+        checkType:     checkType,
+        method:        method,
+        clientRef:     clientRef,
+        delaiSecondes: delaiSecondes,
+        ancreUtc:      ancreUtc,
+      );
 
-      await client.from('attendances').insert({
-        'employee_id': employeeId,
-        'enterprise_id': enterpriseId,
-        'check_type': checkType,
-        'method': method,
-        'check_time': checkTime,
-      });
-
-      return true;
+      return resultat['ok'] == true;
     } catch (e) {
       print('Erreur pointage Supabase: $e');
       rethrow;
@@ -163,20 +230,24 @@ class SupabaseService {
     required String enterpriseId,
     required String checkType,
     String method = 'pin',
-    String? checkTimeOverride,
+    int? delaiSecondes,
+    String? clientRef,
+    DateTime? ancreUtc,
   }) async {
     try {
-      final checkTime = checkTimeOverride ?? DateTime.now().toIso8601String();
+      // ⭐ LIVRAISON 09 : heure décidée par le serveur
+      final resultat = await TrustedPunchService.pointer(
+        employeeId:    employeeId,
+        enterpriseId:  enterpriseId,
+        checkType:     checkType,
+        method:        method,
+        clientRef:     clientRef,
+        delaiSecondes: delaiSecondes,
+        ancreUtc:      ancreUtc,
+      );
 
-      final response = await client.from('attendances').insert({
-        'employee_id': employeeId,
-        'enterprise_id': enterpriseId,
-        'check_type': checkType,
-        'method': method,
-        'check_time': checkTime,
-      }).select('id').single();
-
-      return response['id'] as String;
+      if (resultat['ok'] == true) return resultat['attendance_id'] as String?;
+      return null;
     } catch (e) {
       print('Erreur pointage Supabase: $e');
       return null;
@@ -242,20 +313,24 @@ class SupabaseService {
     try {
       final status = adminApprovalRequired ? 'pending' : 'approved';
 
-      final response = await client
-          .from('face_enrollments')
-          .insert({
-        'employee_id': employeeId,
-        'enterprise_id': enterpriseId,
-        'face_embedding': embedding,
-        'enrollment_photo_url': enrollmentPhotoUrl,
-        'status': status,
-        'is_active': true,
-      })
-          .select()
-          .single();
+      // ⭐ LIVRAISON 14 — l'enrôlement passe par le SERVEUR, et c'est le JETON
+      //    qui dit pour QUI on enrôle. Avant, `employee_id` était un simple
+      //    paramètre : la clé publique pouvait enrôler n'importe quel visage sous
+      //    n'importe quelle identité — et la reconnaissance faciale, censée être le
+      //    contrôle le plus fort, validait ensuite ce visage.
+      final reponse = await client.rpc('encheck_visage_enroler', params: {
+        'p_jeton':     TrustedPunchService.jeton,
+        'p_visage':    embedding,
+        'p_photo_url': enrollmentPhotoUrl,
+        'p_statut':    status,
+      });
 
-      return response;
+      if (reponse is Map && reponse['ok'] == true) {
+        return Map<String, dynamic>.from(reponse);
+      }
+      print('⚠️ Enrôlement refusé par le serveur : '
+          '${reponse is Map ? reponse['reason'] : reponse}');
+      return null;
     } catch (e) {
       print('❌ Erreur création enrôlement: $e');
       return null;
@@ -265,17 +340,28 @@ class SupabaseService {
   static Future<Map<String, dynamic>?> getEnrolementActif(
       String employeeId) async {
     try {
-      final response = await client
-          .from('face_enrollments')
-          .select()
-          .eq('employee_id', employeeId)
-          .eq('is_active', true)
-          .eq('status', 'approved')
-          .order('created_at', ascending: false)
-          .limit(1)
-          .maybeSingle();
+      // ⭐ LIVRAISON 16 — lecture par le SERVEUR. La table `face_enrollments` est
+      //    sous RLS et la clé publique n'a AUCUN droit de lecture : cette requête
+      //    ne renvoyait rien (et le contrôle facial n'avait donc aucun visage de
+      //    référence pour comparer). Le jeton dit à quelle entreprise on
+      //    appartient ; le serveur ne renvoie que la sienne.
+      final reponse = await client.rpc('encheck_visage_lister', params: {
+        'p_jeton': TrustedPunchService.jeton,
+      });
 
-      return response;
+      if (reponse is Map && reponse['ok'] == true) {
+        final liste = (reponse['enrolements'] as List? ?? [])
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .where((e) =>
+                e['employee_id'] == employeeId &&
+                e['is_active'] == true &&
+                e['status'] == 'approved')
+            .toList();
+        // le serveur trie du plus récent au plus ancien
+        return liste.isEmpty ? null : liste.first;
+      }
+      print('⚠️ Enrôlement refusé par le serveur : ${reponse is Map ? reponse['reason'] : reponse}');
+      return null;
     } catch (e) {
       print('❌ Erreur récupération enrôlement: $e');
       return null;
@@ -285,16 +371,23 @@ class SupabaseService {
   static Future<Map<String, dynamic>?> getStatutEnrolement(
       String employeeId) async {
     try {
-      final response = await client
-          .from('face_enrollments')
-          .select('id, status, created_at')
-          .eq('employee_id', employeeId)
-          .eq('is_active', true)
-          .order('created_at', ascending: false)
-          .limit(1)
-          .maybeSingle();
+      // ⭐ LIVRAISON 16 — même raison que ci-dessus : la lecture directe ne
+      //    renvoyait rien. On passe par le serveur et on filtre sur place.
+      final reponse = await client.rpc('encheck_visage_lister', params: {
+        'p_jeton': TrustedPunchService.jeton,
+      });
 
-      return response;
+      if (reponse is Map && reponse['ok'] == true) {
+        final liste = (reponse['enrolements'] as List? ?? [])
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .where((e) => e['employee_id'] == employeeId && e['is_active'] == true)
+            .toList();
+        if (liste.isEmpty) return null;
+        final e = liste.first;
+        return {'id': e['id'], 'status': e['status'], 'created_at': e['created_at']};
+      }
+      print('⚠️ Statut d''enrôlement refusé par le serveur : ${reponse is Map ? reponse['reason'] : reponse}');
+      return null;
     } catch (e) {
       print('❌ Erreur statut enrôlement: $e');
       return null;
@@ -308,13 +401,16 @@ class SupabaseService {
   static Future<Map<String, dynamic>> getConfigRecoFaciale(
       String enterpriseId) async {
     try {
-      final response = await client
-          .from('face_recognition_config')
-          .select()
-          .eq('enterprise_id', enterpriseId)
-          .maybeSingle();
+      // ⭐ LIVRAISON 16 — la configuration aussi passe par le serveur : sinon les
+      //    réglages de l'entreprise (seuil de confiance, approbation obligatoire,
+      //    droit de repli) étaient ignorés au profit des valeurs par défaut.
+      final reponse = await client.rpc('encheck_config_visage', params: {
+        'p_jeton': TrustedPunchService.jeton,
+      });
 
-      if (response != null) return response;
+      if (reponse is Map && reponse['ok'] == true && reponse['config'] != null) {
+        return Map<String, dynamic>.from(reponse['config'] as Map);
+      }
 
       // Config par défaut
       return {
@@ -388,13 +484,16 @@ class SupabaseService {
     String? deviceId,
   }) async {
     try {
-      await client.from('face_recognition_logs').insert({
-        'enterprise_id': enterpriseId,
-        'employee_id': employeeId,
-        'score': score,
-        'matched': matched,
-        'liveness_passed': livenessPassee,
-        'device_id': deviceId,
+      // ⭐ LIVRAISON 14 — le journal passe aussi par le serveur. Même sans jeton
+      //    valable la tentative est notée (une trace vaut mieux qu'un silence),
+      //    mais elle l'est alors SANS identité : on ne peut plus inscrire une
+      //    tentative au nom de quelqu'un d'autre.
+      await client.rpc('encheck_visage_journaliser', params: {
+        'p_jeton':          TrustedPunchService.jeton,
+        'p_score':          score,
+        'p_matched':        matched,
+        'p_liveness_passe': livenessPassee,
+        'p_device_id':      deviceId,
       });
     } catch (e) {
       print('⚠️ Erreur log tentative faciale: $e');
@@ -420,33 +519,27 @@ class SupabaseService {
     bool? isWithinZone,
   }) async {
     try {
-      final Map<String, dynamic> data = {
-        'employee_id': employeeId,
-        'enterprise_id': enterpriseId,
-        'check_type': checkType,
-        'method': 'face',
-        'check_time': DateTime.now().toIso8601String(),
-        'face_score': faceScore,
-        'face_verified': true,
-        'liveness_passed': livenessPassee,
-        'face_attempts': faceAttempts,
-      };
+      // ⭐ LIVRAISON 09 : heure décidée par le serveur, y compris en reconnaissance faciale
+      final resultat = await TrustedPunchService.pointer(
+        employeeId:     employeeId,
+        enterpriseId:   enterpriseId,
+        checkType:      checkType,
+        method:         'face',
+        latitude:       locationLat,
+        longitude:      locationLng,
+        gpsAccuracy:    gpsAccuracy,
+        geofenceId:     geofenceId,
+        distanceMeters: distanceMeters,
+        isWithinZone:   isWithinZone,
+        faceScore:      faceScore,
+        faceVerified:   true,
+        livenessPasse:  livenessPassee,
+        faceAttempts:   faceAttempts,
+      );
 
-      // Données GPS si disponibles
-      if (locationLat != null) data['location_lat'] = locationLat;
-      if (locationLng != null) data['location_lng'] = locationLng;
-      if (gpsAccuracy != null) data['gps_accuracy'] = gpsAccuracy;
-      if (geofenceId != null) data['geofence_id'] = geofenceId;
-      if (distanceMeters != null) data['distance_meters'] = distanceMeters;
-      if (isWithinZone != null) data['is_within_zone'] = isWithinZone;
-
-      final response = await client
-          .from('attendances')
-          .insert(data)
-          .select('id')
-          .single();
-
-      return response['id'] as String;
+      if (resultat['ok'] == true) return resultat['attendance_id'] as String?;
+      print('❌ Pointage facial refusé : ${resultat['reason']}');
+      return null;
     } catch (e) {
       print('❌ Erreur pointage facial: $e');
       return null;
@@ -462,14 +555,27 @@ class SupabaseService {
   static Future<List<Map<String, dynamic>>> getTousEnrolementsApprouves(
       String enterpriseId) async {
     try {
-      final response = await client
-          .from('face_enrollments')
-          .select('id, employee_id, face_embedding')
-          .eq('enterprise_id', enterpriseId)
-          .eq('status', 'approved')
-          .eq('is_active', true);
+      // ⭐ LIVRAISON 16 — ⭐⭐ C'EST LA LECTURE LA PLUS IMPORTANTE : la tablette
+      //    télécharge ici TOUS les visages de référence avant de comparer. Sans
+      //    droit de lecture, cette liste était VIDE : le contrôle facial ne
+      //    pouvait reconnaître personne, tout en ayant l'air de fonctionner.
+      final reponse = await client.rpc('encheck_visage_lister', params: {
+        'p_jeton': TrustedPunchService.jeton,
+      });
 
-      return List<Map<String, dynamic>>.from(response);
+      if (reponse is Map && reponse['ok'] == true) {
+        final tous = (reponse['enrolements'] as List? ?? [])
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .where((e) =>
+                e['status'] == 'approved' &&
+                e['is_active'] == true &&
+                e['face_embedding'] != null)
+            .toList();
+        print('✅ ${tous.length} visage(s) de référence chargé(s) depuis le serveur');
+        return tous;
+      }
+      print('⚠️ Visages refusés par le serveur : ${reponse is Map ? reponse['reason'] : reponse}');
+      return [];
     } catch (e) {
       print('❌ Erreur chargement embeddings: $e');
       return [];
@@ -484,7 +590,10 @@ class SupabaseService {
       String employeeId) async {
     try {
       final response = await client
-          .from('employees')
+          // ⭐ LIVRAISON 13 — on lit la VUE PUBLIQUE, pas la table : elle expose
+          //    tout sauf les hachages. La 12b a fermé `pin_hash` à la clé publique ;
+          //    un `select('*')` sur la table échouerait donc.
+          .from('employees_public')
           .select('*, enterprises(*), employee_schedules(*, work_schedules(*))')
           .eq('id', employeeId)
           .eq('is_active', true)

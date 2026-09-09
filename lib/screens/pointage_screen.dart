@@ -22,6 +22,8 @@ import '../services/theme_service.dart';
 import '../services/sync_service.dart';
 import '../services/photo_service_interface.dart';
 import '../services/geofencing_service.dart';
+import '../services/heure_pointage.dart';   // ⭐ LIVRAISON 21
+import '../services/trusted_punch_service.dart';   // ⭐ LIVRAISON 22
 import 'historique_screen.dart';
 import 'face_enrollment_screen.dart';
 import 'face_pointage_screen.dart';
@@ -108,6 +110,13 @@ class _PointageScreenState extends State<PointageScreen> {
   Map<String, dynamic>? _pendingEmployee;
   Map<String, dynamic>? _dernierEmployePointe;
 
+  // 🔒 LIVRAISON 21 — VERROU ANTI-DOUBLE-GESTE.
+  //    Retient l'employé dont le pointage est EN COURS d'enregistrement. Tant
+  //    qu'il est là, aucun second pointage de CET employé n'est enregistré.
+  //    Volontairement par employé : sur une tablette partagée, le pointage de
+  //    l'employé suivant ne doit jamais être bloqué.
+  String? _pointageEnCoursPour;
+
   @override
   void initState() {
     super.initState();
@@ -131,6 +140,11 @@ class _PointageScreenState extends State<PointageScreen> {
   Future<void> _initialiserApp() async {
     await _chargerModulesLocaux();
     await _chargerEntrepriseLocale();
+
+    // ⭐ LIVRAISON 22 — demander au serveur le fuseau officiel de CETTE
+    //    entreprise (et son décalage actuel). Volontairement SANS `await` :
+    //    l'écran s'affiche tout de suite, l'horloge se corrige dès la réponse.
+    _rafraichirFuseauEntreprise();
     if (_moduleRecoFacialeActif && entrepriseSelectionnee != null) {
       await _chargerConfigRecoFacialeEnLigne();
     }
@@ -244,6 +258,24 @@ class _PointageScreenState extends State<PointageScreen> {
     }
   }
 
+  /// ⭐ LIVRAISON 22 — l'heure officielle de l'entreprise.
+  ///
+  /// Le serveur est le seul à connaître les règles de changement d'heure de
+  /// chaque pays : on lui demande donc le fuseau de l'entreprise choisie, et
+  /// HeurePointage s'en sert partout (historique, horloge, journées).
+  /// En cas d'échec (hors-ligne, serveur pas encore équipé) : on garde ce
+  /// qu'on savait déjà, et l'application affiche l'heure de la tablette.
+  Future<void> _rafraichirFuseauEntreprise() async {
+    final id = entrepriseSelectionnee?['id'] as String?;
+    if (id == null) return;
+    try {
+      await TrustedPunchService.contacterServeur(enterpriseId: id);
+      if (mounted) setState(() {});   // l'horloge et l'avis se remettent à jour
+    } catch (e) {
+      print('⚠️ fuseau de l\'entreprise indisponible : $e');
+    }
+  }
+
   Future<void> _chargerEntrepriseLocale() async {
     final prefs = await SharedPreferences.getInstance();
     final id = prefs.getString('enterprise_id');
@@ -305,7 +337,9 @@ class _PointageScreenState extends State<PointageScreen> {
   }
 
   void _mettreAJourHeure() {
-    final now = DateTime.now();
+    // ⭐ LIVRAISON 22 — l'horloge suit le fuseau de l'ENTREPRISE dès que le
+    //    serveur l'a annoncé (HeurePointage), sinon celui de la tablette.
+    final now = HeurePointage.maintenant();
     final jours = [
       'Dimanche', 'Lundi', 'Mardi', 'Mercredi',
       'Jeudi', 'Vendredi', 'Samedi'
@@ -1205,6 +1239,7 @@ class _PointageScreenState extends State<PointageScreen> {
                     ),
                     Text(dateActuelle,
                         style: EnCheckTextStyles.titreSecondaire),
+                    _buildAvisFuseau(),
                     if (_moduleGeofencingActif || _kioskMode) ...[
                       const SizedBox(height: 16),
                       _buildIndicateursModules(),
@@ -2331,6 +2366,25 @@ class _PointageScreenState extends State<PointageScreen> {
     );
   }
 
+  /// ⭐ LIVRAISON 22 — l'écart chiffré, quand la tablette n'est pas sur le
+  /// fuseau de l'entreprise. Discret, jamais bloquant : il n'apparaît que si
+  /// les deux fuseaux diffèrent vraiment (au moins une minute).
+  Widget _buildAvisFuseau() {
+    final avis = HeurePointage.avisEcartTablette();
+    if (avis == null) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 8, left: 24, right: 24),
+      child: Text(
+        avis,
+        textAlign: TextAlign.center,
+        style: EnCheckTextStyles.titreSecondaire.copyWith(
+          fontSize: 12,
+          color: EnCheckColors.terreChaude,
+        ),
+      ),
+    );
+  }
+
   Widget _buildSeparateur() {
     return Container(
       height: 3,
@@ -2596,11 +2650,40 @@ class _PointageScreenState extends State<PointageScreen> {
       bool estHorsLigne,
       Uint8List? photoBytes,
       ) async {
+    // ⭐ LIVRAISON 21 — LE VERROU, POSÉ AVANT LE PREMIER await.
+    //    Un second geste parti pendant que le premier est encore en vol pour le
+    //    MÊME employé n'enregistre rien.
+    if (_pointageEnCoursPour == employee['id']) return;
+    _pointageEnCoursPour = employee['id'];
+
     try {
       String typePointage = 'in';
       try {
         final dernierPointage =
         await LocalDatabase.dernierPointageCombine(employee['id']);
+
+        // ⭐ LIVRAISON 21 — LE GESTE DOUBLE N'ÉCRIT PLUS RIEN.
+        //    Le type du pointage est déduit du DERNIER pointage connu (local ou
+        //    serveur) : une seconde validation à quelques secondes d'intervalle
+        //    prenait donc le type OPPOSÉ et fabriquait une session fantôme.
+        //    C'est exactement le défaut trouvé en production : 29 paires en
+        //    30 jours, les 6 employés, dont l'entrée 20:01:06 suivie d'une
+        //    sortie 20:01:15 (9 secondes).
+        //    Même seuil que la base : 60 secondes (livraison 20, §1).
+        final instantPrecedent = dernierPointage == null
+            ? null
+            : HeurePointage.instant(dernierPointage);
+        if (dernierPointage != null && instantPrecedent != null) {
+          final ecartSecondes =
+              DateTime.now().toUtc().difference(instantPrecedent).inSeconds;
+          if (ecartSecondes >= 0 && ecartSecondes < 60) {
+            if (mounted) {
+              _afficherDejaPointe(employee, dernierPointage, ecartSecondes);
+            }
+            return;   // ← RIEN n'est enregistré, ni en local ni au serveur
+          }
+        }
+
         if (dernierPointage?['check_type'] == 'in') typePointage = 'out';
       } catch (_) {}
 
@@ -2655,6 +2738,10 @@ class _PointageScreenState extends State<PointageScreen> {
       }
     } catch (e) {
       if (mounted) _afficherErreur('Erreur inattendue : $e');
+    } finally {
+      // Quoi qu'il arrive — succès, erreur ou sortie anticipée — le verrou est
+      // retiré : aucune tablette ne reste bloquée sur un pointage en cours.
+      if (_pointageEnCoursPour == employee['id']) _pointageEnCoursPour = null;
     }
   }
 
@@ -2683,6 +2770,84 @@ class _PointageScreenState extends State<PointageScreen> {
       return '${schedule['name'] ?? 'Planning'} ($start - $end)';
     }
     return null;
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // ⛔ LIVRAISON 21 — « DÉJÀ POINTÉ » : le second geste n'écrit rien
+  // ═══════════════════════════════════════════════════════════
+
+  /// Montre à l'employé le pointage qui vient d'être fait, et n'enregistre RIEN.
+  ///
+  /// C'est le pendant exact, côté application, du déclencheur posé en base
+  /// (livraison 20) : au lieu de laisser la base signaler après coup une paire
+  /// à 9 secondes d'intervalle, l'application empêche la seconde ligne
+  /// d'exister. L'employé comprend ce qui s'est passé, rien n'est perdu.
+  void _afficherDejaPointe(
+    Map<String, dynamic> employee,
+    Map<String, dynamic> dernierPointage,
+    int ecartSecondes,
+  ) {
+    final estEntree = dernierPointage['check_type'] == 'in';
+    final heure = HeurePointage.heureDePointage(dernierPointage);
+    final secondes = ecartSecondes <= 1 ? '1 seconde' : '$ecartSecondes secondes';
+
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) => AlertDialog(
+        backgroundColor: Theme.of(context).cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            const Icon(Icons.timer_outlined,
+                color: EnCheckColors.terreChaude, size: 30),
+            const SizedBox(width: 10),
+            const Text(
+              'DÉJÀ POINTÉ',
+              style: TextStyle(
+                  color: EnCheckColors.terreChaude,
+                  fontWeight: FontWeight.w300,
+                  letterSpacing: 2),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Bonjour ${employee['first_name']} ${employee['last_name']}',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w500,
+                color: Theme.of(context).textTheme.bodyLarge?.color,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'Votre ${estEntree ? 'ENTRÉE' : 'SORTIE'} de $heure a bien été '
+              'enregistrée, il y a $secondes.',
+              style: TextStyle(
+                  color: Theme.of(context).textTheme.bodyMedium?.color),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Rien n\'a été ajouté : un second pointage à moins d\'une minute '
+              'n\'est jamais pris en compte.',
+              style: TextStyle(
+                  fontSize: 13,
+                  color: Theme.of(context).textTheme.bodySmall?.color),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('FERMER'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _afficherSucces(

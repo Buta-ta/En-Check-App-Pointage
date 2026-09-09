@@ -4,6 +4,7 @@
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'trusted_punch_service.dart';   // ⭐ LIVRAISON 14 : le jeton de session
 
 class PhotoService {
   static final _supabase = Supabase.instance.client;
@@ -74,10 +75,18 @@ class PhotoService {
     required String photoUrl,
   }) async {
     try {
-      await _supabase.from('pointages_photos').insert({
-        'pointage_id': pointageId,
-        'photo_url': photoUrl,
+      // ⭐ LIVRAISON 14 — même règle que sur mobile : c'est le serveur qui
+      //    vérifie que ce pointage appartient bien au porteur du jeton.
+      final reponse = await _supabase.rpc('encheck_photo_enregistrer', params: {
+        'p_jeton':       TrustedPunchService.jeton,
+        'p_pointage_id': pointageId,
+        'p_photo_url':   photoUrl,
       });
+
+      if (reponse is Map && reponse['ok'] != true) {
+        print('⚠️ Photo refusée par le serveur : ${reponse['reason']}');
+        return false;
+      }
 
       print('✅ Photo enregistrée (Web) pour pointage: $pointageId');
       return true;
