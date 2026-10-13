@@ -18,6 +18,12 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
   List<Map<String, dynamic>> pointages = [];
   bool chargement = true;
 
+  /// Message à afficher quand la lecture a échoué. Sans lui, un refus
+  /// d'autorisation sur la table `attendances` produisait une liste vide et
+  /// l'écran affichait « Aucun pointage » : l'employé croyait sa journée
+  /// perdue alors que le serveur refusait simplement la lecture.
+  String? erreur;
+
   @override
   void initState() {
     super.initState();
@@ -30,6 +36,7 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
   Future<void> _chargerHistorique() async {
     setState(() {
       chargement = true;
+      erreur = null;
     });
 
     try {
@@ -43,6 +50,9 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
         } catch (e) {
           print('Erreur chargement Supabase: $e');
         }
+        // getHistoriquePointages avale son exception et renvoie [] : sans ce
+        // relevé, l'échec était invisible et ressemblait à une journée vide.
+        erreur = SupabaseService.derniereErreur;
       }
 
       // 2. Charger les pointages pending locaux
@@ -285,6 +295,8 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
                 ? const Center(
               child: CircularProgressIndicator(color: EnCheckColors.terreChaude),
             )
+                : (pointages.isEmpty && erreur != null)
+                ? _construireErreur()
                 : pointages.isEmpty
                 ? _construireVide()
                 : _construireListe(),
@@ -303,6 +315,42 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
           const SizedBox(height: 20),
           const Text('Aucun pointage', style: TextStyle(color: EnCheckColors.gris, fontSize: 18)),
         ],
+      ),
+    );
+  }
+
+  /// « Aucun pointage » voulait dire deux choses différentes : la journée est
+  /// vide, ou le serveur a refusé la lecture. Cet écran tranche. Les pointages
+  /// déjà enregistrés localement restent affichés au-dessus s'il y en a — on
+  /// n'arrive ici que quand la liste est entièrement vide.
+  Widget _construireErreur() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 30),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.cloud_off, size: 70, color: EnCheckColors.gris.withOpacity(0.5)),
+            const SizedBox(height: 20),
+            const Text(
+              'Historique indisponible',
+              style: TextStyle(color: EnCheckColors.gris, fontSize: 18, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              erreur!,
+              style: TextStyle(color: EnCheckColors.gris.withOpacity(0.8), fontSize: 14, height: 1.5),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            TextButton.icon(
+              onPressed: _chargerHistorique,
+              icon: const Icon(Icons.refresh, color: EnCheckColors.terreChaude),
+              label: const Text('Réessayer', style: TextStyle(color: EnCheckColors.terreChaude)),
+            ),
+          ],
+        ),
       ),
     );
   }

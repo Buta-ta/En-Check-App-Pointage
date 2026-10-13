@@ -1,3 +1,13 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   EN-CHECK — COQUILLE WEB
+   ══════════════════════════════════════════════════════════════════════════
+   Deux rôles :
+     1. donner à la page la teinte de l'app, pour que le chargement ne commence
+        pas par un flash blanc ;
+     2. habiller l'écran de chargement de #encheck-splash (index.html), qui
+        couvre le délai entre l'ouverture de la page et le premier pixel Flutter.
+   ══════════════════════════════════════════════════════════════════════════ */
+
 body, html {
   width: 100%;
   height: 100%;
@@ -5,4 +15,58 @@ body, html {
   padding: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background-color: #f5f5f5;
+}
+
+/* ── Écran de chargement ───────────────────────────────────────────────────
+   Visible immédiatement, sans attendre ni main.dart.js ni Supabase.
+   #E5D4C0 est EnCheckColors.sableClair, le fond des écrans de l'app
+   (lib/theme/app_theme.dart) : la transition vers Flutter est invisible.
+   Retiré par index.html dès l'événement `flutter-first-frame`.
+   ────────────────────────────────────────────────────────────────────────── */
+#encheck-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  background-color: #E5D4C0;
+  /* Aucune transition au départ : l'apparition doit être instantanée. */
+}
+
+#encheck-splash .encheck-splash-marque {
+  color: #3D2B1F;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: 4px;
+}
+
+#encheck-splash .encheck-splash-anneau {
+  width: 42px;
+  height: 42px;
+  border: 4px solid rgba(61, 43, 31, 0.18);
+  border-top-color: #8B6914;
+  border-radius: 50%;
+  animation: encheck-splash-rotation 0.9s linear infinite;
+}
+
+#encheck-splash .encheck-splash-texte {
+  color: rgba(61, 43, 31, 0.65);
+  font-size: 14px;
+}
+
+@keyframes encheck-splash-rotation {
+  to { transform: rotate(360deg); }
+}
+
+/* État de sortie : fondu, puis retiré du rendu pour ne plus intercepter les
+   gestes. `forwards` garde l'état final même si le script tarde à supprimer
+   le nœud. */
+#encheck-splash.encheck-splash-sortie {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.25s ease-out, visibility 0.25s;
 }

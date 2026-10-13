@@ -48,15 +48,30 @@ void main() async {
   //    Plus l'ancrage est frais, plus les pointages hors-ligne sont datés juste.
   TrustedPunchService.contacterServeur();
 
-  // Synchronisation automatique au démarrage
-  await SyncService.synchroniserAutomatique();
-
+  // L'interface démarre TOUT DE SUITE.
+  //
+  // La synchronisation passait ici, avec un `await`, avant runApp() : le
+  // premier pixel n'apparaissait donc qu'après le téléchargement de toutes
+  // les entreprises actives puis de tous leurs employés. Sur une tablette de
+  // pharmacie en 4G, c'était un écran blanc de plusieurs secondes — d'autant
+  // que ce volume ne concerne pas l'appareil, qui n'a besoin que de sa propre
+  // entreprise.
+  //
+  // On affiche d'abord, on synchronise ensuite. EnCheckApp a déjà son propre
+  // état de chargement, et chaque écran recharge ses données de son côté :
+  // rien n'attend la fin de la synchronisation pour s'afficher.
   runApp(
     ChangeNotifierProvider(
       create: (_) => ThemeService(),
       child: const EnCheckApp(),
     ),
   );
+
+  // Synchronisation automatique au démarrage — en arrière-plan.
+  // `.catchError` parce qu'une Future non attendue qui lève perd son erreur.
+  SyncService.synchroniserAutomatique().catchError((Object e) {
+    print('❌ Synchronisation de démarrage échouée: $e');
+  });
 }
 
 class EnCheckApp extends StatefulWidget {
