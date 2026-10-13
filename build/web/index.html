@@ -2,53 +2,35 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-  <!--
-    PWA. `mobile-web-app-capable` est la clé standard ; `apple-mobile-web-app-capable`
-    ne sert plus qu'à iOS. Les deux sont posées côte à côte : sans la première,
-    Chrome affiche un avertissement de dépréciation à chaque chargement.
-  -->
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="theme-color" content="#8B6914">
-
   <title>En-Check</title>
 
-  <!-- Manifest PWA : il était absent, donc « Installer l'application » n'était
-       jamais proposé. Les chemins d'icônes suivent la casse réelle des fichiers
-       du dossier icons/ — Vercel sert depuis Linux, où la casse compte. -->
+  <!-- Sans ce lien, le navigateur ne propose jamais « Installer l'application ». -->
   <link rel="manifest" href="manifest.json">
 
-  <!-- Favicon -->
   <link rel="icon" type="image/png" href="icons/favicon.png">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
-
-  <!-- CSS -->
   <link rel="stylesheet" href="styles.css">
+
+  <!--
+    AUCUNE initialisation Supabase ici, et volontairement.
+
+    Le bundle UMD supabase-js expose le global `supabase` (minuscules), pas
+    `Supabase` : l'ancien appel `Supabase.createClient(...)` levait donc
+    « ReferenceError: Supabase is not defined ». Et ce client JS n'était lu par
+    personne — `supabaseConfig` apparaît 0 fois dans build/web/main.dart.js.
+    Le client Supabase est construit côté Dart, dans
+    lib/services/supabase_service.dart. Une seule copie des clés, pas deux.
+  -->
 </head>
 <body>
-  <!--
-    UN SEUL CHARGEMENT DE main.dart.js.
-
-    L'ancienne version en faisait deux :
-      1. un injecteur dans le <head> qui faisait document.body.appendChild(...)
-         → TypeError, car <body> n'existe pas encore quand le <head> s'exécute ;
-      2. le <script src="main.dart.js"> ci-dessous.
-    Seul le second tournait, par accident. On supprime l'injecteur : le
-    TypeError disparaît, et avec lui le risque de démarrer l'app deux fois.
-
-    Ce fichier ne contient volontairement AUCUNE initialisation Supabase.
-    Le client est construit côté Dart, dans lib/services/supabase_service.dart
-    (SupabaseService.initialize). L'ancienne page chargeait supabase-js depuis
-    unpkg puis appelait `Supabase.createClient(...)` — mais le bundle UMD
-    expose `supabase`, pas `Supabase`, d'où le ReferenceError. Ce client JS
-    n'était lu par personne : aucun code Dart ne consulte window.supabaseConfig.
-    Garder les clés en un seul endroit évite aussi de voir les deux copies
-    diverger.
-  -->
+  <!-- Un seul chargement. L'ancien fichier en tentait deux : un injecteur dans
+       le <head> appelait document.body.appendChild avant que <body> existe
+       (TypeError), puis cette balise chargeait réellement le script. -->
   <script src="main.dart.js" type="application/javascript"></script>
 </body>
 </html>

@@ -1,24 +1,8 @@
-/* ══════════════════════════════════════════════════════════════════════════
-   EN-CHECK — FEUILLE DE STYLE DE LA COQUILLE WEB
-   ══════════════════════════════════════════════════════════════════════════
-   web/index.html pointe vers ce fichier depuis toujours, mais il n'existait
-   pas : le navigateur affichait un 404 sur /styles.css à chaque chargement.
-
-   Il ne sert pas à habiller l'application — Flutter dessine tout dans son
-   canvas. Il sert à une seule chose : donner à la page la teinte de fond de
-   l'app, pour que le chargement ne commence pas par un flash blanc.
-
-   #E5D4C0 est EnCheckColors.sableClair, la couleur de fond des écrans
-   d'accueil et de pointage (lib/theme/app_theme.dart).
-   ══════════════════════════════════════════════════════════════════════════ */
-
-html,
-body {
+body, html {
+  width: 100%;
+  height: 100%;
   margin: 0;
   padding: 0;
-  height: 100%;
-  background-color: #E5D4C0;
-  /* Le canevas Flutter gère lui-même le défilement et le zoom pincer-écarter. */
-  overflow: hidden;
-  overscroll-behavior: none;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background-color: #f5f5f5;
 }
