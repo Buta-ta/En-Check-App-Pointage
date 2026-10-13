@@ -4,12 +4,33 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="theme-color" content="#8B6914">
   <title>En-Check</title>
+
+  <!-- Sans ce lien, le navigateur ne propose jamais « Installer l'application ». -->
+  <link rel="manifest" href="manifest.json">
+
   <link rel="icon" type="image/png" href="icons/favicon.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="styles.css">
-  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+
+  <!--
+    AUCUNE initialisation Supabase ici, et volontairement.
+
+    Le bundle UMD supabase-js expose le global `supabase` (minuscules), pas
+    `Supabase` : l'ancien appel `Supabase.createClient(...)` levait donc
+    « ReferenceError: Supabase is not defined ». Et ce client JS n'était lu par
+    personne — `supabaseConfig` apparaît 0 fois dans build/web/main.dart.js.
+    Le client Supabase est construit côté Dart, dans
+    lib/services/supabase_service.dart. Une seule copie des clés, pas deux.
+  -->
 </head>
 <body>
-<script src="main.dart.js" type="application/javascript"></script>
+  <!-- Un seul chargement. L'ancien fichier en tentait deux : un injecteur dans
+       le <head> appelait document.body.appendChild avant que <body> existe
+       (TypeError), puis cette balise chargeait réellement le script. -->
+  <script src="main.dart.js" type="application/javascript"></script>
 </body>
 </html>

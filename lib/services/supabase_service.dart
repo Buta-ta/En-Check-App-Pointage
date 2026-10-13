@@ -15,6 +15,53 @@ class SupabaseService {
     await Supabase.initialize(url: supabaseUrl, anonKey: supabaseAnonKey);
   }
 
+  // ═══════════════════════════════════════════════════════════
+  // 🩺 TRADUIRE UNE ERREUR SUPABASE EN PHRASE LISIBLE
+  // ═══════════════════════════════════════════════════════════
+  /// LE PIÈGE QUE CETTE FONCTION ÉVITE : un refus d'autorisation n'est pas une
+  /// panne de réseau. Quand la table `enterprises` n'a pas de GRANT SELECT pour
+  /// le rôle `anon`, Supabase répond `401` avec `permission denied for table
+  /// enterprises` (SQLSTATE 42501) — et l'écran d'accueil disait alors
+  /// « Erreur de connexion internet ». L'administrateur partait vérifier sa
+  /// box alors que le correctif est un GRANT SQL côté base de données.
+  ///
+  /// La distinction se fait sur le SQLSTATE et le texte de l'erreur, car
+  /// PostgREST renvoie 401 à la fois pour une clé API invalide et pour un
+  /// droit manquant : le code HTTP seul ne suffit pas à trancher.
+  static String messageErreur(Object e) {
+    final texte = e.toString().toLowerCase();
+
+    // 42501 : le rôle n'a pas le droit sur l'objet. Correctif = SQL, pas réseau.
+    if (texte.contains('42501') || texte.contains('permission denied')) {
+      return 'Accès refusé par la base de données : les droits de lecture '
+          'manquent pour l\'application de pointage. Correctif à appliquer '
+          'dans l\'éditeur SQL Supabase (voir supabase/migrations).';
+    }
+
+    // Clé API absente, révoquée, ou projet Supabase différent.
+    if (texte.contains('401') ||
+        texte.contains('invalid api key') ||
+        texte.contains('jwt')) {
+      return 'La clé d\'accès à la base de données n\'est pas acceptée. '
+          'Vérifiez la clé anon dans lib/services/supabase_service.dart.';
+    }
+
+    // RLS : la requête passe mais aucune ligne n'est visible.
+    if (texte.contains('row-level security') ||
+        texte.contains('row level security')) {
+      return 'La sécurité au niveau des lignes (RLS) bloque la lecture. '
+          'Ajoutez une politique de lecture pour le rôle anon.';
+    }
+
+    if (texte.contains('404') || texte.contains('could not find the table')) {
+      return 'Table introuvable côté serveur. Le schéma Supabase et '
+          'l\'application ne correspondent pas.';
+    }
+
+    // Le reste : coupure réelle, DNS, timeout, hors-ligne.
+    return 'Erreur de connexion internet';
+  }
+
   // 🛠️ FONCTION UTILITAIRE POUR NORMALISER LES DONNÉES
   static Map<String, dynamic> _normaliserEmployee(Map<String, dynamic> data) {
     final cleanData = Map<String, dynamic>.from(data);
@@ -29,6 +76,12 @@ class SupabaseService {
     return cleanData;
   }
 
+  /// Dernière erreur d'accès aux données, en clair. `null` quand tout va bien.
+  /// Sert à ne pas annoncer « téléchargé avec succès » après un échec :
+  /// getEntreprises() renvoie une liste vide sur erreur, et le vide se
+  /// confondait avec « cette base ne contient aucune entreprise ».
+  static String? derniereErreur;
+
   // ═══════════════════════════════════════════════════════════
   // 🏢 RÉCUPÉRER LES ENTREPRISES
   // ═══════════════════════════════════════════════════════════
@@ -39,9 +92,12 @@ class SupabaseService {
           .select()
           .eq('is_active', true)
           .order('name');
+      derniereErreur = null;
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
+      derniereErreur = messageErreur(e);
       print('Erreur récupération entreprises: $e');
+      print('   ↳ diagnostic: $derniereErreur');
       return [];
     }
   }
@@ -57,9 +113,12 @@ class SupabaseService {
           .eq('enterprise_id', enterpriseId)
           .eq('is_active', true);
       final List<dynamic> rawList = response as List<dynamic>;
+      derniereErreur = null;
       return rawList.map((e) => _normaliserEmployee(e as Map<String, dynamic>)).toList();
     } catch (e) {
+      derniereErreur = messageErreur(e);
       print('Erreur récupération employés: $e');
+      print('   ↳ diagnostic: $derniereErreur');
       return [];
     }
   }
