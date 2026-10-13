@@ -269,9 +269,15 @@ class SupabaseService {
           .eq('employee_id', employeeId)
           .order('check_time', ascending: false)
           .limit(limite);
+      derniereErreur = null;
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
+      // Un 401 « permission denied for table attendances » renvoyait une liste
+      // vide, et l'écran affichait alors « Aucun pointage » — impossible pour
+      // l'employé de distinguer une journée sans pointage d'un droit manquant.
+      derniereErreur = messageErreur(e);
       print('Erreur historique: $e');
+      print('   ↳ diagnostic: $derniereErreur');
       return [];
     }
   }
