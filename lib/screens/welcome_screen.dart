@@ -75,7 +75,10 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
         setState(() => _error = 'Code entreprise introuvable');
       }
     } catch (e) {
-      setState(() => _error = 'Erreur de connexion internet');
+      // Dire « Erreur de connexion internet » pour un refus d'autorisation
+      // envoyait l'administrateur vérifier sa connexion alors que le correctif
+      // est un GRANT SQL côté Supabase. messageErreur() fait la distinction.
+      setState(() => _error = SupabaseService.messageErreur(e));
     } finally {
       setState(() => _loading = false);
     }

@@ -130,7 +130,17 @@ class SyncService {
         }
       }
 
-      print('✅ Données hors-ligne téléchargées avec succès');
+      // Les appels de SupabaseService avalent leurs exceptions et renvoient du
+      // vide : sans ce contrôle, un 401 « permission denied for table » passait
+      // pour un téléchargement réussi, et la console annonçait « ✅ Données
+      // hors-ligne téléchargées avec succès » juste au-dessus de l'erreur.
+      final erreur = SupabaseService.derniereErreur;
+      if (erreur != null) {
+        print('⚠️ Téléchargement hors-ligne INCOMPLET — $erreur');
+        print('   Les caches locaux gardent leur contenu précédent.');
+      } else {
+        print('✅ Données hors-ligne téléchargées avec succès');
+      }
     } catch (e) {
       print('❌ Erreur téléchargement données: $e');
     }
