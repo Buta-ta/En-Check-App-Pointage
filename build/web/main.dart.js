@@ -10057,7 +10057,7 @@ m=i
 k=J.c2(m)===0?null:J.lW(m)
 q=k
 s=1
-break}A.b0("\u26a0\ufe0f Enr\xf4lement refus\xe9 par le serveur : "+A.i(k.b(n)?J.z(n,"reason"):n))
+break}A.b0("\u26a0\ufe0f Enr\xf4lement refus\xe9 par le serveur: "+A.i(k.b(n)?J.z(n,"reason"):n))
 q=null
 s=1
 break
@@ -10067,7 +10067,7 @@ break
 case 4:p=3
 g=o.pop()
 l=A.R(g)
-A.b0("\u274c Erreur r\xe9cup\xe9ration enr\xf4lement: "+A.i(l))
+A.b0("\u274c Erreur r\xe9cup\xe9ration enr\xf4lement actif: "+A.i(l))
 q=null
 s=1
 break
@@ -10101,7 +10101,7 @@ break}l=J.lW(m)
 j=A.Y(["id",J.z(l,"id"),"status",J.z(l,"status"),"created_at",J.z(l,"created_at")],i,h)
 q=j
 s=1
-break}A.b0("\u26a0\ufe0f Statut denr\xf4lement refus\xe9 par le serveur : "+A.i(j.b(n)?J.z(n,"reason"):n))
+break}A.b0("\u26a0\ufe0f Statut enr\xf4lement refus\xe9 par le serveur: "+A.i(j.b(n)?J.z(n,"reason"):n))
 q=null
 s=1
 break
@@ -10176,7 +10176,7 @@ m=i
 A.b0("\u2705 "+J.c2(m)+" visage(s) de r\xe9f\xe9rence charg\xe9(s) depuis le serveur")
 q=m
 s=1
-break}A.b0("\u26a0\ufe0f Visages refus\xe9s par le serveur : "+A.i(k.b(n)?J.z(n,"reason"):n))
+break}A.b0("\u26a0\ufe0f Visages refus\xe9s par le serveur: "+A.i(k.b(n)?J.z(n,"reason"):n))
 j=A.b([],t.c)
 q=j
 s=1
