@@ -28,6 +28,50 @@
   -->
 </head>
 <body>
+  <!--
+    ÉCRAN DE CHARGEMENT.
+
+    Il est là parce que le délai entre l'ouverture de la page et le premier
+    pixel Flutter était un écran blanc : main.dart.js pèse 3 Mo, puis Dart
+    ouvre huit boîtes Hive, initialise Supabase et contacte le serveur.
+
+    Pur HTML + CSS, donc painted immédiatement, sans attendre aucun script.
+  -->
+  <div id="encheck-splash">
+    <div class="encheck-splash-marque">EN-CHECK</div>
+    <div class="encheck-splash-anneau"></div>
+    <div class="encheck-splash-texte">Chargement…</div>
+  </div>
+
+  <script>
+    // Retire l'écran de chargement au premier pixel Flutter.
+    //
+    // `flutter-first-frame` est dispatché sur window par le moteur — vérifié
+    // dans build/web/main.dart.js :
+    //     p = q.window
+    //     i = q.document.createEvent("Event")
+    //     i.initEvent("flutter-first-frame", !0, !0)
+    //     p.dispatchEvent(i)
+    //
+    // Le délai de sécurité évite qu'un moteur qui ne démarrerait jamais laisse
+    // l'utilisateur devant un rideau sans issue : au bout de 20 s l'écran se
+    // retire de toute façon.
+    (function () {
+      var splash = document.getElementById('encheck-splash');
+      if (!splash) return;
+
+      var retire = function () {
+        splash.classList.add('encheck-splash-sortie');
+        setTimeout(function () {
+          if (splash && splash.parentNode) splash.parentNode.removeChild(splash);
+        }, 300);
+      };
+
+      window.addEventListener('flutter-first-frame', retire, { once: true });
+      setTimeout(retire, 20000);
+    })();
+  </script>
+
   <!-- Un seul chargement. L'ancien fichier en tentait deux : un injecteur dans
        le <head> appelait document.body.appendChild avant que <body> existe
        (TypeError), puis cette balise chargeait réellement le script. -->
