@@ -2,49 +2,12 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-  <!-- iOS meta tags & icons -->
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black">
-
+  <meta name="mobile-web-app-capable" content="yes">
   <title>En-Check</title>
-
-  <!-- Favicon -->
   <link rel="icon" type="image/png" href="icons/favicon.png">
-
-  <!-- CSS -->
   <link rel="stylesheet" href="styles.css">
-
-  <!-- Supabase Client (OBLIGATOIRE pour Web) -->
   <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
-
-  <!-- WARNING: For iOS < 9, calls to console.log() are not visible through the Web Inspector -->
-  <script src="https://unpkg.com/@dart/debug@0.1.6/debug.js"></script>
-
-  <!-- ⚡ INITIALISATION SUPABASE (À FAIRE AVANT main.dart.js) -->
-  <script>
-    // Initialiser Supabase AVANT que Dart ne démarre
-    const supabaseUrl = 'https://cxggndvhwdolbtyezjde.supabase.co';
-    const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN4Z2duZHZod2RvbGJ0eWV6amRlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU4MzU4NTYsImV4cCI6MjA4MTQxMTg1Nn0.x810lGDB1f3IlMRZBRMro8IGHm8s1Y2saD8ebyX5X2c';
-
-    // Stocker dans window pour que Dart puisse y accéder
-    window.supabaseConfig = {
-      url: supabaseUrl,
-      anonKey: supabaseAnonKey
-    };
-
-    // Initialiser le client Supabase (pour les appels directs depuis JS)
-    supabase = Supabase.createClient(supabaseUrl, supabaseAnonKey);
-  </script>
-
-  <script>
-    var serviceWorkerVersion = null;
-    var script = document.createElement('script');
-    script.src = 'main.dart.js';
-    document.body.appendChild(script);
-  </script>
 </head>
 <body>
 <script src="main.dart.js" type="application/javascript"></script>
