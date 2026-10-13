@@ -9,31 +9,69 @@
 ```
 
 Vercel sert donc **directement le dossier `build/web/` tel qu'il est commité**
-dans le dépôt. Il ne lance pas `flutter build web`.
+dans le dépôt. Il ne lance pas `flutter build web` : `build/web/` contient une
+application **déjà compilée**.
 
-Conséquence à connaître avant de modifier quoi que ce soit côté web :
+### La compilation est désormais automatique
+
+Le fichier `.github/workflows/build-web.yml` fait le travail à votre place :
+
+```
+  vous poussez du code sur la branche main
+              │
+              ▼
+  GitHub Actions installe Flutter et lance « flutter build web »
+              │
+              ▼
+  le dossier build/web régénéré est enregistré dans main
+              │
+              ▼
+  Vercel publie les nouveaux fichiers
+```
+
+Vous n'avez donc **plus rien à compiler ni à recopier à la main**.
 
 | Ce que vous modifiez | Effet sur le site déployé |
 |---|---|
-| `web/index.html`, `web/styles.css`, `web/manifest.json` | **Aucun** — `web/` n'est pas servi |
-| `build/web/index.html`, `build/web/styles.css`, `build/web/manifest.json` | Immédiat au prochain déploiement |
-| n'importe quel fichier `lib/*.dart` | Aucun tant que `flutter build web` n'a pas régénéré `build/web/main.dart.js` |
+| `web/index.html`, `web/styles.css`, `web/manifest.json` | **Automatique** (2 à 5 min) : `flutter build web` recopie ces fichiers dans `build/web/` |
+| n'importe quel fichier `lib/*.dart` | **Automatique** (2 à 5 min) |
+| `build/web/**` directement | ❌ À ne plus faire : écrasé au prochain build |
 
-Les fichiers de `web/` restent la source de vérité : `flutter build web` les
-recopie dans `build/web/`. **Modifiez les deux**, ou modifiez `web/` puis
-relancez un build. Ne modifiez jamais `build/web/` seul, sinon le prochain
-`flutter build web` écrasera le correctif.
+> ⚠️ **Ne modifiez plus jamais `build/web/` à la main.** Ce dossier est
+> fabriqué par la machine ; toute retouche disparaît au passage suivant.
+> Travaillez toujours dans `web/` et `lib/`.
 
-> ⚠️ **Piège** : `.gitignore` contient `build/`, mais les fichiers de
-> `build/web/` sont versionnés parce qu'ils ont été ajoutés avec `git add -f`.
-> Un **nouveau** fichier apparu dans `build/web/` (`styles.css` en faisait
-> partie) reste donc invisible pour Git : `flutter build web` le recopie, Git
-> l'ignore, Vercel ne le reçoit pas. Après tout build, vérifier :
->
-> ```bash
-> git status --short --ignored build/web | grep '^!!'
-> git add -f build/web/<fichier>   # pour tout fichier manquant
-> ```
+### Pourquoi Vercel affiche deux déploiements
+
+Après chaque push, Vercel publie **deux fois**, et c'est normal :
+
+1. **Déploiement n° 1** — immédiatement après votre push. Il publie
+   l'**ancien** `build/web`, car la compilation n'est pas terminée. Le site
+   semble inchangé : c'est attendu, pas un échec.
+2. **Déploiement n° 2** — quelques minutes plus tard, avec le message de
+   commit « `build: régénère build/web après compilation automatique` ».
+   **C'est celui-là qui compte.**
+
+### Si le site ne change pas du tout
+
+1. Onglet **Actions** de GitHub : une croix rouge signale une compilation
+   ratée. Cliquez dessus, puis sur la étape fautive pour lire l'erreur.
+2. Si tout est vert mais que rien ne bouge, c'est le **cache du navigateur** :
+   l'application contient un `flutter_service_worker.js` qui garde l'ancienne
+   version en mémoire. Faites **Ctrl+Maj+R**, ou ouvrez les outils de
+   développement → onglet *Application* → *Service Workers* → **Unregister**,
+   puis rechargez.
+
+### Compiler à la main, en secours
+
+Onglet **Actions** → *Compiler l'application web* → **Run workflow** → bouton
+vert. Utile pour relancer une compilation sans rien pousser.
+
+> **Note technique** : `.gitignore` contient `build/`, or `build/web/` doit
+> être versionné puisque c'est lui que Vercel publie. L'Action utilise donc
+> `git add -f build/web`, ce qui force Git à prendre le dossier malgré
+> `.gitignore`. C'est ce qui évite le piège du fichier oublié (`styles.css`
+> en avait été victime).
 
 ---
 
@@ -105,8 +143,8 @@ réseau. `SupabaseService.messageErreur()` distingue maintenant 42501, clé API
 refusée, RLS et vraie coupure réseau ; `SyncService` n'annonce plus
 « ✅ Données hors-ligne téléchargées avec succès » quand la requête a échoué.
 
-> ⚠️ Ces changements Dart ne sont visibles sur le site qu'après un
-> `flutter build web` suivi d'un commit de `build/web/`.
+> ℹ️ Ces changements Dart apparaissent sur le site après le passage de
+> l'Action de compilation (2 à 5 min), sans intervention de votre part.
 
 ---
 

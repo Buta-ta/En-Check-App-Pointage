@@ -1,0 +1,173 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  COMPILATION AUTOMATIQUE DE L'APPLICATION WEB
+# ═══════════════════════════════════════════════════════════════════════════
+#
+#  LE PROBLÈME QUE CE FICHIER RÉSOUT
+#  ---------------------------------
+#  Vercel ne sait pas compiler du Flutter. Le fichier vercel.json dit
+#  simplement : « publie le dossier build/web ». Or build/web, c'est de
+#  l'appli DÉJÀ COMPILÉE : elle n'existe que si quelqu'un a lancé, sur son
+#  ordinateur, la commande :
+#
+#      flutter build web
+#
+#  Conséquence, avant ce fichier : modifier lib/*.dart (par exemple l'écran
+#  d'historique) ne changeait STRICTEMENT RIEN sur le site en ligne, tant que
+#  personne ne recompilait à la main. C'est exactement pour ça que
+#  l'historique restait vide sur Vercel alors que le code était corrigé.
+#
+#  CE QUE FAIT CE FICHIER
+#  ----------------------
+#  À chaque fois que du code source arrive sur main, un ordinateur prêté par
+#  GitHub :
+#    1. installe Flutter,
+#    2. compile le projet en appli web,
+#    3. dépose le résultat dans build/web et l'enregistre dans main.
+#  Vercel voit alors arriver les nouveaux fichiers et les publie.
+#
+#  Autrement dit : tu pousses ton code, et quelques minutes plus tard le site
+#  est à jour, sans rien faire d'autre.
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+name: Compiler l'application web
+
+on:
+  # Se déclenche dès que du code arrive sur la branche principale.
+  push:
+    branches: [main]
+    paths-ignore:
+      # ── TRÈS IMPORTANT : évite la boucle sans fin ────────────────────────
+      # L'Action elle-même enregistre build/web. Sans cette ligne, son propre
+      # commit la redéclencherait, qui enregistrerait build/web, qui la
+      # redéclencherait… à l'infini.
+      - 'build/web/**'
+      # Un simple changement de texte dans la documentation ne mérite pas
+      # de recompiler toute l'application.
+      - '**.md'
+
+  # Permet de lancer la compilation à la main depuis l'onglet « Actions »,
+  # bouton « Run workflow » — utile pour tester sans rien pousser.
+  workflow_dispatch:
+
+# Si deux compilations se déclenchent en même temps, la seconde attend la fin
+# de la première au lieu de la piétiner (sinon elles se disputeraient le droit
+# d'enregistrer build/web et l'une des deux échouerait).
+concurrency:
+  group: compilation-web
+  cancel-in-progress: false
+
+# Sans cette autorisation, l'Action n'a pas le droit d'écrire dans le dépôt.
+permissions:
+  contents: write
+
+jobs:
+  compiler:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. Récupérer le code ─────────────────────────────────────────────
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+
+      # ── 2. Installer Flutter ─────────────────────────────────────────────
+      # POURQUOI CETTE VERSION PRÉCISE (3.44.9) et pas « la dernière » ?
+      #
+      # Le fichier pubspec.lock verrouille les versions de toutes les
+      # bibliothèques et indique le terrain sur lequel elles ont été choisies :
+      #
+      #     sdks:
+      #       dart: ">=3.12.0 <4.0.0"
+      #       flutter: ">=3.44.0"
+      #
+      # Autrement dit : aucune bibliothèque du projet n'accepte moins que
+      # Flutter 3.44.0. Une version plus récente fonctionnerait sans doute,
+      # mais Flutter casse régulièrement de vieilles façons de coder : une
+      # version trop neuve risque de refuser de compiler une bibliothèque
+      # un peu ancienne (tflite_flutter, mobile_scanner…).
+      #
+      # On prend donc volontairement la DERNIÈRE RÉVISION de la PLUS PETITE
+      # version acceptable : c'est le choix le plus sûr.
+      #
+      # Si un jour la compilation échoue en disant qu'il faut une version plus
+      # récente, il suffit de changer le numéro ci-dessous (par exemple
+      # '3.47.7') et de laisser GitHub recompiler.
+      - name: Installer Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.44.9'
+          # Garde Flutter en mémoire d'une fois sur l'autre : les compilations
+          # suivantes démarrent beaucoup plus vite.
+          cache: true
+
+      - name: Vérifier l'installation
+        run: flutter --version
+
+      # ── 3. Télécharger les bibliothèques ─────────────────────────────────
+      # Les versions sont celles de pubspec.lock : c'est ce qui garantit qu'un
+      # ordinateur inconnu compile exactement la même chose que le tien.
+      - name: Télécharger les bibliothèques
+        run: flutter pub get
+
+      # ── 4. Compiler ─────────────────────────────────────────────────────
+      # On vide d'abord le dossier : l'ancien build contenait des fichiers
+      # inutiles laissés par des essais locaux (.vercel, .DS_Store…).
+      # flutter build web recrée tout proprement.
+      - name: Compiler l'application web
+        run: |
+          rm -rf build/web
+          flutter build web --release
+
+      # ── 5. Enregistrer le résultat ──────────────────────────────────────
+      # Deux lettres à comprendre sur la ligne « git add » :
+      #
+      #   -A  prend TOUT ce qui a changé dans le dossier, y compris les
+      #       fichiers supprimés. Sans lui, un fichier disparu de build/web
+      #       resterait à traîner dans le dépôt pour toujours.
+      #   -f  force git à prendre le dossier malgré .gitignore, qui contient
+      #       « build/ » (règle habituelle des projets Flutter).
+      #
+      # ATTENTION : le message de ce commit ne doit SURTOUT PAS contenir
+      # « [skip ci] ». Vercel ignore volontairement les commits portant cette
+      # mention : le site ne se mettrait jamais à jour.
+      - name: Enregistrer build/web
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add -A -f build/web
+
+          # Si la compilation a produit exactement les mêmes fichiers, il n'y a
+          # rien à enregistrer : on s'arrête proprement au lieu de créer un
+          # commit vide.
+          if git diff --cached --quiet; then
+            echo "build/web est identique à la version déjà en ligne : rien à faire."
+            exit 0
+          fi
+
+          git commit -m "build: régénère build/web après compilation automatique"
+
+          # Au cas où quelqu'un aurait poussé autre chose pendant la
+          # compilation, on se replace à jour avant de pousser.
+          git pull --rebase origin main
+          git push origin HEAD:main
+
+      # ── 6. Compte rendu ─────────────────────────────────────────────────
+      # Affiche le poids des fichiers produits, visible dans l'onglet Actions.
+      # Utile pour repérer le jour où l'application devient trop lourde.
+      - name: Compte rendu
+        run: |
+          echo "### Application compilée" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Poids des principaux fichiers :" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Fichier | Poids |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          for f in build/web/main.dart.js build/web/index.html build/web/flutter_service_worker.js; do
+            if [ -f "$f" ]; then
+              echo "| \`$f\` | $(du -h "$f" | cut -f1) |" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Poids total de build/web : $(du -sh build/web | cut -f1)" >> "$GITHUB_STEP_SUMMARY"
