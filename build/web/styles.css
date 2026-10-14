@@ -6,6 +6,12 @@
         pas par un flash blanc ;
      2. habiller l'écran de chargement de #encheck-splash (index.html), qui
         couvre le délai entre l'ouverture de la page et le premier pixel Flutter.
+
+   Les couleurs viennent de lib/theme/app_theme.dart :
+     #E5D4C0  EnCheckColors.sableClair  (fond des écrans)
+     #3D2B1F  brun principal
+     #8B6914  EnCheckColors.terreChaude
+     #D4AF37  EnCheckColors.sableDore
    ══════════════════════════════════════════════════════════════════════════ */
 
 body, html {
@@ -19,8 +25,8 @@ body, html {
 
 /* ── Écran de chargement ───────────────────────────────────────────────────
    Visible immédiatement, sans attendre ni main.dart.js ni Supabase.
-   #E5D4C0 est EnCheckColors.sableClair, le fond des écrans de l'app
-   (lib/theme/app_theme.dart) : la transition vers Flutter est invisible.
+   Le fond est exactement celui de l'app (#E5D4C0) : la transition vers
+   Flutter est invisible.
    Retiré par index.html dès l'événement `flutter-first-frame`.
    ────────────────────────────────────────────────────────────────────────── */
 #encheck-splash {
@@ -31,34 +37,55 @@ body, html {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 22px;
   background-color: #E5D4C0;
   /* Aucune transition au départ : l'apparition doit être instantanée. */
 }
 
+/* La marque. Le décalage compense l'espace ajouté après la dernière lettre
+   par `letter-spacing`, sinon elle paraît décentrée. */
 #encheck-splash .encheck-splash-marque {
   color: #3D2B1F;
-  font-size: 26px;
+  font-size: 30px;
   font-weight: 700;
-  letter-spacing: 4px;
+  letter-spacing: 6px;
+  text-indent: 6px;
 }
 
-#encheck-splash .encheck-splash-anneau {
-  width: 42px;
-  height: 42px;
-  border: 4px solid rgba(61, 43, 31, 0.18);
-  border-top-color: #8B6914;
-  border-radius: 50%;
-  animation: encheck-splash-rotation 0.9s linear infinite;
+#encheck-splash .encheck-splash-soustitre {
+  margin-top: 6px;
+  color: rgba(61, 43, 31, 0.5);
+  font-size: 13px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  text-indent: 3px;
 }
 
-#encheck-splash .encheck-splash-texte {
-  color: rgba(61, 43, 31, 0.65);
-  font-size: 14px;
+/* La piste (le fond) et la barre (le remplissage) sont deux éléments
+   distincts : seule la largeur de la barre change, ce qui est fluide. */
+#encheck-splash .encheck-splash-piste {
+  margin-top: 34px;
+  width: 220px;
+  height: 6px;
+  border-radius: 999px;
+  background-color: rgba(61, 43, 31, 0.12);
+  overflow: hidden;
 }
 
-@keyframes encheck-splash-rotation {
-  to { transform: rotate(360deg); }
+#encheck-splash .encheck-splash-barre {
+  width: 0%;
+  height: 100%;
+  border-radius: 999px;
+  background-image: linear-gradient(90deg, #8B6914 0%, #D4AF37 100%);
+  /* La largeur est animée par le script, image par image : on ne met donc
+     PAS de transition CSS ici, sinon les deux se combattraient. */
+}
+
+#encheck-splash .encheck-splash-pourcent {
+  margin-top: 12px;
+  color: rgba(61, 43, 31, 0.55);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 1px;
 }
 
 /* État de sortie : fondu, puis retiré du rendu pour ne plus intercepter les
@@ -68,5 +95,11 @@ body, html {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  transition: opacity 0.25s ease-out, visibility 0.25s;
+  transition: opacity 0.45s ease-out, visibility 0.45s;
+}
+
+/* Sur petit écran, on resserre un peu pour que rien ne déborde. */
+@media (max-width: 360px) {
+  #encheck-splash .encheck-splash-piste { width: 170px; }
+  #encheck-splash .encheck-splash-marque { font-size: 24px; }
 }
