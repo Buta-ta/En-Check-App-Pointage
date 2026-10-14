@@ -453,6 +453,11 @@ class SupabaseService {
         'p_attendance_id': attendanceId,
         'p_employee_id': employeeId,
         'p_nouveau_type': nouveauType,
+        // ⭐ Le jeton de session prouve que l'employé s'est bien identifié
+        //    sur cet appareil il y a peu. Le serveur s'en sert comme
+        //    troisième garde-fou (en plus de l'appartenance du pointage et
+        //    du délai de 30 minutes). S'il manque, la fonction ne bloque pas.
+        'p_jeton': TrustedPunchService.jeton,
       });
 
       final brut = reponse is String ? jsonDecode(reponse) : reponse;

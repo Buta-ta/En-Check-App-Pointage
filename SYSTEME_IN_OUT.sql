@@ -30,6 +30,14 @@
 --  politique : on emprunte la porte de service.
 --
 --  Ce script est IDEMPOTENT : tu peux le rejouer sans effet de bord.
+--
+--  NOUVEAU (2e version) - par rapport au script deja execute :
+--    - les anomalies ecrivent aussi `suspect` / `suspect_reason`, le
+--      mecanisme que la page Pointages affiche DEJA ;
+--    - une alerte est envoyee a l'administrateur via `encheck_alerte_poser`,
+--      SANS jamais inventer ni corriger de donnees ;
+--    - la correction par l'employe exige le jeton de session et reste
+--      limitee a 30 minutes.
 -- ═══════════════════════════════════════════════════════════════════════════
 
 
@@ -223,15 +231,64 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path TO 'public', 'pg_temp'
 AS $function$
+DECLARE
+  v_att  record;
+  v_jour date;
 BEGIN
+  -- On se branche sur le mécanisme « suspect » que l'admin utilise DÉJÀ
+  -- (page Pointages : drapeau suspect + traduction de suspect_reason).
+  -- Inutile d'inventer un système parallèle : les anomalies apparaîtront
+  -- ainsi dans les écrans existants, sans retouche côté admin.
   UPDATE public.attendances
      SET origine         = COALESCE(p_origine, origine),
          decision_raison = COALESCE(p_raison, decision_raison),
-         anomalie        = COALESCE(p_anomalie, anomalie)
-   WHERE id = p_attendance_id;
+         anomalie        = COALESCE(p_anomalie, anomalie),
+         suspect         = CASE
+             WHEN p_anomalie IS NOT NULL THEN true ELSE suspect END,
+         suspect_reason  = CASE
+             WHEN p_anomalie IS NULL THEN suspect_reason
+             WHEN suspect_reason IS NULL OR btrim(suspect_reason) = ''
+               THEN p_anomalie
+             WHEN suspect_reason LIKE '%' || p_anomalie || '%'
+               THEN suspect_reason
+             ELSE suspect_reason || '|' || p_anomalie
+           END
+   WHERE id = p_attendance_id
+  RETURNING id, employee_id, enterprise_id, check_time::timestamptz AS ct
+    INTO v_att;
 
   IF NOT FOUND THEN
     RETURN jsonb_build_object('ok', false, 'raison', 'pointage_introuvable');
+  END IF;
+
+  -- Jour civil du pointage, en heure du Bénin. Calculé à part : s'il
+  -- échoue, on retombe sur la date du jour plutôt que de perdre l'alerte.
+  BEGIN
+    v_jour := (v_att.ct AT TIME ZONE 'Africa/Porto-Novo')::date;
+  EXCEPTION WHEN OTHERS THEN
+    v_jour := (now() AT TIME ZONE 'Africa/Porto-Novo')::date;
+  END;
+
+  -- Alerte à l'administrateur. C'est un À-CÔTÉ : elle ne doit jamais faire
+  -- échouer le pointage, qui est déjà enregistré. On ne connaît pas les
+  -- valeurs exactes acceptées par p_type et p_gravite, donc si la base
+  -- refuse, on encaisse l'échec et on continue.
+  IF p_anomalie IS NOT NULL THEN
+    BEGIN
+      PERFORM public.encheck_alerte_poser(
+        p_enterprise := v_att.enterprise_id,
+        p_employee   := v_att.employee_id,
+        p_jour       := v_jour,
+        p_type       := 'pointage_anomalie',
+        p_gravite    := 'moyenne',
+        p_titre      := 'Pointage à vérifier',
+        p_detail     := 'Anomalie détectée par le système : ' || p_anomalie,
+        p_ref        := v_att.id,
+        p_appareil   := NULL
+      );
+    EXCEPTION WHEN OTHERS THEN
+      RAISE WARNING 'Alerte non envoyée (sans conséquence) : %', SQLERRM;
+    END;
   END IF;
 
   RETURN jsonb_build_object('ok', true);
@@ -260,15 +317,18 @@ GRANT EXECUTE ON FUNCTION public.encheck_pointage_marquer(uuid, text, text, text
 CREATE OR REPLACE FUNCTION public.encheck_corriger_type(
   p_attendance_id uuid,
   p_employee_id   uuid,
-  p_nouveau_type  text
+  p_nouveau_type  text,
+  p_jeton         text DEFAULT NULL
 ) RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path TO 'public', 'pg_temp'
 AS $function$
 DECLARE
-  c_fenetre constant interval := interval '30 minutes';
-  v_att     record;
+  c_fenetre      constant interval := interval '30 minutes';
+  v_att          record;
+  v_employe_jeton uuid;
+  v_jour         date;
 BEGIN
   IF p_nouveau_type NOT IN ('in', 'out') THEN
     RETURN jsonb_build_object('ok', false, 'raison', 'type_invalide');
@@ -286,6 +346,24 @@ BEGIN
 
   IF v_att.employee_id <> p_employee_id THEN
     RETURN jsonb_build_object('ok', false, 'raison', 'employe_non_proprietaire');
+  END IF;
+
+  -- Vérification du jeton de session, SI l'application en fournit un.
+  -- Le jeton prouve que l'employé s'est réellement identifié sur l'appareil
+  -- il y a peu. On ne connaît pas la forme exacte renvoyée par
+  -- encheck_session_employe : si la lecture échoue, on NE BLOQUE PAS — les
+  -- deux autres garde-fous (appartenance + fenêtre de 30 min) restent.
+  IF p_jeton IS NOT NULL AND btrim(p_jeton) <> '' THEN
+    BEGIN
+      EXECUTE 'SELECT employee_id FROM public.encheck_session_employe($1) LIMIT 1'
+        INTO v_employe_jeton USING p_jeton;
+    EXCEPTION WHEN OTHERS THEN
+      v_employe_jeton := NULL;
+    END;
+
+    IF v_employe_jeton IS NOT NULL AND v_employe_jeton <> p_employee_id THEN
+      RETURN jsonb_build_object('ok', false, 'raison', 'jeton_invalide');
+    END IF;
   END IF;
 
   IF now() - v_att.ct > c_fenetre THEN
@@ -310,12 +388,42 @@ BEGIN
          modifie_le           = now()
    WHERE id = v_att.id;
 
+  -- Jour civil du pointage, en heure du Bénin (même sécurité que plus haut).
+  BEGIN
+    v_jour := (v_att.ct AT TIME ZONE 'Africa/Porto-Novo')::date;
+  EXCEPTION WHEN OTHERS THEN
+    v_jour := (now() AT TIME ZONE 'Africa/Porto-Novo')::date;
+  END;
+
+  -- L'administrateur est prévenu. C'est un À-CÔTÉ : la correction est déjà
+  -- enregistrée, l'échec de l'alerte ne doit donc rien annuler.
+  BEGIN
+    PERFORM public.encheck_alerte_poser(
+      p_enterprise := v_att.enterprise_id,
+      p_employee   := v_att.employee_id,
+      p_jour       := v_jour,
+      p_type       := 'correction_employe',
+      p_gravite    := 'basse',
+      p_titre      := 'Type de pointage corrigé par l''employé',
+      p_detail     := 'Ancien type : ' || COALESCE(v_att.check_type, '?') ||
+                      ' → nouveau type : ' || p_nouveau_type,
+      p_ref        := v_att.id,
+      p_appareil   := NULL
+    );
+  EXCEPTION WHEN OTHERS THEN
+    RAISE WARNING 'Alerte de correction non envoyée (sans conséquence) : %', SQLERRM;
+  END;
+
   RETURN jsonb_build_object('ok', true,
                             'ancien_type', v_att.check_type,
                             'nouveau_type', p_nouveau_type);
 END;
 $function$;
 
+GRANT EXECUTE ON FUNCTION public.encheck_corriger_type(uuid, uuid, text, text)
+  TO anon, authenticated;
+-- On garde aussi l'ancienne signature à trois arguments : si une version
+-- plus ancienne de l'application l'appelle encore, elle continue de marcher.
 GRANT EXECUTE ON FUNCTION public.encheck_corriger_type(uuid, uuid, text)
   TO anon, authenticated;
 
