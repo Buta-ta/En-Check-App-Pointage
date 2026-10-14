@@ -993,6 +993,192 @@ class _PointageScreenState extends State<PointageScreen> {
   }
 
   // ═══════════════════════════════════════════════════════════
+  // 🧠 DÉCISION ENTRÉE / SORTIE — LES DIALOGUES
+  // ═══════════════════════════════════════════════════════════
+
+  /// Demande à l'employé s'il arrive ou s'il part.
+  ///
+  /// On n'y vient que quand le système doute vraiment — typiquement une
+  /// entrée vieille de plus de 12 h, donc une sortie vraisemblablement
+  /// oubliée. Le type proposé est mis en avant, mais l'employé tranche.
+  ///
+  /// Renvoie `null` si l'employé renonce : dans ce cas RIEN n'est enregistré.
+  Future<String?> _demanderTypePointage(
+      String typePropose, String? anomalie) async {
+    final estEntree = typePropose == 'in';
+
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(context).cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.help_outline, color: EnCheckColors.terreChaude),
+            SizedBox(width: 10),
+            Text('Vous arrivez ou\nvous partez ?',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w300)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              "L'application n'arrive pas à le déterminer avec certitude.",
+              style: TextStyle(color: EnCheckColors.gris, fontSize: 13),
+            ),
+            if (anomalie == 'sortie_oubliee') ...[
+              const SizedBox(height: 12),
+              const Text(
+                "Votre dernière entrée remonte à plus de 12 heures : une "
+                "sortie a probablement été oubliée.",
+                style: TextStyle(
+                    color: EnCheckColors.terreChaude,
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold),
+              ),
+            ],
+            const SizedBox(height: 12),
+            Text(
+              estEntree
+                  ? "Ce pointage sera une ARRIVÉE."
+                  : "Ce pointage sera un DÉPART.",
+              style: TextStyle(
+                fontSize: 13,
+                color: Theme.of(context).textTheme.bodyLarge?.color,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('ANNULER',
+                style: TextStyle(color: EnCheckColors.gris)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: EnCheckColors.terreChaude,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: () => Navigator.pop(ctx, 'out'),
+            child: const Text('JE PARS'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: EnCheckColors.succes,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: () => Navigator.pop(ctx, 'in'),
+            child: const Text("J'ARRIVE"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Propose à l'employé de corriger le type de son dernier pointage.
+  ///
+  /// La base garde trois garde-fous : le pointage doit exister, appartenir à
+  /// l'employé, et dater de moins de 30 minutes. Chaque correction est
+  /// enregistrée dans `attendance_corrections` et lève le drapeau
+  /// `modifie_par_employe` : l'administrateur la voit dans la page Pointages.
+  Future<void> _demanderCorrectionType(
+      String attendanceId,
+      Map<String, dynamic> employee,
+      String typeActuel,
+      ) async {
+    final nouveauType = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(context).cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Corriger le type',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w300)),
+        content: Text(
+          "Enregistré en ${typeActuel == 'in' ? 'ARRIVÉE' : 'DÉPART'}. "
+          "Que fallait-il enregistrer ?\n\n"
+          "Votre administrateur sera prévenu de la modification.",
+          style: TextStyle(color: EnCheckColors.gris, fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('ANNULER',
+                style: TextStyle(color: EnCheckColors.gris)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: EnCheckColors.terreChaude,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(ctx, 'out'),
+            child: const Text('DÉPART'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: EnCheckColors.succes,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(ctx, 'in'),
+            child: const Text('ARRIVÉE'),
+          ),
+        ],
+      ),
+    );
+
+    if (nouveauType == null || nouveauType == typeActuel) return;
+
+    final resultat = await SupabaseService.corrigerType(
+      attendanceId: attendanceId,
+      employeeId: employee['id'],
+      nouveauType: nouveauType,
+    );
+
+    if (!mounted) return;
+
+    final ok = resultat?['ok'] == true;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(context).cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Icon(ok ? Icons.check_circle : Icons.error_outline,
+                color: ok ? EnCheckColors.succes : EnCheckColors.erreur),
+            const SizedBox(width: 10),
+            Text(ok ? 'Corrigé' : 'Impossible',
+                style:
+                    const TextStyle(fontSize: 18, fontWeight: FontWeight.w300)),
+          ],
+        ),
+        content: Text(
+          ok
+              ? "Enregistré en ${nouveauType == 'in' ? 'ARRIVÉE' : 'DÉPART'}."
+              : (resultat?['message'] as String?) ??
+                  "La correction n'a pas pu être appliquée. Passez par un "
+                      "administrateur.",
+          style: TextStyle(color: EnCheckColors.gris, fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('OK',
+                style: TextStyle(color: EnCheckColors.terreChaude)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
   // 🖥️ BUILD
   // ═══════════════════════════════════════════════════════════
 
@@ -2916,6 +3102,33 @@ class _PointageScreenState extends State<PointageScreen> {
         if (dernierPointage?['check_type'] == 'in') typePointage = 'out';
       } catch (_) {}
 
+      // ── LE CERVEAU : la base affine la décision ─────────────────────
+      // La bascule locale ne regarde que le DERNIER pointage. La base, elle,
+      // en connaît l'ancienneté : elle peut donc repérer une sortie oubliée
+      // et remettre la séquence d'aplomb, au lieu de l'inverser pour de bon.
+      String confiance = 'haute';
+      String origineDecision = 'bascule_locale';
+      String? anomalie;
+
+      if (ConnectivityService.isOnline) {
+        final suggestion = await SupabaseService.typeSuggere(employee['id']);
+        if (suggestion != null && suggestion['ok'] == true) {
+          typePointage = (suggestion['type'] as String?) ?? typePointage;
+          confiance = (suggestion['confiance'] as String?) ?? 'haute';
+          origineDecision = (suggestion['raison'] as String?) ?? 'serveur';
+          anomalie = suggestion['anomalie'] as String?;
+        }
+      }
+
+      // Le système doute vraiment (par exemple une entrée vieille de plus de
+      // 12 h) : plutôt que de deviner, on laisse l'employé trancher.
+      if (confiance == 'basse') {
+        final choix = await _demanderTypePointage(typePointage, anomalie);
+        if (choix == null) return;   // annulé : RIEN n'est enregistré
+        typePointage = choix;
+        origineDecision = 'manuel_employe';
+      }
+
       bool success;
       String? pointageId;
 
@@ -2956,11 +3169,26 @@ class _PointageScreenState extends State<PointageScreen> {
       }
 
       if (success) {
-        if (!estHorsLigne) SyncService.synchroniserPointages();
+        if (!estHorsLigne) {
+          SyncService.synchroniserPointages();
+
+          // Traçabilité : on inscrit comment le type a été décidé, pour que
+          // l'admin puisse retrouver les cas douteux. Sans conséquence si la
+          // base refuse : le pointage, lui, est déjà enregistré.
+          if (pointageId != null) {
+            await SupabaseService.marquerPointage(
+              attendanceId: pointageId,
+              origine: origineDecision == 'manuel_employe' ? 'manuel' : 'auto',
+              raison: origineDecision,
+              anomalie: anomalie,
+            );
+          }
+        }
         await _compterPointagesEnAttente();
         if (mounted) {
           _afficherSucces(employee['first_name'], employee['last_name'],
-              typePointage, estHorsLigne, employee, photoBytes);
+              typePointage, estHorsLigne, employee, photoBytes,
+              attendanceId: estHorsLigne ? null : pointageId);
         }
       } else {
         if (mounted) _afficherErreur('Erreur lors de l\'enregistrement');
@@ -3085,8 +3313,12 @@ class _PointageScreenState extends State<PointageScreen> {
       String type,
       bool horsLigne,
       Map<String, dynamic> employee,
-      Uint8List? photoBytes,
-      ) {
+      Uint8List? photoBytes, {
+        /// Identifiant du pointage côté serveur. Sans lui, aucune correction
+        /// n'est proposée (cas du hors-ligne : le pointage n'existe pas encore
+        /// sur le serveur, il attend dans la file d'attente locale).
+        String? attendanceId,
+      }) {
     final estEntree = type == 'in';
     final horaires = _getEmployeeScheduleInfo();
 
@@ -3253,6 +3485,17 @@ class _PointageScreenState extends State<PointageScreen> {
           ),
         ),
         actions: [
+          // L'employé peut corriger son propre type. La base limite la
+          // fenêtre à 30 minutes et garde la trace : l'admin verra dans la
+          // page Pointages que ce pointage a été modifié.
+          if (attendanceId != null)
+            TextButton(
+              onPressed: () => _demanderCorrectionType(
+                  attendanceId, employee, type),
+              child: const Text('CORRIGER',
+                  style: TextStyle(
+                      color: EnCheckColors.terreChaude, letterSpacing: 2)),
+            ),
           TextButton(
             onPressed: () {
               Navigator.pop(context);

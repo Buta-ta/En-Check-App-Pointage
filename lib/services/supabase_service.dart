@@ -379,6 +379,92 @@ class SupabaseService {
   }
 
   // ═══════════════════════════════════════════════════════════
+  // 🧠 DÉCISION ENTRÉE / SORTIE
+  // ═══════════════════════════════════════════════════════════
+  //
+  // Ces trois fonctions parlent au « cerveau » installé dans la base par le
+  // script SYSTEME_IN_OUT.sql. Leur point commun : aucune n'est indispensable.
+  // Si elles échouent ou si les fonctions n'existent pas sur un projet plus
+  // ancien, l'application retombe sur son comportement d'avant. Rien ne casse
+  // jamais à cause d'elles.
+
+  /// Demande à la base quel type de pointage enregistrer.
+  ///
+  /// La réponse contient :
+  ///   - `type`      : 'in' ou 'out'
+  ///   - `confiance` : 'haute', 'moyenne' ou 'basse'
+  ///   - `raison`    : la règle qui a décidé
+  ///   - `anomalie`  : 'sortie_oubliee', 'presence_courte' ou null
+  ///
+  /// `null` est renvoyé en cas d'échec : l'appelant applique alors la bascule
+  /// locale, comme avant.
+  static Future<Map<String, dynamic>?> typeSuggere(String employeeId) async {
+    try {
+      final reponse = await client
+          .rpc('encheck_type_suggere', params: {'p_employee_id': employeeId});
+
+      final brut = reponse is String ? jsonDecode(reponse) : reponse;
+      if (brut is Map) return Map<String, dynamic>.from(brut);
+      return null;
+    } catch (e) {
+      print('Suggestion de type indisponible : $e');
+      return null;
+    }
+  }
+
+  /// Inscrit, sur un pointage déjà enregistré, comment la décision a été prise.
+  ///
+  /// Purement informatif : c'est ce qui permet à l'admin de retrouver les
+  /// pointages décidés dans le doute. Un échec est sans conséquence — le
+  /// pointage, lui, est déjà enregistré.
+  static Future<void> marquerPointage({
+    required String attendanceId,
+    required String origine,
+    String? raison,
+    String? anomalie,
+  }) async {
+    try {
+      await client.rpc('encheck_pointage_marquer', params: {
+        'p_attendance_id': attendanceId,
+        'p_origine': origine,
+        'p_raison': raison,
+        'p_anomalie': anomalie,
+      });
+    } catch (e) {
+      print('Marquage du pointage impossible (sans conséquence) : $e');
+    }
+  }
+
+  /// Corrige le type d'un pointage que l'employé vient d'enregistrer.
+  ///
+  /// La base garde trois garde-fous : le pointage doit exister, appartenir à
+  /// l'employé, et dater de moins de 30 minutes. Au-delà, la correction passe
+  /// par un administrateur.
+  ///
+  /// Chaque correction est inscrite dans `attendance_corrections` et lève le
+  /// drapeau `modifie_par_employe` : l'admin la voit dans la page Pointages.
+  static Future<Map<String, dynamic>?> corrigerType({
+    required String attendanceId,
+    required String employeeId,
+    required String nouveauType,
+  }) async {
+    try {
+      final reponse = await client.rpc('encheck_corriger_type', params: {
+        'p_attendance_id': attendanceId,
+        'p_employee_id': employeeId,
+        'p_nouveau_type': nouveauType,
+      });
+
+      final brut = reponse is String ? jsonDecode(reponse) : reponse;
+      if (brut is Map) return Map<String, dynamic>.from(brut);
+      return null;
+    } catch (e) {
+      print('Correction du type impossible : $e');
+      return null;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
   // 🤖 RECONNAISSANCE FACIALE — ENRÔLEMENT
   // ═══════════════════════════════════════════════════════════
   static Future<Map<String, dynamic>?> creerEnrolement({
