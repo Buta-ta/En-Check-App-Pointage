@@ -18,11 +18,6 @@
 
   <!--
     AUCUNE initialisation Supabase ici, et volontairement.
-
-    Le bundle UMD supabase-js expose le global `supabase` (minuscules), pas
-    `Supabase` : l'ancien appel `Supabase.createClient(...)` levait donc
-    « ReferenceError: Supabase is not defined ». Et ce client JS n'était lu par
-    personne — `supabaseConfig` apparaît 0 fois dans build/web/main.dart.js.
     Le client Supabase est construit côté Dart, dans
     lib/services/supabase_service.dart. Une seule copie des clés, pas deux.
   -->
@@ -33,48 +28,116 @@
 
     Il est là parce que le délai entre l'ouverture de la page et le premier
     pixel Flutter était un écran blanc : main.dart.js pèse 3 Mo, puis Dart
-    ouvre huit boîtes Hive, initialise Supabase et contacte le serveur.
+    ouvre plusieurs boîtes Hive, initialise Supabase et contacte le serveur.
 
-    Pur HTML + CSS, donc painted immédiatement, sans attendre aucun script.
+    Pur HTML + CSS, donc peint immédiatement, sans attendre aucun script.
+
+    La barre de progression n'est PAS une fausse animation : chaque palier
+    correspond à un événement réel du navigateur.
   -->
   <div id="encheck-splash">
     <div class="encheck-splash-marque">EN-CHECK</div>
-    <div class="encheck-splash-anneau"></div>
-    <div class="encheck-splash-texte">Chargement…</div>
+    <div class="encheck-splash-soustitre">Pointage</div>
+
+    <div class="encheck-splash-piste">
+      <div class="encheck-splash-barre" id="encheck-splash-barre"></div>
+    </div>
+
+    <div class="encheck-splash-pourcent" id="encheck-splash-pourcent">0 %</div>
   </div>
 
   <script>
-    // Retire l'écran de chargement au premier pixel Flutter.
-    //
-    // `flutter-first-frame` est dispatché sur window par le moteur — vérifié
-    // dans build/web/main.dart.js :
-    //     p = q.window
-    //     i = q.document.createEvent("Event")
-    //     i.initEvent("flutter-first-frame", !0, !0)
-    //     p.dispatchEvent(i)
-    //
-    // Le délai de sécurité évite qu'un moteur qui ne démarrerait jamais laisse
-    // l'utilisateur devant un rideau sans issue : au bout de 20 s l'écran se
-    // retire de toute façon.
+    /*
+      PILOTAGE DE LA BARRE DE PROGRESSION
+      ---------------------------------------------------------------
+      Quatre paliers, tous déclenchés par un événement RÉEL :
+
+        10 %  page ouverte, le HTML est là
+        40 %  DOMContentLoaded : la page est entièrement analysée
+        80 %  window load      : main.dart.js (3 Mo) est téléchargé
+       100 %  flutter-first-frame : Flutter a peint son premier pixel
+
+      Entre deux paliers, la barre continue d'avancer très lentement
+      (elle n'avance JAMAIS au-delà du palier suivant, donc elle ne ment
+      pas sur ce qui est réellement terminé) : c'est ce qui évite
+      l'impression de blocage sur une connexion lente.
+    */
     (function () {
       var splash = document.getElementById('encheck-splash');
       if (!splash) return;
 
-      var retire = function () {
-        splash.classList.add('encheck-splash-sortie');
-        setTimeout(function () {
-          if (splash && splash.parentNode) splash.parentNode.removeChild(splash);
-        }, 300);
-      };
+      var barre  = document.getElementById('encheck-splash-barre');
+      var texte  = document.getElementById('encheck-splash-pourcent');
 
-      window.addEventListener('flutter-first-frame', retire, { once: true });
-      setTimeout(retire, 20000);
+      var cible = 10;      // palier atteint
+      var affiche = 0;     // valeur réellement peinte (suit `cible`)
+      var fini = false;    // Flutter a-t-il peint ?
+      var retire = false;  // écran déjà retiré ?
+
+      function peindre() {
+        if (barre) barre.style.width = affiche.toFixed(1) + '%';
+        if (texte) texte.textContent = Math.floor(affiche) + ' %';
+      }
+
+      function avance() {
+        // Plafond : le palier suivant, ou 100 % quand Flutter a fini.
+        var plafond = fini ? 100 : Math.min(cible + 8, 96);
+
+        if (affiche < cible) {
+          // Rattrapage rapide du palier.
+          affiche += Math.max((cible - affiche) * 0.12, 0.2);
+        } else if (affiche < plafond) {
+          // Frémissement : montre que l'application travaille toujours.
+          affiche += 0.06;
+        }
+
+        if (affiche > plafond) affiche = plafond;
+        peindre();
+
+        if (!fini) window.requestAnimationFrame(avance);
+      }
+
+      function versPalier(valeur) {
+        if (valeur > cible) cible = valeur;
+      }
+
+      function masquer() {
+        if (retire) return;
+        retire = true;
+        fini = true;
+        splash.classList.add('encheck-splash-sortie');
+        window.setTimeout(function () {
+          if (splash && splash.parentNode) splash.parentNode.removeChild(splash);
+        }, 500);
+      }
+
+      peindre();
+      window.requestAnimationFrame(avance);
+
+      document.addEventListener('DOMContentLoaded', function () {
+        versPalier(40);
+      });
+
+      window.addEventListener('load', function () {
+        versPalier(80);
+      });
+
+      // `flutter-first-frame` est dispatché sur window par le moteur Flutter
+      // dès qu'il a peint quelque chose. On laisse la barre finir sa course
+      // (700 ms) plutôt que de couper brutalement : c'est plus agréable.
+      window.addEventListener('flutter-first-frame', function () {
+        versPalier(100);
+        fini = true;
+        window.setTimeout(masquer, 700);
+      }, { once: true });
+
+      // Filet de sécurité : si le moteur ne démarrait jamais (réseau coupé,
+      // fichier corrompu), l'utilisateur ne reste pas devant un rideau.
+      window.setTimeout(masquer, 20000);
     })();
   </script>
 
-  <!-- Un seul chargement. L'ancien fichier en tentait deux : un injecteur dans
-       le <head> appelait document.body.appendChild avant que <body> existe
-       (TypeError), puis cette balise chargeait réellement le script. -->
+  <!-- Un seul chargement de l'application. -->
   <script src="main.dart.js" type="application/javascript"></script>
 </body>
 </html>

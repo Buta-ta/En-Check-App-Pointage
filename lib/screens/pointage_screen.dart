@@ -2171,26 +2171,255 @@ class _PointageScreenState extends State<PointageScreen> {
             ),
           ],
         ),
-        GestureDetector(
-          onTap: () => themeService.toggleTheme(),
-          child: Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: Theme.of(context).cardColor,
-              borderRadius: BorderRadius.circular(10),
-              boxShadow: [
-                BoxShadow(
-                    color: Colors.black.withOpacity(0.1), blurRadius: 5),
-              ],
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _buildBoutonMaJournee(),
+            const SizedBox(width: 10),
+            GestureDetector(
+              onTap: () => themeService.toggleTheme(),
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).cardColor,
+                  borderRadius: BorderRadius.circular(10),
+                  boxShadow: [
+                    BoxShadow(
+                        color: Colors.black.withOpacity(0.1), blurRadius: 5),
+                  ],
+                ),
+                child: Icon(
+                  themeService.isDarkMode ? Icons.light_mode : Icons.dark_mode,
+                  color: EnCheckColors.terreChaude,
+                  size: 20,
+                ),
+              ),
             ),
-            child: Icon(
-              themeService.isDarkMode ? Icons.light_mode : Icons.dark_mode,
-              color: EnCheckColors.terreChaude,
-              size: 20,
-            ),
-          ),
+          ],
         ),
       ],
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // 📅 « MA JOURNÉE » — CONSULTER SANS POINTER
+  // ═══════════════════════════════════════════════════════════
+
+  /// Bouton d'accès à l'historique de la journée.
+  ///
+  /// LE PROBLÈME QU'IL RÈSOUT : avant, le bouton HISTORIQUE n'existait que
+  /// dans la fenêtre de confirmation affichée APRÈS un pointage réussi. Un
+  /// employé qui voulait simplement vérifier sa journée devait donc d'abord
+  /// pointer — et ce pointage, justement, venait fausser la journée qu'il
+  /// voulait consulter.
+  ///
+  /// Ce bouton demande le matricule et le PIN, puis ouvre l'historique sans
+  /// rien enregistrer.
+  Widget _buildBoutonMaJournee() {
+    return GestureDetector(
+      onTap: _ouvrirHistoriqueJournee,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: EnCheckColors.terreChaude,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.today_outlined, color: EnCheckColors.blanc, size: 16),
+            SizedBox(width: 6),
+            Text(
+              'Ma journée',
+              style: TextStyle(
+                color: EnCheckColors.blanc,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Demande matricule + PIN, vérifie l'employé, puis ouvre l'historique.
+  ///
+  /// Aucun pointage n'est créé : c'est toute la différence avec
+  /// _identifierEtEnroler, qui enchaîne l'identification et le pointage.
+  Future<void> _ouvrirHistoriqueJournee() async {
+    if (entrepriseSelectionnee == null) {
+      _afficherErreur('Aucune entreprise sélectionnée.');
+      return;
+    }
+
+    final matriculeController = TextEditingController();
+    final pinController = TextEditingController();
+    bool afficherPinLocal = false;
+    bool verificationEnCours = false;
+    String? messageErreur;
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) => AlertDialog(
+          backgroundColor: Theme.of(context).cardColor,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Row(
+            children: [
+              const Icon(Icons.today_outlined,
+                  color: EnCheckColors.terreChaude),
+              const SizedBox(width: 10),
+              Text(
+                'MA JOURNÉE',
+                style: TextStyle(
+                  letterSpacing: 2,
+                  fontWeight: FontWeight.w300,
+                  color: Theme.of(context).textTheme.bodyLarge?.color,
+                ),
+              ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Saisissez votre matricule et votre PIN pour consulter vos '
+                  'pointages du jour. Aucun pointage ne sera enregistré.',
+                  style: TextStyle(color: EnCheckColors.gris, fontSize: 13),
+                ),
+                const SizedBox(height: 20),
+                TextField(
+                  controller: matriculeController,
+                  keyboardType: TextInputType.number,
+                  enabled: !verificationEnCours,
+                  decoration: InputDecoration(
+                    labelText: 'Matricule',
+                    prefixText:
+                        '${entrepriseSelectionnee!['matricule_prefix'] ?? ''}-',
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+                if (afficherPinLocal) ...[
+                  const SizedBox(height: 15),
+                  TextField(
+                    controller: pinController,
+                    obscureText: true,
+                    keyboardType: TextInputType.number,
+                    enabled: !verificationEnCours,
+                    decoration: InputDecoration(
+                      labelText: 'PIN',
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                ],
+                if (messageErreur != null) ...[
+                  const SizedBox(height: 15),
+                  Text(
+                    messageErreur!,
+                    style: const TextStyle(
+                        color: EnCheckColors.erreur, fontSize: 13),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: verificationEnCours ? null : () => Navigator.pop(ctx),
+              child: Text(
+                'ANNULER',
+                style: TextStyle(
+                    color: Theme.of(context).textTheme.bodyLarge?.color),
+              ),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: EnCheckColors.terreChaude,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+              ),
+              onPressed: verificationEnCours
+                  ? null
+                  : () async {
+                      if (!afficherPinLocal) {
+                        if (matriculeController.text.trim().isEmpty) return;
+                        setModalState(() => afficherPinLocal = true);
+                        return;
+                      }
+
+                      if (pinController.text.length < 4) {
+                        setModalState(() => messageErreur =
+                            'Le PIN doit contenir au moins 4 chiffres.');
+                        return;
+                      }
+
+                      setModalState(() {
+                        verificationEnCours = true;
+                        messageErreur = null;
+                      });
+
+                      final matriculeComplet =
+                          '${entrepriseSelectionnee!['matricule_prefix']}-'
+                          '${matriculeController.text.trim()}';
+
+                      try {
+                        // Même logique que _identifierEtEnroler : on lit le
+                        // cache local quand la connexion manque.
+                        final employee = ConnectivityService.isOnline
+                            ? await SupabaseService.verifierEmployee(
+                                entrepriseSelectionnee!['id'],
+                                matriculeComplet,
+                                pinController.text,
+                              )
+                            : await LocalDatabase.verifierEmployeeCache(
+                                entrepriseSelectionnee!['id'],
+                                matriculeComplet,
+                                pinController.text,
+                              );
+
+                        if (!mounted) return;
+
+                        if (employee == null) {
+                          setModalState(() {
+                            verificationEnCours = false;
+                            messageErreur = 'Matricule ou PIN incorrect.';
+                          });
+                          return;
+                        }
+
+                        Navigator.pop(ctx);
+                        await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => HistoriqueScreen(employee: employee),
+                          ),
+                        );
+                      } catch (e) {
+                        setModalState(() {
+                          verificationEnCours = false;
+                          messageErreur = 'Vérification impossible : $e';
+                        });
+                      }
+                    },
+              child: verificationEnCours
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white),
+                    )
+                  : Text(afficherPinLocal ? 'CONSULTER' : 'SUIVANT'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

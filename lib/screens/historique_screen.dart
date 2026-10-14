@@ -24,6 +24,24 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
   /// perdue alors que le serveur refusait simplement la lecture.
   String? erreur;
 
+  /// Les pointages de la journée EN COURS, du plus ancien au plus récent.
+  ///
+  /// Le découpage se fait sur minuit LOCAL (HeurePointage), pas sur minuit
+  /// UTC : sans cette précaution, un pointage de 00:30 à Cotonou serait
+  /// rangé dans la veille et la journée paraîtrait vide.
+  List<Map<String, dynamic>> get _pointagesDuJour {
+    final aujourdhui = HeurePointage.jourDePointage(
+      {'check_time': DateTime.now().toIso8601String()},
+    );
+
+    final duJour = pointages
+        .where((p) => HeurePointage.jourDePointage(p) == aujourdhui)
+        .toList()
+      ..sort(HeurePointage.parInstantCroissant);
+
+    return duJour;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -289,6 +307,14 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
 
           const SizedBox(height: 20),
 
+          // Le résumé du jour, ce que l'employé vient chercher en premier.
+          // Masqué pendant le chargement et quand la liste est vide : l'écran
+          // « Aucun pointage » le dit déjà.
+          if (!chargement && pointages.isNotEmpty) ...[
+            _construireResumeJour(),
+            const SizedBox(height: 16),
+          ],
+
           Expanded(
             child:
             chargement
@@ -301,6 +327,110 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
                 ? _construireVide()
                 : _construireListe(),
           ),
+        ],
+      ),
+    );
+  }
+
+  /// Le résumé de la journée en cours, en haut de l'écran.
+  ///
+  /// Pourquoi l'ajouter alors que la liste en dessous regroupe déjà les
+  /// pointages par jour ? Parce que l'employé qui consulte « Ma journée »
+  /// veut une réponse immédiate (« suis-je pointé ? à quelle heure ? »),
+  /// pas une liste à faire défiler.
+  Widget _construireResumeJour() {
+    final duJour = _pointagesDuJour;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 20),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: EnCheckColors.terreChaude.withOpacity(0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.today_outlined,
+                  color: EnCheckColors.terreChaude, size: 18),
+              const SizedBox(width: 8),
+              const Text(
+                "AUJOURD'HUI",
+                style: TextStyle(
+                  letterSpacing: 2,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13,
+                  color: EnCheckColors.terreChaude,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                '${duJour.length} pointage${duJour.length > 1 ? 's' : ''}',
+                style: const TextStyle(fontSize: 12, color: EnCheckColors.gris),
+              ),
+            ],
+          ),
+
+          if (duJour.isEmpty) ...[
+            const SizedBox(height: 10),
+            const Text(
+              "Aucun pointage enregistré aujourd'hui.",
+              style: TextStyle(color: EnCheckColors.gris, fontSize: 13),
+            ),
+          ] else ...[
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 10,
+              runSpacing: 8,
+              children: duJour.map((pointage) {
+                final estEntree = pointage['check_type'] == 'in';
+                final couleur =
+                    estEntree ? EnCheckColors.succes : EnCheckColors.terreChaude;
+                // « HH:MM:SS » → « HH:MM » : la seconde n'intéresse pas
+                // l'employé qui consulte sa journée.
+                final heure = HeurePointage.heureDePointage(pointage);
+                final heureCourte =
+                    heure.length >= 5 ? heure.substring(0, 5) : heure;
+
+                return Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: couleur.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        estEntree ? Icons.login : Icons.logout,
+                        size: 14,
+                        color: couleur,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        heureCourte,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                          color: Theme.of(context).textTheme.bodyLarge?.color,
+                        ),
+                      ),
+                      const SizedBox(width: 5),
+                      Text(
+                        estEntree ? 'Entrée' : 'Sortie',
+                        style: const TextStyle(
+                            fontSize: 11, color: EnCheckColors.gris),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+            ),
+          ],
         ],
       ),
     );

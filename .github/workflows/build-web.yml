@@ -13,17 +13,14 @@
 #
 #  Conséquence, avant ce fichier : modifier lib/*.dart (par exemple l'écran
 #  d'historique) ne changeait STRICTEMENT RIEN sur le site en ligne, tant que
-#  personne ne recompilait à la main. C'est exactement pour ça que
-#  l'historique restait vide sur Vercel alors que le code était corrigé.
+#  personne ne recompilait à la main.
 #
 #  CE QUE FAIT CE FICHIER
 #  ----------------------
-#  À chaque fois que du code source arrive sur main, un ordinateur prêté par
-#  GitHub :
-#    1. installe Flutter,
-#    2. compile le projet en appli web,
-#    3. dépose le résultat dans build/web et l'enregistre dans main.
-#  Vercel voit alors arriver les nouveaux fichiers et les publie.
+#  • sur une Pull Request : compile, et signale par une croix rouge si le
+#    code ne compile pas. Rien n'est publié — c'est un contrôle.
+#  • sur la branche principale : compile ET enregistre le résultat dans
+#    build/web. Vercel voit alors arriver les nouveaux fichiers et les publie.
 #
 #  Autrement dit : tu pousses ton code, et quelques minutes plus tard le site
 #  est à jour, sans rien faire d'autre.
@@ -44,6 +41,16 @@ on:
       - 'build/web/**'
       # Un simple changement de texte dans la documentation ne mérite pas
       # de recompiler toute l'application.
+      - '**.md'
+
+  # Se déclenche AUSSI sur les Pull Requests, mais cette fois pour VÉRIFIER
+  # UNIQUEMENT : la compilation tourne, et une croix rouge apparaît si le
+  # code ne compile pas — sans rien publier. C'est le garde-fou qui évite
+  # de fusionner du code cassé dans main.
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - 'build/web/**'
       - '**.md'
 
   # Permet de lancer la compilation à la main depuis l'onglet « Actions »,
@@ -132,6 +139,9 @@ jobs:
       # « [skip ci] ». Vercel ignore volontairement les commits portant cette
       # mention : le site ne se mettrait jamais à jour.
       - name: Enregistrer build/web
+        # Sur une Pull Request, on s'arrête avant : la compilation a servi de
+        # contrôle, on ne publie rien. Seul un vrai push sur main publie.
+        if: github.event_name == 'push'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
