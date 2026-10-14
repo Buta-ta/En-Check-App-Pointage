@@ -175,3 +175,62 @@ et à chaque synchronisation. Avec un GRANT en place, ce parcours s'exécutera
 pour de vrai : le volume croît avec le nombre d'entreprises du projet, pas avec
 celles de l'appareil. Un appareil configuré pour `PHAR050` n'a besoin que de
 `PHAR050`. À revoir quand le parc d'entreprises grandira.
+
+---
+
+## L'historique de pointage vide (résolu le 14/10/2026)
+
+### Symptôme
+
+Le pointage s'enregistre, mais l'écran « Historique » reste vide — y compris
+pour la journée en cours. Aucune erreur nulle part.
+
+### Cause : la RLS, qui refuse en silence
+
+La table `attendances` porte cette politique de sécurité au niveau des lignes :
+
+| policyname | cmd | qual |
+|---|---|---|
+| `encheck_scope_entreprise` | ALL | `can_manage_enterprise(enterprise_id)` |
+
+Traduction : *« une ligne n'est visible que par quelqu'un qui gère son
+entreprise »*. L'application de pointage est **anonyme** (clé publique, rôle
+`anon`, aucune session administrateur) : la condition est donc fausse, et
+Postgres retire toutes les lignes.
+
+**Le piège, et c'est tout le sujet :** une RLS qui refuse ne renvoie **pas
+d'erreur**. Elle renvoie une liste vide. L'écran affichait « Aucun pointage »,
+exactement comme pour une journée sans pointage. Aucun message, aucun
+indice — d'où la difficulté du diagnostic.
+
+À distinguer d'un GRANT manquant, qui lui produit bien une erreur
+(`42501 permission denied`).
+
+### Le correctif : passer par la porte prévue
+
+La base expose une fonction faite exprès :
+
+```
+encheck_pointages_historique(p_employee_id uuid, p_limite integer) → jsonb
+    SECURITY DEFINER = true
+```
+
+`SECURITY DEFINER` signifie qu'elle s'exécute avec **ses propres droits**, et
+donc qu'elle n'est pas soumise à la politique RLS : elle lit la table pour
+nous et renvoie les lignes.
+
+`lib/services/supabase_service.dart` l'utilise désormais dans
+`getHistoriquePointages()` et `dernierPointage()`, avec repli sur la lecture
+directe si la fonction n'existe pas.
+
+> ⚠️ **On n'a PAS touché à la politique RLS.** Elle est correcte : elle
+> empêche qu'un employé lise les pointages d'une autre entreprise. Ajouter
+> une politique permissive aurait ouvert une brèche. La bonne réponse était
+> d'emprunter la porte de service, pas d'enfoncer la porte d'entrée.
+
+### Effet de bord corrigé au passage
+
+`dernierPointage()` servait à décider si le pointage suivant était une ENTRÉE
+ou une SORTIE. Bloquée par la RLS, elle renvoyait toujours `null` :
+l'application croyait n'avoir aucun pointage et enregistrait une **ENTRÉE à
+chaque passage**. La correction remet aussi ce mécanisme d'aplomb.

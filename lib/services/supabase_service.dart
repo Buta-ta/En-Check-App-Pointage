@@ -258,11 +258,71 @@ class SupabaseService {
   // ═══════════════════════════════════════════════════════════
   // 📋 HISTORIQUE POINTAGES
   // ═══════════════════════════════════════════════════════════
+  /// Les pointages d'un employé, lus par la fonction `encheck_pointages_historique`.
+  ///
+  /// POURQUOI NE PAS LIRE LA TABLE DIRECTEMENT
+  /// -----------------------------------------
+  /// La table `attendances` porte une politique de sécurité au niveau des
+  /// lignes (RLS) nommée `encheck_scope_entreprise`, dont la condition est :
+  ///
+  ///     can_manage_enterprise(enterprise_id)
+  ///
+  /// Autrement dit : « tu ne vois cette ligne que si tu gères l'entreprise à
+  /// laquelle elle appartient ». L'application de pointage est ANONYME — elle
+  /// n'a pas de session administrateur — donc cette condition est fausse, et
+  /// Postgres retire TOUTES les lignes.
+  ///
+  /// Le piège : une RLS qui refuse ne renvoie PAS d'erreur. Elle renvoie une
+  /// liste vide. L'écran affichait donc « Aucun pointage », exactement comme
+  /// pour une journée sans pointage. Rien ne permettait de deviner que les
+  /// données existaient bel et bien.
+  ///
+  /// `encheck_pointages_historique` est déclarée SECURITY DEFINER : elle
+  /// s'exécute avec ses propres droits et lit la table pour nous. Sa
+  /// signature :
+  ///
+  ///     encheck_pointages_historique(p_employee_id uuid, p_limite integer)
+  ///       → jsonb
+  ///
+  /// On ne touche donc PAS à la politique RLS : elle est correcte et protège
+  /// les données. On emprunte simplement la porte prévue à cet effet.
+  static Future<List<Map<String, dynamic>>> _pointagesViaRpc(
+      String employeeId,
+      int limite,
+      ) async {
+    final reponse = await client.rpc('encheck_pointages_historique', params: {
+      'p_employee_id': employeeId,
+      'p_limite': limite,
+    });
+
+    // Selon la version du client, une colonne jsonb arrive déjà décodée ou
+    // sous forme de texte : on accepte les deux.
+    final brut = reponse is String ? jsonDecode(reponse) : reponse;
+    if (brut is! List) return <Map<String, dynamic>>[];
+
+    return brut
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+  }
+
   static Future<List<Map<String, dynamic>>> getHistoriquePointages(
       String employeeId, {
         int limite = 50,
       }) async {
     try {
+      // 1. Le chemin normal : la fonction dédiée, non soumise à la RLS.
+      try {
+        final viaRpc = await _pointagesViaRpc(employeeId, limite);
+        derniereErreur = null;
+        return viaRpc;
+      } catch (e) {
+        // Un projet plus ancien pourrait ne pas avoir la fonction : on
+        // retente en lecture directe plutôt que d'abandonner.
+        print('Historique via RPC indisponible, repli sur la table : $e');
+      }
+
+      // 2. Repli : lecture directe de la table.
       final response = await client
           .from('attendances')
           .select()
@@ -285,7 +345,24 @@ class SupabaseService {
   // ═══════════════════════════════════════════════════════════
   // 🔍 DERNIER POINTAGE
   // ═══════════════════════════════════════════════════════════
+
+  /// Le pointage le plus récent de l'employé, ou `null`.
+  ///
+  /// ⚠️ Cette fonction décide si le prochain pointage sera une ENTRÉE ou une
+  /// SORTIE. Bloquée par la RLS (voir _pointagesViaRpc), elle renvoyait
+  /// toujours `null` : l'application croyait alors n'avoir aucun pointage
+  /// et enregistrait une ENTRÉE à chaque passage.
   static Future<Map<String, dynamic>?> dernierPointage(String employeeId) async {
+    // 1. Le chemin normal : la fonction dédiée, non soumise à la RLS.
+    try {
+      final viaRpc = await _pointagesViaRpc(employeeId, 1);
+      if (viaRpc.isNotEmpty) return viaRpc.first;
+      return null;
+    } catch (e) {
+      print('Dernier pointage via RPC indisponible, repli sur la table : $e');
+    }
+
+    // 2. Repli : lecture directe de la table.
     try {
       final response = await client
           .from('attendances')
