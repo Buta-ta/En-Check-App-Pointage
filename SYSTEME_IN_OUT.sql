@@ -38,6 +38,23 @@
 --      SANS jamais inventer ni corriger de donnees ;
 --    - la correction par l'employe exige le jeton de session et reste
 --      limitee a 30 minutes.
+--
+--  NOUVEAU (3e version) — fiche ARBITRAGE N°2/3 (16/10/2026) :
+--    P1 · `encheck_pointage_marquer` ne pose suspect=true QUE si l'anomalie
+--        est encore NON RÉSOLUE : jamais sur un DÉPART manuel qui ferme une
+--        session oubliée (code neutre `resolution_employe`, cas Hippo) ;
+--    P2 · garde-fou « date future » : tout pointage dont check_time dépasse
+--        « now() + 5 min » est REFUSÉ en base (trigger + réglage
+--        `garde_fou_futur_minutes`) — un boîtier mal réglé n'écrit plus le
+--        pointage de demain ;
+--    · les seuils du cerveau sont lus dans `encheck_reglages_pointage` via
+--      `encheck_seuil()` (source unique — arbitrage : aucun chiffre en dur).
+--
+--  ⚠️ DÉPENDANCE : `encheck_seuil()` vient de la migration ADMIN
+--     `20261016000001_fondations_auto_close_structure.sql` (déjà exécutée en
+--     production le 16/10). Sans elle, le cerveau ne peut pas lire ses
+--     seuils : exécute d'abord cette migration, ou le script
+--     `CORRECTIF_ARBITRAGE_2-3_P1_P2.sql` qui le vérifie pour toi.
 -- ═══════════════════════════════════════════════════════════════════════════
 
 
@@ -59,9 +76,11 @@ ALTER TABLE public.attendances ADD COLUMN IF NOT EXISTS decision_raison text;
   -- derniere_entree, presence_trop_longue, bascule_locale…
 
 ALTER TABLE public.attendances ADD COLUMN IF NOT EXISTS anomalie text;
-  -- 'sortie_oubliee'  : une entrée vieille de plus du seuil
-  -- 'presence_courte' : une sortie quelques minutes après l'entrée
-  -- NULL              : rien à signaler
+  -- 'sortie_oubliee'     : une entrée vieille de plus du seuil d'oubli
+  -- 'presence_courte'    : une sortie quelques minutes après l'entrée
+  -- 'resolution_employe' : le doute a été tranché par l'employé lui-même
+  --                        (fiche 2/3) — code NEUTRE, jamais suspect
+  -- NULL                 : rien à signaler
 
 ALTER TABLE public.attendances
   ADD COLUMN IF NOT EXISTS modifie_par_employe boolean NOT NULL DEFAULT false;
@@ -112,10 +131,18 @@ GRANT SELECT ON public.attendance_corrections TO authenticated;
 --   1. aucun pointage connu               → ENTRÉE, confiance haute
 --   2. dernier pointage < 60 s            → BLOQUÉ (déjà pointé)
 --   3. dernier = SORTIE                   → ENTRÉE, confiance haute
---   4. dernier = ENTRÉE, < 12 h           → SORTIE, confiance haute
---      (si la présence < 5 min            → SORTIE, confiance MOYENNE)
---   5. dernier = ENTRÉE, > 12 h           → ENTRÉE, confiance BASSE
+--   4. dernier = ENTRÉE, < seuil oubli    → SORTIE, confiance haute
+--      (si la présence < seuil court      → SORTIE, confiance MOYENNE)
+--   5. dernier = ENTRÉE, > seuil oubli    → ENTRÉE, confiance BASSE
 --                                           + anomalie « sortie oubliée »
+--
+--  LES SEUILS VIENNENT DE LA BASE (fiche 2/3 : aucun chiffre en dur)
+--  ────────────────────────────────────────────────────────────────
+--  Source unique : `encheck_reglages_pointage`, lue par `encheck_seuil()`.
+--  Valeurs par défaut (uniquement si le réglage est absent) :
+--    · oubli_sortie_heures     → 12 h   (règles 4 et 5)
+--    · presence_courte_minutes → 5 min  (règle 4, sortie suspecte)
+--    · seuil_rebond_secondes   → 60 s   (règle 2, anti double-geste)
 --
 --  LA RÈGLE 5 EST CELLE QUI RÉPARE LE SYSTÈME
 --  ───────────────────────────────────────────
@@ -134,10 +161,17 @@ SECURITY DEFINER
 SET search_path TO 'public', 'pg_temp'
 AS $function$
 DECLARE
-  -- ── LES RÉGLAGES (à adapter à tes règles d'entreprise) ──────────────────
-  c_seuil_presence  constant interval := interval '12 hours';  -- au-delà, sortie oubliée
-  c_presence_courte constant interval := interval '5 minutes'; -- sortie suspecte
-  c_garde_fou       constant interval := interval '60 seconds';-- anti double-geste
+  -- ── LES RÉGLAGES : lus dans `encheck_reglages_pointage` (source unique) ──
+  --    Les valeurs ci-dessous ne sont que des replis si le réglage est
+  --    absent. Pour changer un seuil : UPDATE encheck_reglages_pointage
+  --    (fiche 2/3 : aucun chiffre métier réécrit en dur).
+  v_enterprise        uuid;
+  v_seuil_oubli_h     numeric;
+  v_presence_courte_m numeric;
+  v_garde_fou_s       numeric;
+  v_seuil_presence    interval;
+  v_presence_courte   interval;
+  v_garde_fou         interval;
 
   v_dernier_type text;
   v_dernier_time timestamptz;
@@ -150,6 +184,20 @@ BEGIN
   IF p_employee_id IS NULL THEN
     RETURN jsonb_build_object('ok', false, 'raison', 'employe_manquant');
   END IF;
+
+  -- Les réglages se lisent au niveau de l'entreprise de l'employé, avec
+  -- repli sur le réglage global puis sur le défaut.
+  SELECT e.enterprise_id INTO v_enterprise
+    FROM public.employees e
+   WHERE e.id = p_employee_id;
+
+  v_seuil_oubli_h     := public.encheck_seuil(v_enterprise, 'oubli_sortie_heures', 12);
+  v_presence_courte_m := public.encheck_seuil(v_enterprise, 'presence_courte_minutes', 5);
+  v_garde_fou_s       := public.encheck_seuil(v_enterprise, 'seuil_rebond_secondes', 60);
+
+  v_seuil_presence   := make_interval(mins => (v_seuil_oubli_h * 60)::int);
+  v_presence_courte  := make_interval(mins => v_presence_courte_m::int);
+  v_garde_fou        := make_interval(secs => v_garde_fou_s::double precision);
 
   SELECT a.check_type, a.check_time::timestamptz
     INTO v_dernier_type, v_dernier_time
@@ -169,7 +217,7 @@ BEGIN
   v_anciennete := now() - v_dernier_time;
 
   -- Règle 2 : garde-fou anti double-geste.
-  IF v_anciennete < c_garde_fou THEN
+  IF v_anciennete < v_garde_fou THEN
     RETURN jsonb_build_object(
       'ok', true, 'bloque', true,
       'raison', 'pointage_trop_recent',
@@ -182,7 +230,7 @@ BEGIN
     v_type := 'in'; v_confiance := 'haute';
     v_raison := 'derniere_sortie'; v_anomalie := null;
 
-  ELSIF v_anciennete > c_seuil_presence THEN
+  ELSIF v_anciennete > v_seuil_presence THEN
     -- Règle 5 : la présence est anormalement longue.
     v_type := 'in'; v_confiance := 'basse';
     v_raison := 'presence_trop_longue'; v_anomalie := 'sortie_oubliee';
@@ -192,7 +240,7 @@ BEGIN
     v_type := 'out'; v_raison := 'derniere_entree'; v_confiance := 'haute';
     v_anomalie := null;
 
-    IF v_anciennete < c_presence_courte THEN
+    IF v_anciennete < v_presence_courte THEN
       v_anomalie := 'presence_courte';
       v_confiance := 'moyenne';
     END IF;
@@ -206,7 +254,7 @@ BEGIN
     'anomalie', v_anomalie,
     'dernier_type', v_dernier_type,
     'anciennete_secondes', EXTRACT(EPOCH FROM v_anciennete)::int,
-    'seuil_presence_heures', EXTRACT(EPOCH FROM c_seuil_presence) / 3600);
+    'seuil_presence_heures', EXTRACT(EPOCH FROM v_seuil_presence) / 3600);
 END;
 $function$;
 
@@ -232,34 +280,77 @@ SECURITY DEFINER
 SET search_path TO 'public', 'pg_temp'
 AS $function$
 DECLARE
-  v_att  record;
-  v_jour date;
+  v_att          record;
+  v_jour         date;
+  v_resolu       boolean;
+  v_anomalie_finale text;
 BEGIN
+  -- On lit d'abord la ligne : le sort de l'anomalie dépend du pointage
+  -- lui-même (type choisi + origine de la décision), pas seulement de ce que
+  -- l'application transmet.
+  SELECT id, employee_id, enterprise_id,
+         check_type, check_time::timestamptz AS ct,
+         origine, anomalie, suspect, suspect_reason
+    INTO v_att
+    FROM public.attendances
+   WHERE id = p_attendance_id;
+
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('ok', false, 'raison', 'pointage_introuvable');
+  END IF;
+
+  -- ── FICHE ARBITRAGE 2/3, P1 : un doute RÉSOLU n'est plus une anomalie ──
+  --  Est « résolue » :
+  --   · `resolution_employe` : l'employé a tranché lui-même dans le dialogue
+  --     « Arrivée ou Départ ? » — le doute est levé par un humain ;
+  --   · `sortie_oubliee` sur un DÉPART d'origine `manuel` : l'employé qui
+  --     pointe sa sortie ferme justement la session oubliée (cas Hippo,
+  --     16/10 01:14) ;
+  --   · NULL : il n'y avait rien à signaler.
+  --  Dans ces cas : suspect=true JAMAIS posé, et AUCUNE alerte.
+  v_resolu :=
+       (p_anomalie IS NULL)
+    OR (p_anomalie = 'resolution_employe')
+    OR (p_anomalie = 'sortie_oubliee'
+        AND v_att.check_type = 'out'
+        AND COALESCE(p_origine, v_att.origine) = 'manuel');
+
+  -- Que garde-t-on dans la colonne `anomalie` ?
+  --   · `resolution_employe` → conservé tel quel (traçabilité du doute) ;
+  --   · anomalie résolue     → NULL (cible fiche 2/3 sur les lignes Hippo) ;
+  --   · anomalie non résolue → le code transmis ;
+  --   · rien de transmis     → on garde l'existant.
+  v_anomalie_finale :=
+       CASE
+         WHEN p_anomalie IS NULL                THEN v_att.anomalie
+         WHEN p_anomalie = 'resolution_employe' THEN 'resolution_employe'
+         WHEN v_resolu                          THEN NULL
+         ELSE p_anomalie
+       END;
+
   -- On se branche sur le mécanisme « suspect » que l'admin utilise DÉJÀ
   -- (page Pointages : drapeau suspect + traduction de suspect_reason).
   -- Inutile d'inventer un système parallèle : les anomalies apparaîtront
   -- ainsi dans les écrans existants, sans retouche côté admin.
+  -- ⚠️ suspect=true UNIQUEMENT si l'anomalie est encore non résolue (P1) —
+  --    et on ne touche JAMAIS à un suspect posé pour une autre raison.
   UPDATE public.attendances
      SET origine         = COALESCE(p_origine, origine),
          decision_raison = COALESCE(p_raison, decision_raison),
-         anomalie        = COALESCE(p_anomalie, anomalie),
+         anomalie        = v_anomalie_finale,
          suspect         = CASE
-             WHEN p_anomalie IS NOT NULL THEN true ELSE suspect END,
+             WHEN p_anomalie IS NOT NULL AND NOT v_resolu THEN true
+             ELSE suspect
+           END,
          suspect_reason  = CASE
-             WHEN p_anomalie IS NULL THEN suspect_reason
+             WHEN p_anomalie IS NULL OR v_resolu THEN suspect_reason
              WHEN suspect_reason IS NULL OR btrim(suspect_reason) = ''
                THEN p_anomalie
              WHEN suspect_reason LIKE '%' || p_anomalie || '%'
                THEN suspect_reason
              ELSE suspect_reason || '|' || p_anomalie
            END
-   WHERE id = p_attendance_id
-  RETURNING id, employee_id, enterprise_id, check_time::timestamptz AS ct
-    INTO v_att;
-
-  IF NOT FOUND THEN
-    RETURN jsonb_build_object('ok', false, 'raison', 'pointage_introuvable');
-  END IF;
+   WHERE id = p_attendance_id;
 
   -- Jour civil du pointage, en heure du Bénin. Calculé à part : s'il
   -- échoue, on retombe sur la date du jour plutôt que de perdre l'alerte.
@@ -273,7 +364,9 @@ BEGIN
   -- échouer le pointage, qui est déjà enregistré. On ne connaît pas les
   -- valeurs exactes acceptées par p_type et p_gravite, donc si la base
   -- refuse, on encaisse l'échec et on continue.
-  IF p_anomalie IS NOT NULL THEN
+  -- ⚠️ AUCUNE alerte pour un doute résolu (P1) : prévenir l'admin qu'un
+  --    employé a simplement choisi « Départ » serait un faux signal.
+  IF p_anomalie IS NOT NULL AND NOT v_resolu THEN
     BEGIN
       PERFORM public.encheck_alerte_poser(
         p_enterprise := v_att.enterprise_id,
@@ -291,7 +384,8 @@ BEGIN
     END;
   END IF;
 
-  RETURN jsonb_build_object('ok', true);
+  RETURN jsonb_build_object('ok', true, 'anomalie', v_anomalie_finale,
+                            'suspect', NOT v_resolu AND p_anomalie IS NOT NULL);
 END;
 $function$;
 
@@ -429,7 +523,70 @@ GRANT EXECUTE ON FUNCTION public.encheck_corriger_type(uuid, uuid, text)
 
 
 -- ═══════════════════════════════════════════════════════════════════════════
---  6. VÉRIFICATION
+--  6. GARDE-FOU « DATE FUTURE » (fiche ARBITRAGE 2/3, P2)
+-- ═══════════════════════════════════════════════════════════════════════════
+--  Un pointage ne peut pas se trouver dans le futur. Un boîtier mal réglé,
+--  une file hors-ligne corrompue ou une saisie erratique (le bouton « J+1 »
+--  de l'admin) ne doivent jamais écrire « le pointage de demain » — qui sera
+--  ensuite apparié et affiché comme une journée réelle (cas Hippo : une
+--  sortie écrite au 17/10, 14 h de service inventées, fausses alertes).
+--
+--  Marge de dérive d'horloge : `garde_fou_futur_minutes` (défaut : 5 min),
+--  lue dans `encheck_reglages_pointage` — source unique, comme le veut la
+--  doctrine. Pour aligner sur la marge admin (10 min) :
+--
+--    INSERT INTO public.encheck_reglages_pointage (cle, valeur, commentaire)
+--    VALUES ('garde_fou_futur_minutes', '10', 'Aligné sur trg_attendances_refuser_futur')
+--    ON CONFLICT DO NOTHING;
+--
+--  DÉFENSE EN PROFONDEUR : ce trigger protège TOUTES les écritures dans
+--  `attendances` (encheck_punch, corrections admin, imports…), pas seulement
+--  l'application. L'admin a déjà le sien en INSERT (10 min) ; celui-ci couvre
+--  aussi les UPDATE de check_time, avec la marge de la fiche.
+--
+--  Le point de contournement `SET encheck.test_rejeu = '1'` est réservé aux
+--  harnais de test qui rejouent des scénarios avec dates fictives — jamais la
+--  production (même convention que l'admin).
+
+CREATE OR REPLACE FUNCTION public.encheck_punch_garde_fou_futur()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = public, pg_temp
+AS $function$
+DECLARE
+  v_marge_minutes numeric;
+BEGIN
+  IF COALESCE(current_setting('encheck.test_rejeu', true), '') = '1' THEN
+    RETURN NEW;   -- harnais de test explicite, jamais la production
+  END IF;
+
+  v_marge_minutes := COALESCE(
+      public.encheck_seuil(NEW.enterprise_id, 'garde_fou_futur_minutes', 5), 5);
+
+  IF NEW.check_time IS NOT NULL
+     AND NEW.check_time > now() + make_interval(mins => v_marge_minutes::int) THEN
+    RAISE EXCEPTION
+      'horloge_futur : pointage refusé — check_time (%) est dans le futur (marge : % min). Un pointage ne peut pas se trouver dans le futur : vérifiez la date/heure du boîtier ou de la saisie.',
+      NEW.check_time, v_marge_minutes
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+
+DROP TRIGGER IF EXISTS trg_attendances_garde_fou_futur ON public.attendances;
+CREATE TRIGGER trg_attendances_garde_fou_futur
+  BEFORE INSERT OR UPDATE OF check_time ON public.attendances
+  FOR EACH ROW
+  EXECUTE FUNCTION public.encheck_punch_garde_fou_futur();
+
+-- Le trigger s'exécute au moment de l'écriture : personne n'a besoin de
+-- l'appeler soi-même. On retire donc les droits d'exécution directs.
+REVOKE ALL ON FUNCTION public.encheck_punch_garde_fou_futur() FROM PUBLIC, anon, authenticated;
+
+
+-- ═══════════════════════════════════════════════════════════════════════════
+--  7. VÉRIFICATION
 -- ═══════════════════════════════════════════════════════════════════════════
 --  Ce SELECT doit renvoyer trois colonnes de plus qu'avant.
 

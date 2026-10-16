@@ -86,6 +86,18 @@ class TrustedPunchService {
   static bool         _pret = false;
 
   // ═══════════════════════════════════════════════════════════════════════
+  //  GARDE-FOU « DATE FUTURE » (fiche arbitrage 2/3, P2)
+  // ═══════════════════════════════════════════════════════════════════════
+  /// Marge de dérive d'horloge tolérée, en minutes.
+  ///
+  /// Un pointage dont l'heure projetée dépasse « maintenant + cette marge »
+  /// est refusé (`reason: 'horloge_futur'`). La source de vérité reste le
+  /// serveur : réglage `garde_fou_futur_minutes` dans
+  /// `encheck_reglages_pointage` (défaut : 5) + trigger SQL sur
+  /// `attendances`. Ce n'est ici qu'un refus anticipé, côté appareil.
+  static const int margeDeriveHorlogeMinutes = 5;
+
+  // ═══════════════════════════════════════════════════════════════════════
   //  ÉTAT (utile pour l'affichage et le diagnostic)
   // ═══════════════════════════════════════════════════════════════════════
 
@@ -322,6 +334,12 @@ class TrustedPunchService {
   /// Retourne la réponse du serveur, par exemple :
   ///   {ok: true, attendance_id: '…', check_time: '…', suspect: false, …}
   ///   {ok: false, reason: 'employe_inconnu_ou_inactif'}
+  ///
+  /// ⭐ FICHE ARBITRAGE 2/3, P2 — GARDE-FOU « DATE FUTURE » : un pointage dont
+  ///    l'heure projetée (ancre + délai) dépasse « maintenant + 5 min » est
+  ///    REFUSÉ ici avec `reason: 'horloge_futur'`, avant même d'appeler le
+  ///    serveur. Le serveur garde la sienne (trigger SQL + réglage
+  ///    `garde_fou_futur_minutes`) : défense en profondeur.
   static Future<Map<String, dynamic>> pointer({
     required String  employeeId,
     required String  enterpriseId,
@@ -373,6 +391,32 @@ class TrustedPunchService {
     //    approximation silencieuse.
     final delaiEffectif = heureInconnue ? null : (delaiSecondes ?? mesure);
     final ancreEffectif  = delaiEffectif == null ? null : (ancreUtc ?? _anchorUtc);
+
+    // ⭐ FICHE ARBITRAGE 2/3, P2 — LE GARDE-FOU « DATE FUTURE ».
+    //    L'heure que le serveur va dater est « ancre + délai » (ou
+    //    MAINTENANT si aucune mesure n'est disponible). Elle ne doit JAMAIS
+    //    se retrouver dans le futur au-delà de la marge de dérive : un
+    //    boîtier mal réglé ou une file corrompue ne doit pas écrire le
+    //    pointage de demain (cas Hippo : une sortie écrite au 17/10).
+    //    On ne projette que si l'ancre ET le délai sont connus — sinon le
+    //    serveur datera à MAINTENANT, qui n'est jamais dans le futur.
+    if (delaiEffectif != null && ancreEffectif != null) {
+      final projection =
+          ancreEffectif.add(Duration(seconds: delaiEffectif));
+      final limite = DateTime.now()
+          .toUtc()
+          .add(const Duration(minutes: margeDeriveHorlogeMinutes));
+      if (projection.isAfter(limite)) {
+        print('❌ horloge_futur : heure projetée '
+            '${projection.toIso8601String()} au-delà de '
+            '+$margeDeriveHorlogeMinutes min — pointage refusé.');
+        return {
+          'ok': false,
+          'reason': 'horloge_futur',
+          'check_time_projete': projection.toIso8601String(),
+        };
+      }
+    }
 
     try {
       final res = await _sb.rpc('encheck_punch', params: {
@@ -429,6 +473,13 @@ class TrustedPunchService {
     } on PostgrestException catch (e) {
       // 404 = la livraison 09 n'est pas encore appliquée sur ce serveur
       print('❌ encheck_punch : ${e.message} (code ${e.code})');
+      // ⭐ FICHE ARBITRAGE 2/3, P2 — le trigger SQL « date future » refuse le
+      //    pointage avec un message explicite : on le traduit pour ce qu'il
+      //    est, au lieu du générique « serveur_non_equipe ».
+      if (e.message.contains('horloge_futur') ||
+          e.message.contains('futur')) {
+        return {'ok': false, 'reason': 'horloge_futur', 'detail': e.message};
+      }
       return {'ok': false, 'reason': 'serveur_non_equipe', 'detail': e.message};
     } catch (e) {
       // panne réseau : le pointage sera mis en file locale et rejoué plus tard
