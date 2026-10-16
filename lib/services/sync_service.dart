@@ -2,6 +2,7 @@ import 'local_database.dart';
 import 'supabase_service.dart'; // ✅ Import correct
 import 'connectivity_service.dart';
 import 'trusted_punch_service.dart';
+import 'pause_service.dart'; // ⏸ LOT D — la file d'attente des pauses
 
 class SyncService {
   // ═══════════════════════════════════════════════════════════
@@ -74,6 +75,10 @@ class SyncService {
           }
         }
       }
+      // ⏸ LOT D — après les pointages, la file des pauses : même logique
+      // (rejeu FIFO, sans doublon). La base est protégée par (employé, instant
+      // de début) unique — renvoyer la même pause ne crée rien.
+      await PauseService.synchroniser();
       return synchronises;
     } catch (e) {
       print('❌ Erreur globale sync: $e');
