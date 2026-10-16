@@ -137,7 +137,7 @@ class PauseService {
     if (ConnectivityService.isOnline) {
       await synchroniser();
     }
-    return etatPause(employeeId) ?? etat;
+    return (await etatPause(employeeId)) ?? etat;
   }
 
   /// « ▶ Je reprends » — fonctionne avec ET sans réseau.
