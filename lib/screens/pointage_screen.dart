@@ -999,13 +999,20 @@ class _PointageScreenState extends State<PointageScreen> {
   /// Demande à l'employé s'il arrive ou s'il part.
   ///
   /// On n'y vient que quand le système doute vraiment — typiquement une
-  /// entrée vieille de plus de 12 h, donc une sortie vraisemblablement
+  /// entrée vieille de plus du seuil d'oubli (12 h par défaut, réglable dans
+  /// `encheck_reglages_pointage`), donc une sortie vraisemblablement
   /// oubliée. Le type proposé est mis en avant, mais l'employé tranche.
   ///
   /// Renvoie `null` si l'employé renonce : dans ce cas RIEN n'est enregistré.
   Future<String?> _demanderTypePointage(
-      String typePropose, String? anomalie) async {
+      String typePropose, String? anomalie, double? seuilPresenceHeures) async {
     final estEntree = typePropose == 'in';
+    // Affichage du seuil : « 12 » plutôt que « 12.0 », « 12,5 » en français.
+    final String? seuilTexte = seuilPresenceHeures == null
+        ? null
+        : (seuilPresenceHeures == seuilPresenceHeures.roundToDouble()
+            ? seuilPresenceHeures.toInt().toString()
+            : seuilPresenceHeures.toString().replaceFirst('.', ','));
 
     return showDialog<String>(
       context: context,
@@ -1031,10 +1038,16 @@ class _PointageScreenState extends State<PointageScreen> {
             ),
             if (anomalie == 'sortie_oubliee') ...[
               const SizedBox(height: 12),
-              const Text(
-                "Votre dernière entrée remonte à plus de 12 heures : une "
-                "sortie a probablement été oubliée.",
-                style: TextStyle(
+              // Le seuil vient de la base (réglage « oubli_sortie_heures ») :
+              // aucun chiffre en dur dans l'interface (fiche 2/3, cohérence).
+              Text(
+                seuilTexte == null
+                    ? "Votre dernière entrée est très ancienne : une "
+                        "sortie a probablement été oubliée."
+                    : "Votre dernière entrée remonte à plus de "
+                        "$seuilTexte heures : une sortie a probablement "
+                        "été oubliée.",
+                style: const TextStyle(
                     color: EnCheckColors.terreChaude,
                     fontSize: 13,
                     fontWeight: FontWeight.bold),
@@ -3109,6 +3122,7 @@ class _PointageScreenState extends State<PointageScreen> {
       String confiance = 'haute';
       String origineDecision = 'bascule_locale';
       String? anomalie;
+      double? seuilPresenceHeures;
 
       if (ConnectivityService.isOnline) {
         final suggestion = await SupabaseService.typeSuggere(employee['id']);
@@ -3117,16 +3131,27 @@ class _PointageScreenState extends State<PointageScreen> {
           confiance = (suggestion['confiance'] as String?) ?? 'haute';
           origineDecision = (suggestion['raison'] as String?) ?? 'serveur';
           anomalie = suggestion['anomalie'] as String?;
+          // Le seuil d'oubli vient de la base (encheck_reglages_pointage) :
+          // jamais de chiffre en dur dans l'interface (fiche 2/3, cohérence).
+          seuilPresenceHeures =
+              (suggestion['seuil_presence_heures'] as num?)?.toDouble();
         }
       }
 
-      // Le système doute vraiment (par exemple une entrée vieille de plus de
-      // 12 h) : plutôt que de deviner, on laisse l'employé trancher.
+      // Le système doute vraiment (par exemple une entrée vieille de plus du
+      // seuil d'oubli) : plutôt que de deviner, on laisse l'employé trancher.
       if (confiance == 'basse') {
-        final choix = await _demanderTypePointage(typePointage, anomalie);
+        final choix = await _demanderTypePointage(
+            typePointage, anomalie, seuilPresenceHeures);
         if (choix == null) return;   // annulé : RIEN n'est enregistré
         typePointage = choix;
         origineDecision = 'manuel_employe';
+        // ⭐ FICHE ARBITRAGE 2/3, P1 — un doute TRANCHÉ PAR L'HUMAIN n'est
+        //    plus une anomalie. On remplace l'anomalie du doute (typiquement
+        //    'sortie_oubliee') par le code neutre 'resolution_employe' :
+        //    la base ne marquera donc JAMAIS suspect un « Départ » choisi en
+        //    toute connaissance de cause par l'employé (cas Hippo, 16/10).
+        anomalie = 'resolution_employe';
       }
 
       bool success;
