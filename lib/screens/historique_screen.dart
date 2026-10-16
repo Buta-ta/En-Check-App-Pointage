@@ -1,9 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/app_theme.dart';
 import '../services/supabase_service.dart';
 import '../services/local_database.dart';
 import '../services/connectivity_service.dart';
 import '../services/heure_pointage.dart'; // ⭐ LIVRAISON 19 — conversion d'heure
+import '../services/pause_service.dart'; // ⏸ LOT D — les pauses
+import '../services/geofencing_service.dart'; // ⏸ LOT D — mention « Hors site »
 
 class HistoriqueScreen extends StatefulWidget {
   final Map<String, dynamic> employee;
@@ -23,6 +28,20 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
   /// l'écran affichait « Aucun pointage » : l'employé croyait sa journée
   /// perdue alors que le serveur refusait simplement la lecture.
   String? erreur;
+
+  // ═══════════════════════════════════════════════════════════
+  //  ⏸ LES PAUSES — fiche « LOT D » (16/10/2026)
+  //  La carte pause vit ICI : c'est l'écran où l'employé s'est identifié
+  //  (matricule + PIN) — le bon endroit pour « Je pars en pause » et
+  //  « ▶ Je reprends ».
+  // ═══════════════════════════════════════════════════════════
+  Map<String, dynamic>? _pauseEtat;    // pause ouverte (debut, motif…)
+  Map<String, dynamic>? _pausePrevue;  // créneau du planning (calculé par la base)
+  bool _pausePret = false;
+  bool _horsSite = false;              // 📍 mention informative, JAMAIS bloquante
+  bool _pauseActionEnCours = false;    // verrou anti-double-tap
+  Timer? _rappelTimer;
+  bool _rappelAffiche = false;
 
   /// Les pointages de la journée EN COURS, du plus ancien au plus récent.
   ///
@@ -46,6 +65,354 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
   void initState() {
     super.initState();
     _chargerHistorique();
+    _chargerPause();
+  }
+
+  @override
+  void dispose() {
+    _rappelTimer?.cancel();
+    super.dispose();
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  ⏸ LES PAUSES — chargement + gestes (fiche LOT D)
+  // ═══════════════════════════════════════════════════════════
+
+  /// Charge : la pause ouverte, le créneau prévu (calculé PAR LA BASE),
+  /// la mention « Hors site » (indicative) — puis programme le rappel de
+  /// reprise si la pause dure déjà depuis trop longtemps.
+  Future<void> _chargerPause() async {
+    try {
+      final employeId = widget.employee['id'] as String;
+      final entrepriseId = widget.employee['enterprise_id']?.toString();
+
+      final etat = await PauseService.etatPause(employeId);
+
+      Map<String, dynamic>? prevue;
+      if (entrepriseId != null && entrepriseId.isNotEmpty) {
+        prevue = await PauseService.pausePrevue(
+            employeeId: employeId, enterpriseId: entrepriseId);
+      }
+
+      // « 📍 Hors site » : purement informatif — la pause reste possible
+      // partout (fiche LOT D : le géo-fencage ne bloque JAMAIS le bouton).
+      var horsSite = false;
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        if (prefs.getBool('module_geolocalisation') == true &&
+            entrepriseId != null &&
+            entrepriseId.isNotEmpty) {
+          final position = await GeofencingService.obtenirPosition();
+          if (position != null) {
+            final zone = await GeofencingService.verifierZone(
+                enterpriseId: entrepriseId, position: position);
+            horsSite = zone['is_within_zone'] == false;
+          }
+        }
+      } catch (_) {
+        // Pas de GPS / permission refusée : on n'affiche simplement rien.
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _pauseEtat = etat;
+        _pausePrevue = prevue;
+        _horsSite = horsSite;
+        _pausePret = true;
+      });
+      _programmerRappel();
+    } catch (e) {
+      print('⚠️ chargement de la pause : $e');
+      if (mounted) setState(() => _pausePret = true);
+    }
+  }
+
+  /// « ⏸ Je pars en pause » — marche aussi hors-ligne (file d'attente locale).
+  Future<void> _partirEnPause() async {
+    if (_pauseActionEnCours) return; // verrou anti-double-tap (fiche LOT D)
+    setState(() => _pauseActionEnCours = true);
+    try {
+      final etat = await PauseService.partirEnPause(
+        employeeId: widget.employee['id'] as String,
+        enterpriseId: widget.employee['enterprise_id']?.toString(),
+        motif: _pauseEtat?['motif'] as String?,
+      );
+      if (!mounted) return;
+      setState(() {
+        _pauseEtat = etat;
+        _rappelAffiche = false;
+        _pauseActionEnCours = false;
+      });
+      _programmerRappel();
+      final horsLigne = !ConnectivityService.isOnline;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(horsLigne
+            ? '⏸ Pause enregistrée hors-ligne : elle sera synchronisée.'
+            : '⏸ Pause enregistrée. Bonne pause !'),
+        backgroundColor: EnCheckColors.terreChaude,
+      ));
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _pauseActionEnCours = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text("Impossible d'enregistrer la pause : $e"),
+      ));
+    }
+  }
+
+  /// « ▶ Je reprends » — marche aussi hors-ligne.
+  Future<void> _reprendrePause() async {
+    if (_pauseActionEnCours) return;
+    setState(() => _pauseActionEnCours = true);
+    try {
+      await PauseService.reprendre(
+        employeeId: widget.employee['id'] as String,
+        enterpriseId: widget.employee['enterprise_id']?.toString(),
+      );
+      if (!mounted) return;
+      setState(() {
+        if (_pauseEtat != null) _pauseEtat!['debut'] = null;
+        _rappelAffiche = false;
+        _pauseActionEnCours = false;
+      });
+      _rappelTimer?.cancel();
+      final horsLigne = !ConnectivityService.isOnline;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(horsLigne
+            ? '▶ Reprise enregistrée hors-ligne : elle sera synchronisée.'
+            : '▶ Reprise enregistrée. Bon service !'),
+        backgroundColor: EnCheckColors.succes,
+      ));
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _pauseActionEnCours = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text("Impossible d'enregistrer la reprise : $e"),
+      ));
+    }
+  }
+
+  /// Motif FACULTATIF — retoucher la même pastille efface le motif.
+  Future<void> _choisirMotif(String? motif) async {
+    final etat = _pauseEtat;
+    if (etat == null || etat['debut'] == null) return;
+    final nouveau = (etat['motif'] == motif) ? null : motif;
+    setState(() {
+      etat['motif'] = nouveau;
+      _pauseEtat = etat;
+    });
+    await PauseService.changerMotif(
+        employeeId: widget.employee['id'] as String, motif: nouveau);
+  }
+
+  /// Rappel LOCAL de reprise (75 min) : bannière + SnackBar, jamais une
+  /// alarme, jamais un SMS, jamais une notification payante (fiche LOT D).
+  void _programmerRappel() {
+    _rappelTimer?.cancel();
+    final etat = _pauseEtat;
+    if (etat == null || etat['debut'] == null) return;
+    final debut = HeurePointage.instantDe(etat['debut'] as String);
+    if (debut == null) return;
+
+    void afficher() {
+      if (_rappelAffiche || !mounted) return;
+      setState(() => _rappelAffiche = true);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text(
+            'Toujours en pause ? Touche ▶ Je reprends si tu es de retour.'),
+        backgroundColor: EnCheckColors.terreChaude,
+      ));
+    }
+
+    if (PauseService.rappelDepasse(debut)) {
+      afficher();
+      return;
+    }
+    final echeance =
+        debut.add(const Duration(minutes: PauseService.rappelMinutes));
+    _rappelTimer = Timer(echeance.difference(DateTime.now().toUtc()), afficher);
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  ⏸ LA CARTE PAUSE (fiche LOT D)
+  // ═══════════════════════════════════════════════════════════
+
+  Widget _pastilleHorsSite() => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: EnCheckColors.terreChaude.withOpacity(0.12),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Text(
+          '📍 Hors site',
+          style:
+              TextStyle(fontSize: 11, color: EnCheckColors.terreChaude),
+        ),
+      );
+
+  Widget _construireCartePause() {
+    // Variables locales non-nulles : pas de promotion hasardeuse.
+    final etat = _pauseEtat;
+    final debutIso = etat == null ? null : etat['debut'] as String?;
+    final motifActif = etat == null ? null : etat['motif'] as String?;
+
+    // « Service en cours depuis … » = le dernier pointage du jour est une
+    // arrivée (entrée). Sinon la carte le dit honnêtement.
+    String? serviceDepuis;
+    final duJour = _pointagesDuJour;
+    if (duJour.isNotEmpty && duJour.last['check_type'] == 'in') {
+      final heure = HeurePointage.heureDePointage(duJour.last);
+      serviceDepuis = heure.length >= 5 ? heure.substring(0, 5) : heure;
+    }
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 20),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: debutIso != null
+              ? EnCheckColors.terreChaude.withOpacity(0.55)
+              : EnCheckColors.succes.withOpacity(0.35),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (debutIso != null) ...[
+            Row(
+              children: [
+                const Icon(Icons.pause_circle,
+                    color: EnCheckColors.terreChaude, size: 18),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'En pause depuis '
+                    '${PauseService.heureCourteDe(debutIso)}',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 15,
+                    ),
+                  ),
+                ),
+                if (_horsSite) _pastilleHorsSite(),
+              ],
+            ),
+
+            // L'annonce du planning — calculée PAR LA BASE
+            // (`encheck_pause_prevue`), jamais par l'app.
+            if (_pausePrevue?['trouvee'] == true) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Pause prévue ${_pausePrevue!['debut']}–${_pausePrevue!['fin']}',
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: EnCheckColors.gris,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ],
+
+            // 🕒 Rappel de reprise (75 min) — local et gratuit.
+            if (_rappelAffiche) ...[
+              Container(
+                margin: const EdgeInsets.only(top: 10),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: EnCheckColors.terreChaude.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.alarm, size: 16, color: EnCheckColors.terreChaude),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Toujours en pause ? Touche ▶ Je reprends si tu es de retour.',
+                        style: TextStyle(
+                            fontSize: 12, color: EnCheckColors.terreChaude),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
+            const SizedBox(height: 12),
+            const Text('Motif facultatif :',
+                style: TextStyle(fontSize: 12, color: EnCheckColors.gris)),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: [
+                for (final motif in PauseService.motifs)
+                  ChoiceChip(
+                    label: Text(motif),
+                    selected: motifActif == motif,
+                    selectedColor: EnCheckColors.terreChaude.withOpacity(0.2),
+                    onSelected: (_) => _choisirMotif(motif),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _pauseActionEnCours ? null : _reprendrePause,
+                icon: const Icon(Icons.play_arrow),
+                label: const Text('▶ Je reprends'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: EnCheckColors.succes,
+                  foregroundColor: EnCheckColors.blanc,
+                ),
+              ),
+            ),
+          ] else ...[
+            Row(
+              children: [
+                Icon(
+                  serviceDepuis != null
+                      ? Icons.check_circle
+                      : Icons.radio_button_unchecked,
+                  color: serviceDepuis != null
+                      ? EnCheckColors.succes
+                      : EnCheckColors.gris,
+                  size: 18,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    serviceDepuis != null
+                        ? 'Service en cours depuis $serviceDepuis'
+                        : 'Pas de service en cours',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 15,
+                    ),
+                  ),
+                ),
+                if (_horsSite) _pastilleHorsSite(),
+              ],
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _pauseActionEnCours ? null : _partirEnPause,
+                icon: const Icon(Icons.pause),
+                label: const Text('⏸ Je pars en pause'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: EnCheckColors.terreChaude,
+                  foregroundColor: EnCheckColors.blanc,
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -304,6 +671,16 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
               ],
             ),
           ),
+
+          const SizedBox(height: 16),
+
+          // ═══════════════════════════════════════════
+          // ⏸ LES PAUSES (fiche LOT D) — la carte « Ma journée »
+          // ═══════════════════════════════════════════
+          if (_pausePret) ...[
+            _construireCartePause(),
+            const SizedBox(height: 16),
+          ],
 
           const SizedBox(height: 20),
 
