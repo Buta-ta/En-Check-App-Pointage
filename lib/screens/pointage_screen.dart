@@ -23,6 +23,7 @@ import '../services/sync_service.dart';
 import '../services/photo_service_interface.dart';
 import '../services/geofencing_service.dart';
 import '../services/heure_pointage.dart';   // ⭐ LIVRAISON 21
+import '../services/pause_service.dart'; // ⏸ VISIBILITÉ DES PAUSES — le bouton du haut de l'écran
 import '../services/trusted_punch_service.dart';   // ⭐ LIVRAISON 22
 import 'historique_screen.dart';
 import 'face_enrollment_screen.dart';
@@ -40,6 +41,15 @@ class PointageScreen extends StatefulWidget {
 
 class _PointageScreenState extends State<PointageScreen> {
   String? _modeSelectionne;
+
+  // ⏸ VISIBILITÉ DES PAUSES (17/10/2026)
+  //    'pointage' → les gestes enregistrent un pointage (comme d'habitude).
+  //    'pause'    → la prochaine identification sert à la PAUSE : le même
+  //                 mode que le pointage (PIN / QR / visage), sans jamais
+  //                 changer les habitudes de l'entreprise.
+  String _intention = 'pointage';
+  List<Map<String, dynamic>> _pausesOuvertes = [];
+  Timer? _timerPauses;
 
   // 🔢 PIN
   String numeroMatricule = '';
@@ -130,6 +140,7 @@ class _PointageScreenState extends State<PointageScreen> {
   @override
   void dispose() {
     _timer?.cancel();
+    _timerPauses?.cancel();
     super.dispose();
   }
 
@@ -140,6 +151,13 @@ class _PointageScreenState extends State<PointageScreen> {
   Future<void> _initialiserApp() async {
     await _chargerModulesLocaux();
     await _chargerEntrepriseLocale();
+
+    // ⏸ Bandeau des pauses : premier chargement + rafraîchissement doux
+    //    (toutes les minutes) pour afficher les rappels « toujours en pause ? ».
+    _chargerPausesOuvertes();
+    _timerPauses = Timer.periodic(const Duration(minutes: 1), (_) {
+      _chargerPausesOuvertes();
+    });
 
     // ⭐ LIVRAISON 22 — demander au serveur le fuseau officiel de CETTE
     //    entreprise (et son décalage actuel). Volontairement SANS `await` :
@@ -421,6 +439,7 @@ class _PointageScreenState extends State<PointageScreen> {
     await SyncService.synchroniserAutomatique();
     await PhotoService.syncPhotosEnAttente();
     await _compterPointagesEnAttente();
+    await _chargerPausesOuvertes(); // ⏸ le bandeau suit la synchro
     setState(() => syncEnCours = false);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -431,11 +450,445 @@ class _PointageScreenState extends State<PointageScreen> {
   }
 
   // ═══════════════════════════════════════════════════════════
+  // ⏸ VISIBILITÉ DES PAUSES (17/10/2026)
+  //    Le problème : la pause était cachée dans « Ma journée » que très peu
+  //    d'employés consultent. Désormais : un bouton sur l'écran principal +
+  //    un bandeau « qui est en pause depuis quand ».
+  // ═══════════════════════════════════════════════════════════
+
+  Future<void> _chargerPausesOuvertes() async {
+    final entrepriseId = entrepriseSelectionnee?['id']?.toString();
+    if (entrepriseId == null) return;
+    try {
+      final liste =
+          await PauseService.pausesOuvertes(enterpriseId: entrepriseId);
+      if (mounted) {
+        setState(() => _pausesOuvertes = liste);
+      }
+    } catch (e) {
+      print('⚠️ bandeau pauses : $e');
+    }
+  }
+
+  /// Le bouton « ⏸ PAUSE / REPRISE » de l'écran principal.
+  ///
+  /// Identique partout : l'employé s'identifie avec SON mode habituel
+  /// (PIN / QR / visage — celui que l'entreprise a choisi pour le pointage).
+  Future<void> _demarrerFluxPause() async {
+    if (_intention == 'pause') return; // déjà en route (anti-double-tap)
+    setState(() => _intention = 'pause');
+
+    // Mode visage exclusif / obligatoire : on lance tout de suite le scan
+    // visage (reconnaissance SEULE — aucun pointage enregistré).
+    if (_moduleRecoFacialeActif) {
+      final pointageMode = _faceConfig['pointage_mode'] as String? ?? 'free';
+      final pret = _kioskMode || (_faceEnrolled && _faceApproved);
+      if ((pointageMode == 'face_exclusive' ||
+              pointageMode == 'face_required' ||
+              _kioskMode) &&
+          pret) {
+        await _onBoutonFaceClique();
+        return;
+      }
+    }
+    // Sinon : les outils habituels (clavier PIN, scanner QR) sont déjà à
+    // l'écran — la ligne « MODE PAUSE » explique quoi faire.
+  }
+
+  void _annulerFluxPause() {
+    setState(() => _intention = 'pointage');
+  }
+
+  /// L'identification a abouti (PIN, QR ou visage) → la feuille de pause.
+  Future<void> _ouvrirFeuillePause(Map<String, dynamic> employe) async {
+    final entrepriseId = entrepriseSelectionnee?['id']?.toString();
+    final employeId = employe['id'] as String?;
+    if (employeId == null || entrepriseId == null) {
+      _annulerFluxPause();
+      return;
+    }
+
+    final nom =
+        '${employe['first_name'] ?? ''} ${employe['last_name'] ?? ''}'.trim();
+    final matricule = employe['matricule']?.toString();
+
+    // « 📍 Hors site » : informatif uniquement — ne bloque JAMAIS la pause.
+    var horsSite = false;
+    try {
+      if (_moduleGeofencingActif) {
+        final position = await GeofencingService.obtenirPosition();
+        if (position != null) {
+          final zone = await GeofencingService.verifierZone(
+              enterpriseId: entrepriseId, position: position);
+          horsSite = zone['is_within_zone'] == false;
+        }
+      }
+    } catch (_) {}
+
+    // État actuel : local ∪ base (la fusion est dans PauseService).
+    final liste =
+        await PauseService.pausesOuvertes(enterpriseId: entrepriseId);
+    Map<String, dynamic>? ouverte;
+    for (final p in liste) {
+      if (p['employee_id'] == employeId) ouverte = p;
+    }
+
+    if (!mounted) return;
+
+    String? motifChoisi = ouverte?['motif'] as String?;
+    var actionEnCours = false;
+    var rappelAffiche = false;
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setEtat) {
+          final estOuverte = ouverte != null;
+          DateTime? debut;
+          if (estOuverte) {
+            debut = HeurePointage.instantDe(ouverte!['debut']);
+          }
+          final rappel = debut != null && PauseService.rappelDepasse(debut);
+          if (rappel) rappelAffiche = true;
+          final heureDebut = debut == null
+              ? ''
+              : (PauseService.heureCourteDe(
+                  debut.toUtc().toIso8601String()));
+
+          return Container(
+            decoration: BoxDecoration(
+              color: Theme.of(ctx).cardColor,
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(24)),
+            ),
+            padding: EdgeInsets.only(
+              left: 20,
+              right: 20,
+              top: 16,
+              bottom: 20 + MediaQuery.of(ctx).viewInsets.bottom,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: EnCheckColors.gris.withOpacity(0.4),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Icon(
+                      estOuverte ? Icons.pause_circle : Icons.timer_outlined,
+                      color: EnCheckColors.terreChaude,
+                      size: 28,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            nom,
+                            style: const TextStyle(
+                                fontSize: 18, fontWeight: FontWeight.w700),
+                          ),
+                          if (matricule != null && matricule.isNotEmpty)
+                            Text(
+                              matricule,
+                              style: const TextStyle(
+                                  fontSize: 12, color: EnCheckColors.gris),
+                            ),
+                        ],
+                      ),
+                    ),
+                    if (horsSite)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: EnCheckColors.terreChaude.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Text('📍 Hors site',
+                            style: TextStyle(
+                                fontSize: 11,
+                                color: EnCheckColors.terreChaude)),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  estOuverte
+                      ? 'En pause depuis $heureDebut'
+                      : 'Prêt pour la pause ?',
+                  style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w600),
+                ),
+                if (estOuverte && rappelAffiche) ...[
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: EnCheckColors.terreChaude.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.alarm,
+                            size: 16, color: EnCheckColors.terreChaude),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Toujours en pause ? Touche ▶ Je reprends si tu es de retour.',
+                            style: TextStyle(
+                                fontSize: 12,
+                                color: EnCheckColors.terreChaude),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 14),
+                const Text('Motif facultatif :',
+                    style:
+                        TextStyle(fontSize: 12, color: EnCheckColors.gris)),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: [
+                    for (final motif in PauseService.motifs)
+                      ChoiceChip(
+                        label: Text(motif),
+                        selected: motifChoisi == motif,
+                        selectedColor:
+                            EnCheckColors.terreChaude.withOpacity(0.2),
+                        onSelected: (_) async {
+                          final nouveau =
+                              (motifChoisi == motif) ? null : motif;
+                          setEtat(() => motifChoisi = nouveau);
+                          if (estOuverte) {
+                            // Modifiable tant que la pause est ouverte.
+                            await PauseService.changerMotif(
+                                employeeId: employeId, motif: nouveau);
+                          }
+                        },
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                ElevatedButton.icon(
+                  onPressed: actionEnCours
+                      ? null
+                      : () async {
+                          setEtat(() => actionEnCours = true);
+                          try {
+                            if (estOuverte) {
+                              await PauseService.reprendre(
+                                employeeId: employeId,
+                                enterpriseId: entrepriseId,
+                              );
+                            } else {
+                              ouverte = await PauseService.partirEnPause(
+                                employeeId: employeId,
+                                enterpriseId: entrepriseId,
+                                nom: nom,
+                                matricule: matricule,
+                                motif: motifChoisi,
+                              );
+                            }
+                            if (!ctx.mounted) return;
+                            Navigator.of(ctx).pop();
+                            final horsLigne = !ConnectivityService.isOnline;
+                            if (mounted) {
+                              ScaffoldMessenger.of(context)
+                                  .showSnackBar(SnackBar(
+                                content: Text(estOuverte
+                                    ? (horsLigne
+                                        ? '▶ Reprise enregistrée hors-ligne : elle sera synchronisée.'
+                                        : '▶ Reprise enregistrée. Bon service !')
+                                    : (horsLigne
+                                        ? '⏸ Pause enregistrée hors-ligne : elle sera synchronisée.'
+                                        : '⏸ Pause enregistrée. Bonne pause !')),
+                                backgroundColor: estOuverte
+                                    ? EnCheckColors.succes
+                                    : EnCheckColors.terreChaude,
+                              ));
+                              _chargerPausesOuvertes();
+                            }
+                          } catch (e) {
+                            setEtat(() => actionEnCours = false);
+                            if (ctx.mounted) {
+                              ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+                                  content:
+                                      Text("Impossible d'enregistrer : $e")));
+                            }
+                          }
+                        },
+                  icon: Icon(estOuverte ? Icons.play_arrow : Icons.pause),
+                  label: Text(estOuverte
+                      ? '▶ Je reprends'
+                      : '⏸ Je pars en pause'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: estOuverte
+                        ? EnCheckColors.succes
+                        : EnCheckColors.terreChaude,
+                    foregroundColor: EnCheckColors.blanc,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+
+    _annulerFluxPause();
+    if (mounted) _chargerPausesOuvertes();
+  }
+
+  /// Le bandeau « qui est en pause » — visible par tout le monde sur la
+  /// tablette partagée (choix validé le 17/10 : avec le nom).
+  Widget _construireBandeauPauses() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: EnCheckColors.terreChaude.withOpacity(0.10),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: EnCheckColors.terreChaude.withOpacity(0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.pause_circle,
+                  size: 16, color: EnCheckColors.terreChaude),
+              SizedBox(width: 6),
+              Text('PAUSES EN COURS',
+                  style: TextStyle(
+                      fontSize: 10,
+                      letterSpacing: 1.2,
+                      fontWeight: FontWeight.w700,
+                      color: EnCheckColors.terreChaude)),
+            ],
+          ),
+          const SizedBox(height: 6),
+          for (final pause in _pausesOuvertes) ...[
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '⏸ ${pause['nom'] ?? 'Employé'} — en pause depuis '
+                    '${pause['debut'] == null ? '—' : PauseService.heureCourteDe(pause['debut'] as String)}',
+                    style: const TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.w600),
+                  ),
+                ),
+                if (pause['debut'] != null &&
+                    PauseService.rappelDepasse(
+                        HeurePointage.instantDe(pause['debut']) ??
+                            DateTime.now().toUtc()))
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: EnCheckColors.erreur.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Text('🕒 Toujours en pause ?',
+                        style: TextStyle(
+                            fontSize: 10, color: EnCheckColors.erreur)),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 2),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// La ligne « MODE PAUSE » pendant l'identification.
+  Widget _construireLigneModePause() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: EnCheckColors.sableDore.withOpacity(0.18),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: EnCheckColors.sableDore.withOpacity(0.5)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.pause_circle_outline,
+              size: 18, color: EnCheckColors.terreChaude),
+          const SizedBox(width: 8),
+          const Expanded(
+            child: Text(
+              '⏸ MODE PAUSE — identifiez-vous comme pour pointer',
+              style: TextStyle(
+                  fontSize: 12.5, fontWeight: FontWeight.w600),
+            ),
+          ),
+          TextButton(
+            onPressed: _annulerFluxPause,
+            child: const Text('ANNULER',
+                style: TextStyle(
+                    fontSize: 11, color: EnCheckColors.gris)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Le bouton PAUSE, toujours visible sous la zone de pointage.
+  Widget _buildBoutonPause() {
+    final enModePause = _intention == 'pause';
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton.icon(
+        onPressed: enModePause ? null : _demarrerFluxPause,
+        icon: Icon(enModePause ? Icons.hourglass_top : Icons.pause_circle),
+        label: Text(
+          enModePause ? 'MODE PAUSE EN COURS…' : '⏸ PAUSE / REPRISE',
+          style: const TextStyle(
+              letterSpacing: 1.2,
+              fontWeight: FontWeight.w700,
+              fontSize: 15),
+        ),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: EnCheckColors.terreChaude,
+          foregroundColor: EnCheckColors.blanc,
+          disabledBackgroundColor: EnCheckColors.gris.withOpacity(0.5),
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
   // 🤖 LOGIQUE RECONNAISSANCE FACIALE
   // ═══════════════════════════════════════════════════════════
 
   Future<void> _onBoutonFaceClique() async {
-    if (_moduleGeofencingActif) {
+    // ⏸ En MODE PAUSE, le GPS ne bloque jamais (fiche LOT D).
+    if (_moduleGeofencingActif && _intention != 'pause') {
       final gpsOk = await _verifierPositionGPS();
       if (!gpsOk) return;
     }
@@ -1216,6 +1669,8 @@ class _PointageScreenState extends State<PointageScreen> {
         positionGPS: _currentPosition,
         verificationZone: _verificationZone,
         kioskMode: _kioskMode,
+        // ⏸ En MODE PAUSE : le visage identifie SANS enregistrer de pointage.
+        identificationSeule: _intention == 'pause',
         onPointageComplete: (result) async {
           Map<String, dynamic>? employeeComplet;
           final empId = result['employee_id'] as String?;
@@ -1241,6 +1696,16 @@ class _PointageScreenState extends State<PointageScreen> {
             _currentPosition = null;
             _verificationZone = null;
           });
+
+          // ⏸ MODE PAUSE : reconnu → feuille de pause (aucun pointage écrit).
+          if (result['identification_seule'] == true) {
+            if (employeeComplet != null) {
+              await _ouvrirFeuillePause(employeeComplet);
+            } else {
+              _annulerFluxPause();
+            }
+            return;
+          }
 
           await _compterPointagesEnAttente();
           if (mounted) _afficherSuccesFacial(result);
@@ -1443,8 +1908,25 @@ class _PointageScreenState extends State<PointageScreen> {
                       const SizedBox(height: 16),
                       _buildIndicateursModules(),
                     ],
-                    const SizedBox(height: 40),
+
+                    // ⏸ Bandeau « pauses en cours » (avec noms) — visible
+                    //    par tout le monde, comme validé le 17/10.
+                    if (_pausesOuvertes.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      _construireBandeauPauses(),
+                    ],
+
+                    const SizedBox(height: 30),
+                    if (_intention == 'pause') ...[
+                      _construireLigneModePause(),
+                      const SizedBox(height: 12),
+                    ],
                     _buildZonePointage(),
+                    const SizedBox(height: 20),
+
+                    // ⏸ LE BOUTON PAUSE — toujours visible, jamais caché
+                    //    dans « Ma journée » (le problème signalé le 17/10).
+                    _buildBoutonPause(),
                     const SizedBox(height: 30),
                     _buildSeparateur(),
                     const SizedBox(height: 20),
@@ -2868,7 +3350,9 @@ class _PointageScreenState extends State<PointageScreen> {
   Future<void> _validerPointagePIN() async {
     if (entrepriseSelectionnee == null) return;
 
-    if (_moduleGeofencingActif) {
+    // ⏸ En MODE PAUSE, le GPS ne bloque jamais (fiche LOT D) : « Hors site »
+    //    reste informatif. Le contrôle n'est fait que pour un vrai pointage.
+    if (_moduleGeofencingActif && _intention != 'pause') {
       final gpsOk = await _verifierPositionGPS();
       if (!gpsOk) return;
     }
@@ -2889,6 +3373,22 @@ class _PointageScreenState extends State<PointageScreen> {
 
       if (employee != null) {
         _extraireSchedule(employee);
+
+        // ⏸ MODE PAUSE : identifié → la feuille de pause, et RIEN d'autre.
+        if (_intention == 'pause') {
+          setState(() {
+            chargement = false;
+            numeroMatricule = '';
+            codePin = '';
+            afficherPin = false;
+            _modeSelectionne = null;
+            _gpsVerifie = false;
+            _currentPosition = null;
+            _verificationZone = null;
+          });
+          await _ouvrirFeuillePause(employee);
+          return;
+        }
 
         if (_modulePhotoActif && !_moduleQRActif) {
           if (kIsWeb) {
@@ -2974,7 +3474,8 @@ class _PointageScreenState extends State<PointageScreen> {
   Future<void> _validerPointageQRPuisPhoto(String qrCode) async {
     if (entrepriseSelectionnee == null) return;
 
-    if (_moduleGeofencingActif) {
+    // ⏸ En MODE PAUSE, le GPS ne bloque jamais (fiche LOT D).
+    if (_moduleGeofencingActif && _intention != 'pause') {
       final gpsOk = await _verifierPositionGPS();
       if (!gpsOk) return;
     }
@@ -3001,6 +3502,19 @@ class _PointageScreenState extends State<PointageScreen> {
 
       _extraireSchedule(employee);
 
+      // ⏸ MODE PAUSE : pas de photo, pas de pointage — la feuille de pause.
+      if (_intention == 'pause') {
+        setState(() {
+          chargement = false;
+          _modeSelectionne = null;
+          _gpsVerifie = false;
+          _currentPosition = null;
+          _verificationZone = null;
+        });
+        await _ouvrirFeuillePause(employee);
+        return;
+      }
+
       // QR validé → ouvrir WebCameraWidget
       setState(() {
         chargement = false;
@@ -3018,7 +3532,8 @@ class _PointageScreenState extends State<PointageScreen> {
       String qrCode, Uint8List? photoBytes) async {
     if (entrepriseSelectionnee == null) return;
 
-    if (_moduleGeofencingActif) {
+    // ⏸ En MODE PAUSE, le GPS ne bloque jamais (fiche LOT D).
+    if (_moduleGeofencingActif && _intention != 'pause') {
       final gpsOk = await _verifierPositionGPS();
       if (!gpsOk) return;
     }
@@ -3039,6 +3554,20 @@ class _PointageScreenState extends State<PointageScreen> {
 
       if (employee != null) {
         _extraireSchedule(employee);
+
+        // ⏸ MODE PAUSE : identifié → la feuille de pause, sans pointage.
+        if (_intention == 'pause') {
+          setState(() {
+            chargement = false;
+            _modeSelectionne = null;
+            _gpsVerifie = false;
+            _currentPosition = null;
+            _verificationZone = null;
+          });
+          await _ouvrirFeuillePause(employee);
+          return;
+        }
+
         final method = photoBytes != null ? 'qr_photo' : 'qr_code';
         await _traiterPointage(employee, method, estHorsLigne, photoBytes);
       } else {

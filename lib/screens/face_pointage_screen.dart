@@ -30,6 +30,12 @@ class FacePointageScreen extends StatefulWidget {
   final Map<String, dynamic>? verificationZone;
   final bool kioskMode;
 
+  /// 🎯 MODE PAUSE (visibilité, 17/10/2026) : quand c'est `true`, le visage
+  /// sert UNIQUEMENT à reconnaître l'employé — AUCUN pointage n'est
+  /// enregistré. Le résultat `identification_seule` part dans
+  /// `onPointageComplete` pour ouvrir la feuille de pause.
+  final bool identificationSeule;
+
   const FacePointageScreen({
     super.key,
     required this.employee,
@@ -42,6 +48,7 @@ class FacePointageScreen extends StatefulWidget {
     this.positionGPS,
     this.verificationZone,
     this.kioskMode = false,
+    this.identificationSeule = false,
   });
 
   @override
@@ -306,6 +313,24 @@ class _FacePointageScreenState extends State<FacePointageScreen> {
   Future<void> _validerPointage(double score, bool livenessOk, {Map<String, dynamic>? employee}) async {
     setState(() => _pointageEnCours = true);
     final emp = employee ?? widget.employee;
+
+    // 🎯 MODE PAUSE : reconnu → on rend l'identité et on s'arrête ICI.
+    //    Aucun pointage n'est écrit (règle d'or : la pause passe uniquement
+    //    par les 2 RPC de pause, jamais par `attendances`).
+    if (widget.identificationSeule) {
+      setState(() {
+        _pointageTermine = true;
+        _pointageEnCours = false;
+      });
+      widget.onPointageComplete({
+        'identification_seule': true,
+        'score': score,
+        'liveness_ok': livenessOk,
+        'employee_id': emp['id'],
+        'employee': emp,
+      });
+      return;
+    }
 
     try {
       final dernierPointage = await LocalDatabase.dernierPointageCombine(emp['id']);

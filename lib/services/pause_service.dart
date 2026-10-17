@@ -108,6 +108,8 @@ class PauseService {
   static Future<Map<String, dynamic>> partirEnPause({
     required String employeeId,
     required String? enterpriseId,
+    String? nom,
+    String? matricule,
     String? motif,
   }) async {
     final file = await _boiteFile();
@@ -117,6 +119,8 @@ class PauseService {
     final etat = {
       'employee_id': employeeId,
       'enterprise_id': enterpriseId,
+      'nom': nom,
+      'matricule': matricule,
       'debut': debut.toIso8601String(),
       'motif': motif,
       'pause_id': null,
@@ -370,6 +374,110 @@ class PauseService {
       print('⚠️ encheck_pause_prevue : $e');
       return {'trouvee': false};
     }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  //  LA LISTE DES PAUSES EN COURS — pour le bandeau de l'écran principal
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /// Toutes les pauses ouvertes de l'entreprise, pour LE BANDEAU VISIBLE de
+  /// l'écran de pointage (fiche de visibilité, 17/10/2026).
+  ///
+  /// Deux sources mêlées :
+  ///  • la BASE (RPC `encheck_pauses_en_cours`) quand on est en ligne — la
+  ///    vérité, avec les noms ;
+  ///  • l'ÉTAT LOCAL (Hive) toujours — pour voir la pause qui vient d'être
+  ///    ouverte, même hors-ligne ou avant le rejeu.
+  ///
+  /// Règle de fusion (par employé) :
+  ///  • fermée ICI (reprise déjà tapée) → ne plus l'afficher, même si la base
+  ///    ne l'a pas encore reçue ;
+  ///  • ouverte ICI → afficher ;
+  ///  • rien ici → suivre la base.
+  static Future<List<Map<String, dynamic>>> pausesOuvertes({
+    required String enterpriseId,
+  }) async {
+    // 1. État local : les pauses connues de CETTE tablette (ouvertes OU
+    //    fermées localement — la mention « fin » sert de arbitre).
+    final localParEmploye = <String, Map<String, dynamic>>{};
+    try {
+      final box = await _boiteEtat();
+      for (final key in box.keys.toList()) {
+        if (!key.toString().startsWith('etat:')) continue;
+        final etat = Map<String, dynamic>.from(box.get(key) as Map);
+        final empId = etat['employee_id']?.toString();
+        if (empId == null) continue;
+        localParEmploye[empId] = etat;
+      }
+    } catch (e) {
+      print('⚠️ pausesOuvertes (local) : $e');
+    }
+
+    // 2. La base, quand c'est possible.
+    final lignes = <Map<String, dynamic>>[];
+    final vues = <String>{};
+    if (ConnectivityService.isOnline) {
+      try {
+        final res = await _sb.rpc('encheck_pauses_en_cours',
+            params: {'p_enterprise': enterpriseId});
+        if (res is List) {
+          for (final row in res) {
+            final r = Map<String, dynamic>.from(row as Map);
+            final empId = r['employe_id']?.toString();
+            if (empId == null) continue;
+            final local = localParEmploye[empId];
+            // Reprise déjà tapée sur cette tablette (pas encore rejouée) :
+            // on la considère fermée tout de suite.
+            if (local != null &&
+                local['debut'] == null &&
+                local['fin'] != null) {
+              continue;
+            }
+            final prenom = r['prenom']?.toString() ?? '';
+            final nom = r['nom']?.toString() ?? '';
+            lignes.add({
+              'employee_id': empId,
+              'nom': ('$prenom $nom').trim(),
+              'matricule': r['matricule']?.toString(),
+              'debut': r['debut']?.toString(),
+              'motif': r['motif']?.toString(),
+              'duree_minutes': r['duree_minutes'],
+              'source': 'base',
+            });
+            vues.add(empId);
+          }
+        }
+      } catch (e) {
+        // Fonction pas encore créée ou moment sans réseau : le bandeau
+        // restera sur l'état local — jamais d'erreur à l'écran.
+        print('⚠️ pausesOuvertes (base) : $e');
+      }
+    }
+
+    // 3. Compléter avec les pauses ouvertes ICI que la base ne liste pas.
+    for (final entry in localParEmploye.entries) {
+      final etat = entry.value;
+      if (etat['debut'] == null) continue; // fermée ici
+      if (vues.contains(entry.key)) continue;
+      final debutIso = etat['debut'] as String?;
+      lignes.add({
+        'employee_id': entry.key,
+        'nom': etat['nom']?.toString() ?? 'Employé',
+        'matricule': etat['matricule']?.toString(),
+        'debut': debutIso,
+        'motif': etat['motif']?.toString(),
+        'duree_minutes': null,
+        'source': 'local',
+      });
+    }
+
+    // 4. Du plus ancien au plus récent (les oublis de reprise d'abord).
+    lignes.sort((a, b) {
+      final da = HeurePointage.instantDe(a['debut']) ?? DateTime.now().toUtc();
+      final db = HeurePointage.instantDe(b['debut']) ?? DateTime.now().toUtc();
+      return da.compareTo(db);
+    });
+    return lignes;
   }
 
   // ═══════════════════════════════════════════════════════════════════════
