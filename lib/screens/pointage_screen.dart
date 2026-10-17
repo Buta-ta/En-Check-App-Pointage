@@ -854,7 +854,8 @@ class _PointageScreenState extends State<PointageScreen> {
     );
   }
 
-  /// Le bouton PAUSE, toujours visible sous la zone de pointage.
+  /// Le bouton PAUSE, collé JUSTE AU-DESSUS de la carte MATRICULE
+  /// (retour du 17/10 au soir : visible sans jamais scroller).
   Widget _buildBoutonPause() {
     final enModePause = _intention == 'pause';
     return SizedBox(
@@ -1909,24 +1910,23 @@ class _PointageScreenState extends State<PointageScreen> {
                       _buildIndicateursModules(),
                     ],
 
-                    // ⏸ Bandeau « pauses en cours » (avec noms) — visible
-                    //    par tout le monde, comme validé le 17/10.
-                    if (_pausesOuvertes.isNotEmpty) ...[
-                      const SizedBox(height: 16),
-                      _construireBandeauPauses(),
-                    ],
+                    const SizedBox(height: 24),
 
-                    const SizedBox(height: 30),
+                    // ⏸ LE BLOC PAUSE — GLISSÉ JUSTE AU-DESSUS DE LA CARTE
+                    //    « MATRICULE » (retour du 17/10 au soir) : c'est là
+                    //    que se posent les yeux des employés. En bas de page,
+                    //    il fallait scroller tout le temps pour le voir.
+                    if (_pausesOuvertes.isNotEmpty) ...[
+                      _construireBandeauPauses(),
+                      const SizedBox(height: 12),
+                    ],
+                    _buildBoutonPause(),
+                    const SizedBox(height: 12),
                     if (_intention == 'pause') ...[
                       _construireLigneModePause(),
                       const SizedBox(height: 12),
                     ],
                     _buildZonePointage(),
-                    const SizedBox(height: 20),
-
-                    // ⏸ LE BOUTON PAUSE — toujours visible, jamais caché
-                    //    dans « Ma journée » (le problème signalé le 17/10).
-                    _buildBoutonPause(),
                     const SizedBox(height: 30),
                     _buildSeparateur(),
                     const SizedBox(height: 20),
