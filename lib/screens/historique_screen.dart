@@ -102,7 +102,8 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
         if (prefs.getBool('module_geolocalisation') == true &&
             entrepriseId != null &&
             entrepriseId.isNotEmpty) {
-          final position = await GeofencingService.obtenirPosition();
+          final position =
+              await GeofencingService.obtenirPosition(tentatives: 1);
           if (position != null) {
             final zone = await GeofencingService.verifierZone(
                 enterpriseId: entrepriseId, position: position);

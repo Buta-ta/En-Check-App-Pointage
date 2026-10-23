@@ -394,10 +394,46 @@ class _PointageScreenState extends State<PointageScreen> {
     try {
       _currentPosition = await GeofencingService.obtenirPosition();
       if (_currentPosition == null) {
-        _afficherErreur(
-            'Impossible d\'obtenir votre position GPS.\nActivez le GPS.');
-        setState(() => chargement = false);
-        return false;
+        final raison = GeofencingService.raisonDernierEchec;
+
+        if (raison == 'permission') {
+          // Refus RÉEL de la localisation : réglage à corriger, message clair.
+          _afficherErreur(
+              'Localisation refusée pour ce site.\n\n'
+              'Sur iPad (Safari) : Réglages › Safari › Localisation,\n'
+              'ou le bouton « aA » de la page › Paramètres du site › '
+              'Localisation › Autoriser.\n\n'
+              'Sur Android : Réglages › Applications › Navigateur › '
+              'Autorisations › Position.');
+          setState(() => chargement = false);
+          return false;
+        }
+
+        if (raison == 'service') {
+          _afficherErreur(
+              'Services de localisation désactivés sur la tablette.\n\n'
+              'Réglages › Confidentialité et sécurité › '
+              'Services de localisation › Activés.');
+          setState(() => chargement = false);
+          return false;
+        }
+
+        // 'introuvable' — GPS temporairement perdu (intérieur, signal
+        // faible…) : un ennui de GPS ne doit JAMAIS empêcher un pointage.
+        // Même philosophie que le « catch » plus bas : on enregistre quand
+        // même, avec un avertissement honnête.
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text(
+                '⚠️ Position introuvable (GPS faible ?) — pointage enregistré sans contrôle de zone.'),
+            backgroundColor: EnCheckColors.terreChaude,
+          ));
+        }
+        setState(() {
+          chargement = false;
+          _gpsVerifie = true;
+        });
+        return true;
       }
 
       _verificationZone = await GeofencingService.verifierZone(
@@ -516,7 +552,8 @@ class _PointageScreenState extends State<PointageScreen> {
     var horsSite = false;
     try {
       if (_moduleGeofencingActif) {
-        final position = await GeofencingService.obtenirPosition();
+        final position =
+            await GeofencingService.obtenirPosition(tentatives: 1);
         if (position != null) {
           final zone = await GeofencingService.verifierZone(
               enterpriseId: entrepriseId, position: position);
