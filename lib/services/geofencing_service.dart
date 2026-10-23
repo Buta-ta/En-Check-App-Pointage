@@ -31,45 +31,80 @@ class GeofencingService {
   // 📍 OBTENIR LA POSITION GPS ACTUELLE
   // ═══════════════════════════════════════════════════════════
 
-  static Future<Position?> obtenirPosition() async {
-    try {
-      // Vérifier si les permissions sont accordées
-      LocationPermission permission = await Geolocator.checkPermission();
+  /// Pourquoi la dernière tentative a échoué — pour des messages HONNÊTES :
+  ///  'permission'  → la localisation est réellement refusée (réglages)
+  ///  'service'     → les services de localisation sont désactivés
+  ///  'introuvable' → temporairement introuvable (GPS faible, intérieur…)
+  static String? raisonDernierEchec;
 
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-        if (permission == LocationPermission.denied) {
-          print('❌ Permission GPS refusée');
-          return null;
+  /// Obtenir la position GPS.
+  ///
+  /// [tentatives] : nombre de recherches avant d'abandonner (3 par défaut
+  /// pour un pointage ; 1 pour un simple affichage « Hors site »).
+  ///
+  /// ⚠️ LEÇON DU 17/10 (iPad) : on ne fait PLUS confiance aux seuls
+  /// drapeaux de permission. Sur Safari, une simple recherche de position
+  /// ÉCHOUÉE (kCLErrorLocationUnknown = « je ne sais pas où tu es », GPS
+  /// faible ou intérieur) fait répondre le module web « permission refusée
+  /// définitivement ». La VÉRITÉ, c'est la vraie tentative de position
+  /// ci-dessous : c'est elle qui décide.
+  static Future<Position?> obtenirPosition({int tentatives = 3}) async {
+    raisonDernierEchec = null;
+
+    // 1. Services de localisation activés ? (sur web, toujours « oui »)
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        raisonDernierEchec = 'service';
+        print('❌ Service GPS désactivé sur l\'appareil');
+        return null;
+      }
+    } catch (_) {
+      // Certains navigateurs ne savent pas répondre : on continue.
+    }
+
+    // 2. Demande de permission (utile pour afficher la fenêtre système)…
+    //    …mais son verdict ne tranche RIEN (voir la leçon du 17/10).
+    try {
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        await Geolocator.requestPermission();
+      }
+    } catch (_) {}
+
+    // 3. LA VÉRITÉ : la vraie tentative de position, avec retentatives.
+    for (var essai = 1; essai <= tentatives; essai++) {
+      try {
+        final position = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high,
+          timeLimit: const Duration(seconds: 10),
+        );
+        raisonDernierEchec = null;
+        print('✅ Position GPS obtenue: ${position.latitude}, ${position.longitude}');
+        print('   Précision: ${position.accuracy.toStringAsFixed(1)}m');
+        return position;
+      } on PermissionDeniedException {
+        // Refus RÉEL du système ou du navigateur… ou un échec de GPS mal
+        // résumé en « refus » : une seconde tentative sert de garde-fou.
+        raisonDernierEchec = 'permission';
+        print('⚠️ GPS : refus de localisation (tentative $essai/$tentatives)');
+        if (essai < tentatives) {
+          await Future.delayed(const Duration(seconds: 2));
+        }
+      } catch (e) {
+        // Timeout, « position introuvable » (kCLErrorLocationUnknown)…
+        // → ennuis PASSAGERS : on retente avant d'abandonner.
+        raisonDernierEchec = 'introuvable';
+        print('⚠️ GPS : position introuvable (tentative $essai/$tentatives) : $e');
+        if (essai < tentatives) {
+          await Future.delayed(const Duration(seconds: 2));
         }
       }
-
-      if (permission == LocationPermission.deniedForever) {
-        print('❌ Permission GPS refusée définitivement');
-        return null;
-      }
-
-      // Vérifier si le GPS est activé
-      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        print('❌ Service GPS désactivé');
-        return null;
-      }
-
-      // Obtenir la position
-      Position position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-        timeLimit: const Duration(seconds: 10),
-      );
-
-      print('✅ Position GPS obtenue: ${position.latitude}, ${position.longitude}');
-      print('   Précision: ${position.accuracy.toStringAsFixed(1)}m');
-
-      return position;
-    } catch (e) {
-      print('❌ Erreur obtention position GPS: $e');
-      return null;
     }
+
+    print('❌ Position GPS indisponible (raison : $raisonDernierEchec)');
+    return null;
   }
 
   // ═══════════════════════════════════════════════════════════
