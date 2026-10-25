@@ -93,58 +93,28 @@ class SyncService {
     if (!ConnectivityService.isOnline) return;
 
     try {
-      print('📥 Téléchargement des données hors-ligne...');
+      print('📥 Préparation du mode hors-ligne...');
 
       final entreprises = await SupabaseService.getEntreprises();
       await LocalDatabase.cacherEntreprises(entreprises);
 
-      for (var entreprise in entreprises) {
-        final employeesDynamic = await SupabaseService.getEmployeesParEntreprise(entreprise['id']);
-        final employees = employeesDynamic.cast<Map<String, dynamic>>();
-
-        await LocalDatabase.cacherEmployees(employees);
-
-        final schedules = <Map<String, dynamic>>[];
-
-        for (var employee in employees) {
-          try {
-            dynamic rawSchedule = employee['employee_schedules'];
-            Map<String, dynamic>? scheduleMap;
-
-            if (rawSchedule == null) {
-              continue;
-            } else if (rawSchedule is List) {
-              if (rawSchedule.isNotEmpty) {
-                scheduleMap = rawSchedule.first as Map<String, dynamic>;
-              }
-            } else if (rawSchedule is Map) {
-              scheduleMap = rawSchedule as Map<String, dynamic>;
-            }
-
-            if (scheduleMap != null) {
-              final cleanSchedule = Map<String, dynamic>.from(scheduleMap);
-              schedules.add(cleanSchedule);
-            }
-          } catch (e) {
-            print('⚠️ Ignoré horaire malformé pour employé ${employee['id']}: $e');
-          }
-        }
-
-        if (schedules.isNotEmpty) {
-          await LocalDatabase.cacherHoraires(schedules);
-        }
-      }
+      // CONTRAT D'ACCÈS EMPLOYÉS (25/10/2026) : plus de téléchargement
+      // collectif du personnel. L'ancienne boucle lisait `employees_public`
+      // (lecture anonyme désormais interdite). Le cache des employés ne
+      // contient QUE les profils de ceux qui se sont identifiés sur cette
+      // tablette, écrits à la connexion (SupabaseService._mettreEnCacheSession).
+      // La synchronisation collective (personnel + gabarits) viendra de
+      // encheck_borne_personnel, avec un appareil autorisé par l'administration.
 
       // Les appels de SupabaseService avalent leurs exceptions et renvoient du
       // vide : sans ce contrôle, un 401 « permission denied for table » passait
-      // pour un téléchargement réussi, et la console annonçait « ✅ Données
-      // hors-ligne téléchargées avec succès » juste au-dessus de l'erreur.
+      // pour un téléchargement réussi.
       final erreur = SupabaseService.derniereErreur;
       if (erreur != null) {
-        print('⚠️ Téléchargement hors-ligne INCOMPLET — $erreur');
+        print('⚠️ Catalogue des entreprises incomplet — $erreur');
         print('   Les caches locaux gardent leur contenu précédent.');
       } else {
-        print('✅ Données hors-ligne téléchargées avec succès');
+        print('✅ Mode hors-ligne prêt (catalogue des entreprises à jour)');
       }
     } catch (e) {
       print('❌ Erreur téléchargement données: $e');
