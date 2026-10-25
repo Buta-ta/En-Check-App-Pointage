@@ -175,6 +175,36 @@ class LocalDatabase {
     return box.values.map((e) => Map<String, dynamic>.from(e)).toList();
   }
 
+  /// 🪪 CONTRAT D'ACCÈS (25/10/2026) — compléter une fiche légère depuis une
+  /// ligne d'enrôlement facial (si elle porte des champs d'identité).
+  /// Ajout UNIQUEMENT : une clé déjà présente n'est jamais remplacée — une
+  /// fiche mémorisée à la connexion prime toujours.
+  static Future<void> completerIdentiteCache(Map<String, dynamic> ligne) async {
+    try {
+      final id = ligne['employee_id'];
+      if (id is! String || id.isEmpty) return;
+      var box = Hive.box('employees_cache');
+      final brut = box.get(id);
+      final fiche = brut != null
+          ? Map<String, dynamic>.from(brut)
+          : <String, dynamic>{};
+      fiche.putIfAbsent('id', () => id);
+      for (final cle in [
+        'enterprise_id',
+        'first_name',
+        'last_name',
+        'matricule',
+        'photo_url',
+        'is_active',
+      ]) {
+        if (ligne[cle] != null) fiche.putIfAbsent(cle, () => ligne[cle]);
+      }
+      await box.put(id, fiche);
+    } catch (e) {
+      print('⚠️ completerIdentiteCache : $e');
+    }
+  }
+
   // ═══════════════════════════════════════════════
   // 🔐 VÉRIFIER UN EMPLOYÉ EN CACHE (AVEC PIN)
   // ══

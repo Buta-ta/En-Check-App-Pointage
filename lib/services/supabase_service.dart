@@ -76,6 +76,21 @@ class SupabaseService {
     return cleanData;
   }
 
+  /// 💾 CONTRAT D'ACCÈS (25/10/2026) — cache de SESSION uniquement.
+  ///
+  /// L'ancien cache collectif (toute l'entreprise téléchargée en anonyme) a
+  /// été supprimé : `employees_public` est fermé. On mémorise ici le profil
+  /// tel que la RPC de connexion vient de le renvoyer — c'est ce qui permet
+  /// au mode hors-ligne de retrouver les employés déjà identifiés sur cette
+  /// tablette, et rien de plus.
+  static Future<void> _mettreEnCacheSession(Map<String, dynamic> profil) async {
+    try {
+      await LocalDatabase.cacherEmployees([profil]);
+    } catch (e) {
+      print('⚠️ Cache session non écrit : $e');
+    }
+  }
+
   /// Dernière erreur d'accès aux données, en clair. `null` quand tout va bien.
   /// Sert à ne pas annoncer « téléchargé avec succès » après un échec :
   /// getEntreprises() renvoie une liste vide sur erreur, et le vide se
@@ -103,25 +118,17 @@ class SupabaseService {
   }
 
   // ═══════════════════════════════════════════════════════════
-  // 👥 RÉCUPÉRER LES EMPLOYÉS
+  // 👥 RÉCUPÉRER LES EMPLOYÉS — SUPPRIMÉ (contrat d'accès employés, 25/10/2026)
   // ═══════════════════════════════════════════════════════════
-  static Future<List<dynamic>> getEmployeesParEntreprise(String enterpriseId) async {
-    try {
-      final response = await client
-          .from('employees_public')
-          .select('*, employee_schedules(*, work_schedules(*))')
-          .eq('enterprise_id', enterpriseId)
-          .eq('is_active', true);
-      final List<dynamic> rawList = response as List<dynamic>;
-      derniereErreur = null;
-      return rawList.map((e) => _normaliserEmployee(e as Map<String, dynamic>)).toList();
-    } catch (e) {
-      derniereErreur = messageErreur(e);
-      print('Erreur récupération employés: $e');
-      print('   ↳ diagnostic: $derniereErreur');
-      return [];
-    }
-  }
+  //
+  // getEmployeesParEntreprise() lisait la vue `employees_public` en anonyme.
+  // Cette lecture est désormais interdite côté serveur (migration 011) et le
+  // contrat Admin signé le 25/10 l'interdit de toute façon : le personnel ne
+  // se télécharge plus en bloc. Le cache local ne reçoit QUE les profils
+  // renvoyés par encheck_employee_login / encheck_employee_login_qr au moment
+  // où quelqu'un s'identifie sur cette tablette (voir _mettreEnCacheSession).
+  // La synchronisation collective viendra de encheck_borne_personnel
+  // (appareil autorisé par l'administration).
 
   // ═══════════════════════════════════════════════════════════
   // 🔐 VÉRIFIER EMPLOYÉ (PIN)
@@ -144,6 +151,9 @@ class SupabaseService {
           : Map<String, dynamic>.from(reponse as Map);
 
       if (resultat['ok'] != true) {
+        // Mauvais identifiants = parcours normal : ce n'est PAS une panne
+        // d'accès aux données, on n'annonce donc aucune erreur de connexion.
+        derniereErreur = null;
         print('Connexion refuse: ' + resultat['raison'].toString());
         return null;
       }
@@ -151,8 +161,15 @@ class SupabaseService {
       final empLocal = Map<String, dynamic>.from(resultat['employee'] as Map);
       await LocalDatabase.memoriserVerificateur(empLocal['id'] as String, pin);
       await TrustedPunchService.enregistrerJeton(resultat['jeton'] as String?);
-      return _normaliserEmployee(Map<String, dynamic>.from(resultat['employee'] as Map));
+      final profil =
+          _normaliserEmployee(Map<String, dynamic>.from(resultat['employee'] as Map));
+      // Contrat d'accès : le cache local ne reçoit QUE le profil de la
+      // session en cours — jamais tout le personnel de l'entreprise.
+      await _mettreEnCacheSession(profil);
+      derniereErreur = null;
+      return profil;
     } catch (e) {
+      derniereErreur = messageErreur(e);
       print('Erreur verification: ' + e.toString());
       return null;
     }
@@ -179,6 +196,8 @@ class SupabaseService {
           : Map<String, dynamic>.from(reponse as Map);
 
       if (resultat['ok'] != true) {
+        // Mauvais badge = parcours normal : aucune erreur de connexion.
+        derniereErreur = null;
         print('Badge refuse: ' + resultat['raison'].toString());
         return null;
       }
@@ -189,8 +208,15 @@ class SupabaseService {
         await LocalDatabase.memoriserVerificateur(empLocal['id'] as String, pin);
       }
       await TrustedPunchService.enregistrerJeton(resultat['jeton'] as String?);
-      return _normaliserEmployee(Map<String, dynamic>.from(resultat['employee'] as Map));
+      final profil =
+          _normaliserEmployee(Map<String, dynamic>.from(resultat['employee'] as Map));
+      // Contrat d'accès : le cache local ne reçoit QUE le profil de la
+      // session en cours — jamais tout le personnel de l'entreprise.
+      await _mettreEnCacheSession(profil);
+      derniereErreur = null;
+      return profil;
     } catch (e) {
+      derniereErreur = messageErreur(e);
       print('Erreur verification QR: ' + e.toString());
       return null;
     }
@@ -311,32 +337,18 @@ class SupabaseService {
         int limite = 50,
       }) async {
     try {
-      // 1. Le chemin normal : la fonction dédiée, non soumise à la RLS.
-      try {
-        final viaRpc = await _pointagesViaRpc(employeeId, limite);
-        derniereErreur = null;
-        return viaRpc;
-      } catch (e) {
-        // Un projet plus ancien pourrait ne pas avoir la fonction : on
-        // retente en lecture directe plutôt que d'abandonner.
-        print('Historique via RPC indisponible, repli sur la table : $e');
-      }
-
-      // 2. Repli : lecture directe de la table.
-      final response = await client
-          .from('attendances')
-          .select()
-          .eq('employee_id', employeeId)
-          .order('check_time', ascending: false)
-          .limit(limite);
+      // Chemin unique : la fonction dédiée, non soumise à la RLS.
+      // CONTRAT D'ACCÈS (25/10/2026) : plus de repli en lecture directe sur
+      // `attendances` — un refus ne doit ni déclencher une lecture de secours
+      // ni se transformer en historique vide présenté comme un succès.
+      final viaRpc = await _pointagesViaRpc(employeeId, limite);
       derniereErreur = null;
-      return List<Map<String, dynamic>>.from(response);
+      return viaRpc;
     } catch (e) {
-      // Un 401 « permission denied for table attendances » renvoyait une liste
-      // vide, et l'écran affichait alors « Aucun pointage » — impossible pour
-      // l'employé de distinguer une journée sans pointage d'un droit manquant.
+      // L'écran lit `derniereErreur` et affiche l'échec : l'employé distingue
+      // une journée sans pointage d'un problème de droits ou de réseau.
       derniereErreur = messageErreur(e);
-      print('Erreur historique: $e');
+      print('Erreur historique (RPC seule) : $e');
       print('   ↳ diagnostic: $derniereErreur');
       return [];
     }
@@ -353,27 +365,14 @@ class SupabaseService {
   /// toujours `null` : l'application croyait alors n'avoir aucun pointage
   /// et enregistrait une ENTRÉE à chaque passage.
   static Future<Map<String, dynamic>?> dernierPointage(String employeeId) async {
-    // 1. Le chemin normal : la fonction dédiée, non soumise à la RLS.
+    // Chemin unique : la fonction dédiée. CONTRAT D'ACCÈS (25/10/2026) —
+    // plus de repli en lecture directe sur `attendances`.
     try {
       final viaRpc = await _pointagesViaRpc(employeeId, 1);
       if (viaRpc.isNotEmpty) return viaRpc.first;
       return null;
     } catch (e) {
-      print('Dernier pointage via RPC indisponible, repli sur la table : $e');
-    }
-
-    // 2. Repli : lecture directe de la table.
-    try {
-      final response = await client
-          .from('attendances')
-          .select()
-          .eq('employee_id', employeeId)
-          .order('check_time', ascending: false)
-          .limit(1)
-          .maybeSingle();
-      return response;
-    } catch (e) {
-      print('Erreur dernier pointage: $e');
+      print('Dernier pointage indisponible (RPC seule) : $e');
       return null;
     }
   }
@@ -698,6 +697,12 @@ class SupabaseService {
             e['is_active'] == true &&
             e['face_embedding'] != null)
             .toList();
+        // Contrat d'accès : si la ligne d'enrôlement porte des champs
+        // d'identité, on complète le cache local (ajout uniquement — jamais
+        // d'écrasement d'une fiche plus complète mémorisée à la connexion).
+        for (final e in tous) {
+          await LocalDatabase.completerIdentiteCache(e);
+        }
         print('✅ ${tous.length} visage(s) de référence chargé(s) depuis le serveur');
         return tous;
       }
@@ -710,21 +715,10 @@ class SupabaseService {
   }
 
   // ═══════════════════════════════════════════════════════════
-  // 👤 CHARGER UN EMPLOYÉ PAR ID
+  // 👤 CHARGER UN EMPLOYÉ PAR ID — SUPPRIMÉ (contrat d'accès 25/10/2026)
   // ═══════════════════════════════════════════════════════════
-  static Future<Map<String, dynamic>?> getEmployeeParId(String employeeId) async {
-    try {
-      final response = await client
-          .from('employees_public')
-          .select('*, enterprises(*), employee_schedules(*, work_schedules(*))')
-          .eq('id', employeeId)
-          .eq('is_active', true)
-          .maybeSingle();
-      if (response == null) return null;
-      return _normaliserEmployee(response);
-    } catch (e) {
-      print('❌ Erreur chargement employé: $e');
-      return null;
-    }
-  }
+  // getEmployeeParId() lisait `employees_public` en anonyme : lecture
+  // désormais interdite. La fiche vient du profil renvoyé par la RPC de
+  // connexion (ou du cache de session) ; un ID fourni par le client n'est
+  // de toute façon jamais une autorisation (contrat Admin du 25/10/2026).
 }

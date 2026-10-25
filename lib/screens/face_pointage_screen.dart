@@ -247,7 +247,18 @@ class _FacePointageScreenState extends State<FacePointageScreen> {
         meilleurScore = score;
         final empId = embeddingData['employee_id'] as String;
         final emp = await LocalDatabase.getEmployeeParId(empId);
-        if (emp != null) meilleurEmployee = emp;
+        // CONTRAT D'ACCÈS (25/10/2026) : le cache ne contient plus tout le
+        // personnel. Le visage EST reconnu (le vecteur correspond) : on garde
+        // au minimum l'identifiant vérifié — un visage reconnu ne devient
+        // jamais un « non reconnu » faute de fiche.
+        meilleurEmployee = emp ??
+            {
+              'id': empId,
+              'enterprise_id': widget.enterpriseId,
+              'first_name': '',
+              'last_name': '',
+              'fiche_incomplete': true,
+            };
       }
     }
 
@@ -701,7 +712,12 @@ class _FacePointageScreenState extends State<FacePointageScreen> {
     final estEntree = _resultats!['check_type'] == 'in';
     final score = (_resultats!['score'] as double) * 100;
     final emp = _resultats!['employee'] as Map<String, dynamic>?;
-    final nomAffiche = emp != null ? '${emp['first_name']} ${emp['last_name']}' : '';
+    // Nom complet s'il existe ; sinon un libellé honnête (fiche minimale
+    // quand le visage est reconnu hors cache — contrat d'accès 25/10/2026).
+    final noms = emp == null
+        ? ''
+        : '${emp['first_name'] ?? ''} ${emp['last_name'] ?? ''}'.trim();
+    final nomAffiche = noms.isEmpty ? 'Employé identifié' : noms;
 
     return Scaffold(
       backgroundColor: Colors.black,

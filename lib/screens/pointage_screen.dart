@@ -250,29 +250,18 @@ class _PointageScreenState extends State<PointageScreen> {
   }
 
   Future<void> _detecterEmployesNonEnroles() async {
-    if (entrepriseSelectionnee == null) return;
-
-    try {
-      final allEmployees = await SupabaseService.getEmployeesParEntreprise(
-          entrepriseSelectionnee!['id']);
-
-      final nonEnroles = <Map<String, dynamic>>[];
-      for (final emp in allEmployees.cast<Map<String, dynamic>>()) {
-        final embedding = await LocalDatabase.getEmbedding(emp['id']);
-        if (embedding == null) {
-          nonEnroles.add(emp);
-        }
-      }
-
-      if (mounted) {
-        setState(() {
-          _kioskEmployeesNonEnroles = nonEnroles;
-          _kioskPhase = nonEnroles.isEmpty ? 'pointage' : 'enrolling';
-          _kioskEnrolementIndex = 0;
-        });
-      }
-    } catch (e) {
-      print('❌ Erreur détection non-enrôlés: $e');
+    // CONTRAT D'ACCÈS EMPLOYÉS (25/10/2026) : la liste complète du personnel
+    // n'est plus téléchargée (lecture `employees_public` fermée). Le balayage
+    // collectif « qui n'a pas encore donné son visage ? » attend donc la
+    // synchronisation de BORNE AUTORISÉE (encheck_borne_personnel, côté
+    // Admin). En attendant : aucun balayage — et un message honnête au lieu
+    // du faux « Tous les employés sont déjà enrôlés ».
+    if (mounted) {
+      setState(() {
+        _kioskEmployeesNonEnroles = [];
+        _kioskPhase = 'pointage';
+        _kioskEnrolementIndex = 0;
+      });
     }
   }
 
@@ -1175,7 +1164,8 @@ class _PointageScreenState extends State<PointageScreen> {
 
       if (employee == null) {
         setState(() => chargement = false);
-        _afficherErreur('Matricule ou PIN incorrect');
+        _afficherErreur(
+            _messageIdentifiants(estHorsLigne: estHorsLigne, type: 'pin'));
         return;
       }
 
@@ -1710,21 +1700,12 @@ class _PointageScreenState extends State<PointageScreen> {
         // ⏸ En MODE PAUSE : le visage identifie SANS enregistrer de pointage.
         identificationSeule: _intention == 'pause',
         onPointageComplete: (result) async {
-          Map<String, dynamic>? employeeComplet;
-          final empId = result['employee_id'] as String?;
-          if (empId != null && empId.isNotEmpty) {
-            try {
-              if (ConnectivityService.isOnline) {
-                employeeComplet =
-                await SupabaseService.getEmployeeParId(empId);
-              }
-              employeeComplet ??= result['employee'];
-            } catch (_) {
-              employeeComplet = result['employee'];
-            }
-          } else {
-            employeeComplet = _employeeEnAttente;
-          }
+          // CONTRAT D'ACCÈS (25/10/2026) : la fiche vient du profil renvoyé
+          // par le scan — plus de rechargement anonyme par ID
+          // (`employees_public` est fermé).
+          Map<String, dynamic>? employeeComplet =
+              result['employee'] as Map<String, dynamic>?;
+          employeeComplet ??= _employeeEnAttente;
 
           setState(() {
             _showFacePointage = false;
@@ -2189,7 +2170,10 @@ class _PointageScreenState extends State<PointageScreen> {
         await _detecterEmployesNonEnroles();
         if (_kioskEmployeesNonEnroles.isEmpty) {
           _afficherErreur(
-              'Tous les employés sont déjà enrôlés.\nAucun nouvel employé à enrôler.');
+              'Liste complète du personnel non disponible sur cette tablette.\n'
+              'L\'enrôlement collectif arrive avec la synchronisation de borne.\n'
+              'Pour l\'instant : un employé s\'enrôle en s\'identifiant avec '
+              'son matricule et son PIN.');
           return;
         }
         setState(() {
@@ -3107,7 +3091,9 @@ class _PointageScreenState extends State<PointageScreen> {
                         if (employee == null) {
                           setModalState(() {
                             verificationEnCours = false;
-                            messageErreur = 'Matricule ou PIN incorrect.';
+                            messageErreur = _messageIdentifiants(
+                                estHorsLigne: !ConnectivityService.isOnline,
+                                type: 'pin');
                           });
                           return;
                         }
@@ -3458,7 +3444,8 @@ class _PointageScreenState extends State<PointageScreen> {
           });
         }
       } else {
-        _afficherErreur('Matricule ou PIN incorrect');
+        _afficherErreur(
+            _messageIdentifiants(estHorsLigne: estHorsLigne, type: 'pin'));
         setState(() => chargement = false);
       }
     } catch (e) {
@@ -3532,7 +3519,8 @@ class _PointageScreenState extends State<PointageScreen> {
       }
 
       if (employee == null) {
-        _afficherErreur('Badge non reconnu');
+        _afficherErreur(
+            _messageIdentifiants(estHorsLigne: estHorsLigne, type: 'qr'));
         setState(() => chargement = false);
         return;
       }
@@ -3608,7 +3596,8 @@ class _PointageScreenState extends State<PointageScreen> {
         final method = photoBytes != null ? 'qr_photo' : 'qr_code';
         await _traiterPointage(employee, method, estHorsLigne, photoBytes);
       } else {
-        _afficherErreur('Badge non reconnu');
+        _afficherErreur(
+            _messageIdentifiants(estHorsLigne: estHorsLigne, type: 'qr'));
       }
     } catch (e) {
       _afficherErreur('Erreur: $e');
@@ -3621,6 +3610,24 @@ class _PointageScreenState extends State<PointageScreen> {
       _currentPosition = null;
       _verificationZone = null;
     });
+  }
+
+  /// 💬 CONTRAT D'ACCÈS (25/10/2026) — message honnête selon la cause réelle
+  /// d'un échec d'identification : plus de vide silencieux ni de « incorrect »
+  /// mensonger quand c'est le réseau ou le cache de la tablette.
+  String _messageIdentifiants(
+      {required bool estHorsLigne, required String type}) {
+    if (estHorsLigne) {
+      return type == 'qr'
+          ? 'Badge incorrect — ou jamais utilisé sur cette tablette (hors-ligne).'
+          : 'Matricule ou PIN incorrect — ou employé jamais identifié sur '
+              'cette tablette (hors-ligne).';
+    }
+    final panne = SupabaseService.derniereErreur;
+    if (panne != null) {
+      return 'Connexion au serveur impossible : $panne';
+    }
+    return type == 'qr' ? 'Badge non reconnu' : 'Matricule ou PIN incorrect';
   }
 
   void _extraireSchedule(Map<String, dynamic> employee) {
