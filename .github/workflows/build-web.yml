@@ -121,6 +121,11 @@ jobs:
       # On vide d'abord le dossier : l'ancien build contenait des fichiers
       # inutiles laissés par des essais locaux (.vercel, .DS_Store…).
       # flutter build web recrée tout proprement.
+      - name: Diagnostic analyse (temporaire)
+        continue-on-error: true
+        run: |
+          flutter analyze --no-fatal-infos 2>&1 | head -80 | sed 's/^/::error::/'
+
       - name: Compiler l'application web
         run: |
           rm -rf build/web
