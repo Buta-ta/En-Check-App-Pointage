@@ -100,20 +100,100 @@ class SupabaseService {
   // ═══════════════════════════════════════════════════════════
   // 🏢 RÉCUPÉRER LES ENTREPRISES
   // ═══════════════════════════════════════════════════════════
+  /// 🏢 CATALOGUE PUBLIC — CONTRAT ÉTAPE 2 (25/10/2026)
+  ///
+  /// Remplace l'ancienne lecture directe de `enterprises` par la RPC
+  /// `encheck_entreprises_publiques()` : entreprises ACTIVES uniquement,
+  /// champs exacts id, name, logo_url, matricule_prefix, pointage_mode.
+  /// `pointage_mode` vaut `null` sans configuration : conservé tel quel
+  /// (jamais converti silencieusement en 'free' — consigne Admin).
+  /// Les anciens droits directs sur `enterprises` seront retirés par
+  /// l'équipe Admin après validation de cette bascule.
   static Future<List<Map<String, dynamic>>> getEntreprises() async {
     try {
-      final response = await client
-          .from('enterprises')
-          .select()
-          .eq('is_active', true)
-          .order('name');
+      final reponse = await client.rpc('encheck_entreprises_publiques');
+      final brut = reponse is String ? jsonDecode(reponse) : reponse;
+      if (brut is! Map) {
+        derniereErreur = 'Réponse du catalogue illisible';
+        print('Erreur récupération entreprises: réponse illisible');
+        return [];
+      }
+      if (brut['ok'] != true) {
+        derniereErreur =
+            'Catalogue refusé : ${brut['raison'] ?? 'raison inconnue'}';
+        print('Erreur récupération entreprises: $derniereErreur');
+        return [];
+      }
+      final liste = (brut['entreprises'] as List? ?? [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
       derniereErreur = null;
-      return List<Map<String, dynamic>>.from(response);
+      return liste;
     } catch (e) {
       derniereErreur = messageErreur(e);
       print('Erreur récupération entreprises: $e');
       print('   ↳ diagnostic: $derniereErreur');
       return [];
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // 👤 PROFIL PAR JETON — CONTRAT ÉTAPE 2 (25/10/2026)
+  // ═══════════════════════════════════════════════════════════
+
+  /// 🔄 Profil de la session depuis le jeton applicatif.
+  ///
+  /// Le SERVEUR résout l'employé depuis le jeton — aucun identifiant client
+  /// n'est envoyé (ni accepté). Le jeton n'est JAMAIS écrit dans un log.
+  /// Retourne l'enveloppe serveur : `{ok:true, expire_le, employee}` ou
+  /// `{ok:false, raison}`. Les erreurs techniques (réseau, SQL, fonction
+  /// absente) reviennent en `{ok:false, erreur_technique}` — jamais
+  /// transformées en succès ni en liste vide (contrat Admin).
+  static Future<Map<String, dynamic>> getProfilJeton() async {
+    final jeton = TrustedPunchService.jeton;
+    if (jeton == null || jeton.isEmpty) {
+      return {'ok': false, 'raison': 'jeton_invalide'};
+    }
+    try {
+      final reponse = await client.rpc('encheck_employe_profil', params: {
+        'p_jeton': jeton,
+      });
+      final brut = reponse is String ? jsonDecode(reponse) : reponse;
+      if (brut is Map) return Map<String, dynamic>.from(brut);
+      return {'ok': false, 'erreur_technique': 'Réponse illisible'};
+    } catch (e) {
+      return {'ok': false, 'erreur_technique': messageErreur(e)};
+    }
+  }
+
+  /// 🎯 Rafraîchit la fiche de la session COURANTE (celle du jeton) si — et
+  /// seulement si — elle correspond à [employeeIdAttendu]. Retourne la fiche
+  /// fraîche (déjà mise en cache) ou `null`.
+  ///
+  /// [onRefus] reçoit la raison métier (jeton_expire, reauthentification_requise,
+  /// jeton_revoque…) pour un message honnête. Les erreurs techniques restent
+  /// silencieuses ici : chaque écran gère déjà les siennes.
+  static Future<Map<String, dynamic>?> rafraichirProfilDeSession({
+    required String employeeIdAttendu,
+    void Function(String raison)? onRefus,
+  }) async {
+    try {
+      final r = await getProfilJeton();
+      if (r['ok'] == true && r['employee'] is Map) {
+        final profil =
+            _normaliserEmployee(Map<String, dynamic>.from(r['employee'] as Map));
+        // Le jeton ne décrit que SON titulaire : s'il ne correspond pas à
+        // l'employé concerné (ex. visage reconnu en mode borne), on n'écrase
+        // rien — la fiche du scan reste la référence.
+        if (profil['id'] != employeeIdAttendu) return null;
+        await _mettreEnCacheSession(profil);
+        return profil;
+      }
+      if (r['erreur_technique'] != null) return null; // technique : silencieux
+      onRefus?.call((r['raison'] as String?) ?? 'inconnu');
+      return null;
+    } catch (_) {
+      return null;
     }
   }
 
@@ -566,7 +646,7 @@ class SupabaseService {
         'fallback_allowed': true,
         'max_attempts': 3,
         'kiosk_mode_enabled': false,
-        'pointage_mode': 'free',
+        'pointage_mode': null,
       };
     } catch (e) {
       print('❌ Erreur config reco faciale: $e');
@@ -577,7 +657,7 @@ class SupabaseService {
         'fallback_allowed': true,
         'max_attempts': 3,
         'kiosk_mode_enabled': false,
-        'pointage_mode': 'free',
+        'pointage_mode': null,
       };
     }
   }

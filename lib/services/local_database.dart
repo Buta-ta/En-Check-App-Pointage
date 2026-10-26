@@ -353,7 +353,7 @@ class LocalDatabase {
       'fallback_allowed': true,
       'max_attempts': 3,
       'kiosk_mode_enabled': false,
-      'pointage_mode': 'free',
+      'pointage_mode': null,
     };
   }
 
