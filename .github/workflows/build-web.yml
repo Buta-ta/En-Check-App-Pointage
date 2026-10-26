@@ -124,7 +124,7 @@ jobs:
       - name: Diagnostic analyse (temporaire)
         continue-on-error: true
         run: |
-          flutter analyze --no-fatal-infos 2>&1 | head -80 | sed 's/^/::error::/'
+          flutter analyze --no-fatal-infos 2>&1 | grep -E '(error|warning) •' | head -30 | sed 's/^/::error::/'
 
       - name: Compiler l'application web
         run: |
