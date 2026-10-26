@@ -104,7 +104,7 @@ class _PointageScreenState extends State<PointageScreen> {
     'fallback_allowed': true,
     'max_attempts': 3,
     'kiosk_mode_enabled': false,
-    'pointage_mode': 'free',
+    'pointage_mode': null,
   };
 
   Map<String, dynamic>? _employeeEnAttente;
@@ -506,7 +506,9 @@ class _PointageScreenState extends State<PointageScreen> {
     // Mode visage exclusif / obligatoire : on lance tout de suite le scan
     // visage (reconnaissance SEULE — aucun pointage enregistré).
     if (_moduleRecoFacialeActif) {
-      final pointageMode = _faceConfig['pointage_mode'] as String? ?? 'free';
+      // Contrat Admin (25/10) : null = configuration indisponible — jamais
+      // converti silencieusement en 'free'.
+      final pointageMode = _faceConfig['pointage_mode'] as String?;
       final pret = _kioskMode || (_faceEnrolled && _faceApproved);
       if ((pointageMode == 'face_exclusive' ||
               pointageMode == 'face_required' ||
@@ -1705,6 +1707,17 @@ class _PointageScreenState extends State<PointageScreen> {
           // (`employees_public` est fermé).
           Map<String, dynamic>? employeeComplet =
               result['employee'] as Map<String, dynamic>?;
+          // 🔄 CONTRAT ÉTAPE 2 (25/10/2026) : rafraîchissement par JETON —
+          // uniquement quand la session appartient bien à l'employé identifié
+          // (en mode borne, le jeton peut décrire quelqu'un d'autre : on
+          // n'écrase alors rien et la fiche du scan reste la référence).
+          final empId = result['employee_id'] as String?;
+          if (ConnectivityService.isOnline && empId != null && empId.isNotEmpty) {
+            final rafraichi = await SupabaseService.rafraichirProfilDeSession(
+              employeeIdAttendu: empId,
+            );
+            if (rafraichi != null) employeeComplet = rafraichi;
+          }
           employeeComplet ??= _employeeEnAttente;
 
           setState(() {
@@ -2102,7 +2115,9 @@ class _PointageScreenState extends State<PointageScreen> {
     if (_modeSelectionne == 'pin') return _buildModePIN();
     if (_modeSelectionne == 'qr') return _buildModeQR();
 
-    final pointageMode = _faceConfig['pointage_mode'] as String? ?? 'free';
+    // Contrat Admin (25/10) : null = configuration indisponible — jamais
+    // converti silencieusement en 'free'.
+    final pointageMode = _faceConfig['pointage_mode'] as String?;
 
     if (pointageMode == 'face_exclusive') {
       return _buildBoutonFaceScan(onTap: _onBoutonFaceClique);

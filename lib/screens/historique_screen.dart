@@ -23,6 +23,20 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
   List<Map<String, dynamic>> pointages = [];
   bool chargement = true;
 
+  /// 🔄 CONTRAT ÉTAPE 2 (25/10/2026) — fiche rafraîchie via le jeton de la
+  /// session (le serveur en résout le titulaire) : poste, département et
+  /// horaires à jour. `null` tant que le rafraîchissement n'a pas abouti.
+  Map<String, dynamic>? _ficheFraiche;
+
+  /// Raison métier d'un refus de session (jeton expiré, ancien jeton…),
+  /// affichée honnêtement au lieu de laisser croire que tout va bien.
+  String? _sessionRaison;
+
+  /// La fiche AFFICHÉE : rafraîchie si possible, sinon celle transmise par
+  /// l'écran précédent — mêmes identifiants, le rafraîchissement par jeton
+  /// n'étant accepté que pour le même employé.
+  Map<String, dynamic> get _fiche => _ficheFraiche ?? widget.employee;
+
   /// Message à afficher quand la lecture a échoué. Sans lui, un refus
   /// d'autorisation sur la table `attendances` produisait une liste vide et
   /// l'écran affichait « Aucun pointage » : l'employé croyait sa journée
@@ -66,6 +80,44 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
     super.initState();
     _chargerHistorique();
     _chargerPause();
+    _rafraichirProfil();
+  }
+
+  /// 🔄 Contrat étape 2 : la fiche de la session se rafraîchit par le jeton
+  /// (encheck_employe_profil). Refus métier → message honnête ; erreur
+  /// technique → silencieux (l'historique affiche déjà les siennes) ;
+  /// hors-ligne → on garde la fiche transmise.
+  Future<void> _rafraichirProfil() async {
+    if (!ConnectivityService.isOnline) return;
+    final rafraichi = await SupabaseService.rafraichirProfilDeSession(
+      employeeIdAttendu: _fiche['id'] as String,
+      onRefus: (raison) {
+        if (!mounted) return;
+        setState(() => _sessionRaison = raison);
+      },
+    );
+    if (rafraichi != null && mounted) {
+      setState(() => _ficheFraiche = rafraichi);
+    }
+  }
+
+  /// 💬 Libellé honnête selon la raison de refus de session.
+  String _messageSession(String raison) {
+    switch (raison) {
+      case 'reauthentification_requise':
+        return 'Session ancienne : reconnectez-vous avec votre matricule et '
+            'votre PIN pour actualiser votre fiche.';
+      case 'jeton_expire':
+        return 'Session expirée : reconnectez-vous pour actualiser vos données.';
+      case 'jeton_revoque':
+        return 'Session fermée : reconnectez-vous pour continuer.';
+      case 'employe_inactif':
+        return 'Compte désactivé : contactez votre responsable.';
+      case 'entreprise_inactive':
+        return 'Entreprise désactivée : contactez votre responsable.';
+      default:
+        return 'Impossible de vérifier la session : reconnectez-vous.';
+    }
   }
 
   @override
@@ -83,8 +135,8 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
   /// reprise si la pause dure déjà depuis trop longtemps.
   Future<void> _chargerPause() async {
     try {
-      final employeId = widget.employee['id'] as String;
-      final entrepriseId = widget.employee['enterprise_id']?.toString();
+      final employeId = _fiche['id'] as String;
+      final entrepriseId = _fiche['enterprise_id']?.toString();
 
       final etat = await PauseService.etatPause(employeId);
 
@@ -134,8 +186,8 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
     setState(() => _pauseActionEnCours = true);
     try {
       final etat = await PauseService.partirEnPause(
-        employeeId: widget.employee['id'] as String,
-        enterpriseId: widget.employee['enterprise_id']?.toString(),
+        employeeId: _fiche['id'] as String,
+        enterpriseId: _fiche['enterprise_id']?.toString(),
         motif: _pauseEtat?['motif'] as String?,
       );
       if (!mounted) return;
@@ -167,8 +219,8 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
     setState(() => _pauseActionEnCours = true);
     try {
       await PauseService.reprendre(
-        employeeId: widget.employee['id'] as String,
-        enterpriseId: widget.employee['enterprise_id']?.toString(),
+        employeeId: _fiche['id'] as String,
+        enterpriseId: _fiche['enterprise_id']?.toString(),
       );
       if (!mounted) return;
       setState(() {
@@ -203,7 +255,7 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
       _pauseEtat = etat;
     });
     await PauseService.changerMotif(
-        employeeId: widget.employee['id'] as String, motif: nouveau);
+        employeeId: _fiche['id'] as String, motif: nouveau);
   }
 
   /// Rappel LOCAL de reprise (75 min) : bannière + SnackBar, jamais une
@@ -431,7 +483,7 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
       // 1. Charger depuis Supabase si en ligne
       if (ConnectivityService.isOnline) {
         try {
-          final supabaseData = await SupabaseService.getHistoriquePointages(widget.employee['id']);
+          final supabaseData = await SupabaseService.getHistoriquePointages(_fiche['id']);
           tousLesPointages.addAll(supabaseData);
         } catch (e) {
           print('Erreur chargement Supabase: $e');
@@ -443,7 +495,7 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
 
       // 2. Charger les pointages pending locaux
       try {
-        final pendingData = await LocalDatabase.getPointagesPendingParEmploye(widget.employee['id']);
+        final pendingData = await LocalDatabase.getPointagesPendingParEmploye(_fiche['id']);
 
         // ✅ FUSION : Ajouter les pending, mais éviter les doublons si déjà synchronisés
         for (var localPointage in pendingData) {
@@ -486,9 +538,9 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
   // 📸 CONSTRUIRE L'AVATAR (PHOTO OU INITIALES)
   // ═══════════════════════════════════════════════════════════
   Widget _construireAvatar() {
-    final photoUrl = widget.employee['photo_url'];
-    final prenom = widget.employee['first_name'] ?? '';
-    final nom = widget.employee['last_name'] ?? '';
+    final photoUrl = _fiche['photo_url'];
+    final prenom = _fiche['first_name'] ?? '';
+    final nom = _fiche['last_name'] ?? '';
     final initiales = '${prenom.isNotEmpty ? prenom[0] : ''}${nom.isNotEmpty ? nom[0] : ''}';
 
     return Container(
@@ -588,7 +640,7 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
                 const SizedBox(height: 12),
 
                 Text(
-                  '${widget.employee['first_name']} ${widget.employee['last_name']}',
+                  '${_fiche['first_name']} ${_fiche['last_name']}',
                   style: const TextStyle(
                     color: EnCheckColors.blanc,
                     fontSize: 22,
@@ -599,7 +651,7 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
                 const SizedBox(height: 6),
 
                 Text(
-                  widget.employee['matricule'] ?? '',
+                  _fiche['matricule'] ?? '',
                   style: const TextStyle(
                     color: EnCheckColors.sableDore,
                     fontSize: 14,
@@ -609,7 +661,7 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
 
                 const SizedBox(height: 12),
 
-                if (widget.employee['position'] != null || widget.employee['department'] != null)
+                if (_fiche['position'] != null || _fiche['department'] != null)
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                     decoration: BoxDecoration(
@@ -618,8 +670,8 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
                     ),
                     child: Column(
                       children: [
-                        if (widget.employee['position'] != null &&
-                            widget.employee['position'].toString().isNotEmpty)
+                        if (_fiche['position'] != null &&
+                            _fiche['position'].toString().isNotEmpty)
                           Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -630,7 +682,7 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
                               ),
                               const SizedBox(width: 8),
                               Text(
-                                widget.employee['position'],
+                                _fiche['position'],
                                 style: const TextStyle(
                                   color: EnCheckColors.blanc,
                                   fontSize: 14,
@@ -640,14 +692,14 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
                             ],
                           ),
 
-                        if (widget.employee['position'] != null &&
-                            widget.employee['position'].toString().isNotEmpty &&
-                            widget.employee['department'] != null &&
-                            widget.employee['department'].toString().isNotEmpty)
+                        if (_fiche['position'] != null &&
+                            _fiche['position'].toString().isNotEmpty &&
+                            _fiche['department'] != null &&
+                            _fiche['department'].toString().isNotEmpty)
                           const SizedBox(height: 6),
 
-                        if (widget.employee['department'] != null &&
-                            widget.employee['department'].toString().isNotEmpty)
+                        if (_fiche['department'] != null &&
+                            _fiche['department'].toString().isNotEmpty)
                           Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -658,7 +710,7 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
                               ),
                               const SizedBox(width: 8),
                               Text(
-                                widget.employee['department'],
+                                _fiche['department'],
                                 style: TextStyle(
                                   color: EnCheckColors.blanc.withOpacity(0.8),
                                   fontSize: 13,
@@ -693,6 +745,14 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
             const SizedBox(height: 16),
           ],
 
+          // 💬 Contrat étape 2 : un refus de session (expirée, ancien jeton…)
+          // s'affiche honnêtement, au lieu de laisser croire que la fiche
+          // affichée est toujours la vérité.
+          if (_sessionRaison != null) ...[
+            _construireBandeauSession(),
+            const SizedBox(height: 12),
+          ],
+
           Expanded(
             child:
             chargement
@@ -704,6 +764,35 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
                 : pointages.isEmpty
                 ? _construireVide()
                 : _construireListe(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 💬 Bandeau de session — contrat étape 2 (25/10/2026).
+  Widget _construireBandeauSession() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: EnCheckColors.terreChaude.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: EnCheckColors.terreChaude.withOpacity(0.4)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.lock_clock, color: EnCheckColors.terreChaude, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              _messageSession(_sessionRaison!),
+              style: const TextStyle(
+                color: EnCheckColors.brunProfond,
+                fontSize: 13,
+                height: 1.4,
+              ),
+            ),
           ),
         ],
       ),

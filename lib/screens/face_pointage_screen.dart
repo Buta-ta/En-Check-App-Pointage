@@ -308,7 +308,9 @@ class _FacePointageScreenState extends State<FacePointageScreen> {
 
       if (_tentatives >= maxAttempts) {
         final fallbackAllowed = widget.config['fallback_allowed'] as bool? ?? true;
-        final pointageMode = widget.config['pointage_mode'] as String? ?? 'free';
+        // Contrat Admin (25/10) : null = configuration indisponible — on ne
+        // le déclare jamais 'free'. Les tests de mode restent explicites.
+        final pointageMode = widget.config['pointage_mode'] as String?;
 
         if (fallbackAllowed && pointageMode != 'face_exclusive' && widget.onFallback != null) {
           setState(() => _showFallback = true);
