@@ -3,6 +3,7 @@ import 'security_service.dart';
 import 'trusted_punch_service.dart';
 import 'local_database.dart';
 import 'dart:convert';
+import 'package:image/image.dart' as img;
 import 'dart:typed_data';
 
 class SupabaseService {
@@ -580,10 +581,16 @@ class SupabaseService {
   // ═══════════════════════════════════════════════════════════
   // 📋 RECONNAISSANCE FACIALE — ENRÔLEMENT ACTIF
   // ═══════════════════════════════════════════════════════════
+  /// 📋 RECONNAISSANCE FACIALE — ENRÔLEMENT ACTIF
+  ///
+  /// CONTRAT ÉTAPE 3 (26/10/2026) : lecture VISAGE V2, portée 'personne' —
+  /// le jeton ne décrit que SON titulaire. En cas de refus : pas de repli sur
+  /// l'ancienne RPC (v1) ni sur des lectures directes — jamais.
   static Future<Map<String, dynamic>?> getEnrolementActif(String employeeId) async {
     try {
-      final reponse = await client.rpc('encheck_visage_lister', params: {
+      final reponse = await client.rpc('encheck_visage_lister_v2', params: {
         'p_jeton': TrustedPunchService.jeton,
+        'p_portee': 'personne',
       });
       if (reponse is Map && reponse['ok'] == true) {
         final liste = (reponse['enrolements'] as List? ?? [])
@@ -595,7 +602,7 @@ class SupabaseService {
             .toList();
         return liste.isEmpty ? null : liste.first;
       }
-      print('⚠️ Enrôlement refusé par le serveur: ${reponse is Map ? reponse["reason"] : reponse}');
+      print('⚠️ Enrôlement refusé par le serveur: ${reponse is Map ? reponse["raison"] ?? reponse["reason"] : reponse}');
       return null;
     } catch (e) {
       print('❌ Erreur récupération enrôlement actif: $e');
@@ -606,10 +613,15 @@ class SupabaseService {
   // ═══════════════════════════════════════════════════════════
   // 📋 RECONNAISSANCE FACIALE — STATUT ENRÔLEMENT
   // ═══════════════════════════════════════════════════════════
+  /// 📋 RECONNAISSANCE FACIALE — STATUT ENRÔLEMENT
+  ///
+  /// CONTRAT ÉTAPE 3 : visage V2, portée 'personne' (statuts propres du
+  /// titulaire visibles). Refus → pas de repli sur la v1.
   static Future<Map<String, dynamic>?> getStatutEnrolement(String employeeId) async {
     try {
-      final reponse = await client.rpc('encheck_visage_lister', params: {
+      final reponse = await client.rpc('encheck_visage_lister_v2', params: {
         'p_jeton': TrustedPunchService.jeton,
+        'p_portee': 'personne',
       });
       if (reponse is Map && reponse['ok'] == true) {
         final liste = (reponse['enrolements'] as List? ?? [])
@@ -620,7 +632,7 @@ class SupabaseService {
         final e = liste.first;
         return {'id': e['id'], 'status': e['status'], 'created_at': e['created_at']};
       }
-      print('⚠️ Statut enrôlement refusé par le serveur: ${reponse is Map ? reponse["reason"] : reponse}');
+      print('⚠️ Statut enrôlement refusé par le serveur: ${reponse is Map ? reponse["raison"] ?? reponse["reason"] : reponse}');
       return null;
     } catch (e) {
       print('❌ Erreur statut enrôlement: $e');
@@ -663,32 +675,116 @@ class SupabaseService {
   }
 
   // ═══════════════════════════════════════════════════════════
-  // 📸 RECONNAISSANCE FACIALE — UPLOAD PHOTO ENRÔLEMENT
+  // 📸 PHOTO D'ENRÔLEMENT — SERVICE PHOTOS (Edge, contrat étape 3)
   // ═══════════════════════════════════════════════════════════
+
+  /// Envoi de la photo d'enrôlement via le service photos
+  /// (`pointage-enrollment-photo`, action 'upload') — JETON PERSONNEL,
+  /// jamais celui d'une borne. L'ancien uploadBinary/getPublicUrl est
+  /// abandonné : le serveur impose chemin/entreprise/employé et retourne
+  /// `photo_reference`, la seule valeur à stocker dans `enrollment_photo_url`
+  /// (ni URL signée, ni URL publique).
+  ///
+  /// Quotas serveur : JPEG brut ≤ 2 MiB, corps ≤ 3 MiB, ≤ 8 MP — 10
+  /// réservations par heure et par employé (un essai échoué après réservation
+  /// consomme le quota). Codes : 400 format/image, 403 accès/jeton,
+  /// 429 quota_photo, 503 indisponibilité / envoi NON confirmé.
   static Future<String?> uploadPhotoEnrolement({
     required List<int> photoBytes,
-    required String enterpriseId,
-    required String employeeId,
   }) async {
+    final jeton = TrustedPunchService.jeton;
+    if (jeton == null || jeton.isEmpty) {
+      derniereErreur = 'Session absente — reconnectez-vous.';
+      return null;
+    }
     try {
-      final timestamp = DateTime.now().millisecondsSinceEpoch;
-      final fileName = '${enterpriseId}/${employeeId}_$timestamp.jpg';
-      await client.storage
-          .from('face-enrollments')
-          .uploadBinary(
-        fileName,
-        Uint8List.fromList(photoBytes),
-        fileOptions: const FileOptions(
-          contentType: 'image/jpeg',
-          upsert: false,
-        ),
+      // Garantir un JPEG brut : le codec serveur refuse les autres formats.
+      List<int> jpeg = photoBytes;
+      final estDejaJpeg = photoBytes.length > 2 &&
+          photoBytes[0] == 0xFF &&
+          photoBytes[1] == 0xD8;
+      if (!estDejaJpeg) {
+        final decoded = img.decodeImage(Uint8List.fromList(photoBytes));
+        if (decoded != null) {
+          jpeg = Uint8List.fromList(img.encodeJpg(decoded, quality: 92));
+        }
+      }
+      if (jpeg.length > 2 * 1024 * 1024) {
+        derniereErreur = 'Photo trop lourde (max 2 Mo) — rapprochez-vous '
+            'moins près ou réduisez la résolution.';
+        return null;
+      }
+      final reponse = await client.functions.invoke(
+        'pointage-enrollment-photo',
+        body: {
+          'action': 'upload',
+          'p_jeton': jeton,
+          'jpeg_base64': base64Encode(jpeg),
+        },
       );
-      final url = client.storage
-          .from('face-enrollments')
-          .getPublicUrl(fileName);
-      return url;
+      final brut = reponse.data;
+      if (reponse.status == 200 && brut is Map && brut['ok'] == true) {
+        derniereErreur = null;
+        return brut['photo_reference'] as String?;
+      }
+      derniereErreur = messageErreurPhoto(reponse.status, brut);
+      print('❌ Upload photo enrôlement refusé (${reponse.status})');
+      return null;
     } catch (e) {
+      derniereErreur = 'Envoi de la photo impossible : $e';
       print('❌ Erreur upload photo enrôlement: $e');
+      return null;
+    }
+  }
+
+  /// 💬 Message honnête selon le code HTTP du service photos.
+  /// En 503 : l'envoi n'est PAS confirmé — ne jamais affirmer l'enregistrement.
+  static String messageErreurPhoto(int? status, dynamic brut) {
+    final detail = brut is Map
+        ? (brut['message'] ?? brut['error'] ?? brut['raison'])
+        : null;
+    switch (status) {
+      case 400:
+        return "Photo refusée (format ou image invalide)"
+            "${detail != null ? ' — $detail' : ''}.";
+      case 403:
+        return "Session refusée pour le service photos — reconnectez-vous.";
+      case 429:
+        return "Quota de photos atteint (10 par heure et par employé) — "
+            "réessayez plus tard.";
+      case 503:
+        return "Service photos indisponible : l'envoi n'a PAS été "
+            "confirmé, la photo n'est pas enregistrée.";
+      default:
+        return "Service photos en erreur (${status ?? 'réseau'})"
+            "${detail != null ? ' — $detail' : ''}.";
+    }
+  }
+
+
+  /// 🔎 URL signée (300 s) d'une photo d'enrôlement appartenant au TITULAIRE
+  /// du jeton (action 'read', jeton personnel). L'URL est un porteur :
+  /// NE PAS la persister, la journaliser ni la partager. Les anciennes
+  /// références public/authenticated .jpg restent acceptées côté serveur.
+  static Future<String?> getUrlPhotoEnrolement(String enrollmentId) async {
+    final jeton = TrustedPunchService.jeton;
+    if (jeton == null || jeton.isEmpty) return null;
+    try {
+      final reponse = await client.functions.invoke(
+        'pointage-enrollment-photo',
+        body: {
+          'action': 'read',
+          'p_jeton': jeton,
+          'enrollment_id': enrollmentId,
+        },
+      );
+      final brut = reponse.data;
+      if (reponse.status == 200 && brut is Map && brut['ok'] == true) {
+        return brut['url'] as String?;
+      }
+      return null;
+    } catch (e) {
+      print('❌ Erreur lecture photo enrôlement: $e');
       return null;
     }
   }
@@ -763,36 +859,12 @@ class SupabaseService {
   // ═══════════════════════════════════════════════════════════
   // 🤖 CHARGER TOUS LES EMBEDDINGS APPROUVÉS (MODE TABLETTE)
   // ═══════════════════════════════════════════════════════════
-  static Future<List<Map<String, dynamic>>> getTousEnrolementsApprouves(
-      String enterpriseId) async {
-    try {
-      final reponse = await client.rpc('encheck_visage_lister', params: {
-        'p_jeton': TrustedPunchService.jeton,
-      });
-      if (reponse is Map && reponse['ok'] == true) {
-        final tous = (reponse['enrolements'] as List? ?? [])
-            .map((e) => Map<String, dynamic>.from(e as Map))
-            .where((e) =>
-        e['status'] == 'approved' &&
-            e['is_active'] == true &&
-            e['face_embedding'] != null)
-            .toList();
-        // Contrat d'accès : si la ligne d'enrôlement porte des champs
-        // d'identité, on complète le cache local (ajout uniquement — jamais
-        // d'écrasement d'une fiche plus complète mémorisée à la connexion).
-        for (final e in tous) {
-          await LocalDatabase.completerIdentiteCache(e);
-        }
-        print('✅ ${tous.length} visage(s) de référence chargé(s) depuis le serveur');
-        return tous;
-      }
-      print('⚠️ Visages refusés par le serveur: ${reponse is Map ? reponse['reason'] : reponse}');
-      return [];
-    } catch (e) {
-      print('❌ Erreur chargement embeddings: $e');
-      return [];
-    }
-  }
+  // SUPPRIMÉ (contrat étape 3, 26/10/2026) : l'ancienne lecture collective
+  // passait par `encheck_visage_lister` (v1) avec un jeton PERSONNEL.
+  // Le cache borne est désormais le SNAPSHOT COMPLET de
+  // `encheck_borne_personnel` (jeton borne, remplacement intégral,
+  // expiration cache_expire_le) — voir `BorneService.synchroniserPersonnel()`.
+  // Aucun repli sur la v1.
 
   // ═══════════════════════════════════════════════════════════
   // 👤 CHARGER UN EMPLOYÉ PAR ID — SUPPRIMÉ (contrat d'accès 25/10/2026)

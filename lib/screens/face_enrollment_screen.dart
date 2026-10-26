@@ -191,20 +191,36 @@ class _FaceEnrollmentScreenState extends State<FaceEnrollmentScreen> {
     try {
       final embeddingMoyen = FaceRecognitionService.moyenneVecteurs(_embeddings);
 
-      String? photoUrl;
+      // 📸 CONTRAT ÉTAPE 3 (26/10/2026) : la photo passe par le service
+      // photos (Edge) avec le jeton PERSONNEL — plus d'upload direct ni
+      // d'URL publique. Le serveur retourne une `photo_reference` à stocker
+      // telle quelle dans enrollment_photo_url.
+      String? photoReference;
       if (_photoEnrolement != null) {
-        photoUrl = await SupabaseService.uploadPhotoEnrolement(
+        photoReference = await SupabaseService.uploadPhotoEnrolement(
           photoBytes: _photoEnrolement!.toList(),
-          enterpriseId: widget.enterpriseId,
-          employeeId: widget.employee['id'],
         );
+        if (photoReference == null) {
+          // Échec explicite (400/403/429/503) : on n'affirme jamais
+          // l'enregistrement, et on n'enregistre pas l'enrôlement sans
+          // sa photo de preuve.
+          _afficherErreur(SupabaseService.derniereErreur ??
+              'Envoi de la photo impossible — la photo n\'a pas été enregistrée.');
+          setState(() {
+            _enrolementTermine = false;
+            _enregistrementEnCours = false;
+            _currentStep = 0;
+            _embeddings.clear();
+          });
+          return;
+        }
       }
 
       final enrollment = await SupabaseService.creerEnrolement(
         employeeId: widget.employee['id'],
         enterpriseId: widget.enterpriseId,
         embedding: embeddingMoyen,
-        enrollmentPhotoUrl: photoUrl ?? '',
+        enrollmentPhotoUrl: photoReference ?? '',
         adminApprovalRequired: widget.adminApprovalRequired,
       );
 

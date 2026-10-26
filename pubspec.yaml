@@ -24,6 +24,9 @@ dependencies:
   hive: ^2.2.3
   hive_flutter: ^1.1.0
 
+  # 🖥️ BORNES (contrat étape 3) — coffre sécurisé de l'OS pour le secret bs1_
+  flutter_secure_storage: ^9.2.2
+
   # Photo pointage
   camera: ^0.11.0+2
   flutter_image_compress: ^2.3.0

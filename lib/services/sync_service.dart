@@ -1,5 +1,6 @@
 import 'local_database.dart';
 import 'supabase_service.dart'; // ✅ Import correct
+import 'borne_service.dart'; // 🖥️ CONTRAT ÉTAPE 3 — snapshot de borne
 import 'connectivity_service.dart';
 import 'trusted_punch_service.dart';
 import 'pause_service.dart'; // ⏸ LOT D — la file d'attente des pauses
@@ -98,13 +99,22 @@ class SyncService {
       final entreprises = await SupabaseService.getEntreprises();
       await LocalDatabase.cacherEntreprises(entreprises);
 
-      // CONTRAT D'ACCÈS EMPLOYÉS (25/10/2026) : plus de téléchargement
-      // collectif du personnel. L'ancienne boucle lisait `employees_public`
-      // (lecture anonyme désormais interdite). Le cache des employés ne
-      // contient QUE les profils de ceux qui se sont identifiés sur cette
-      // tablette, écrits à la connexion (SupabaseService._mettreEnCacheSession).
-      // La synchronisation collective (personnel + gabarits) viendra de
-      // encheck_borne_personnel, avec un appareil autorisé par l'administration.
+      // 🖥️ CONTRAT ÉTAPE 3 (26/10/2026) : le téléchargement collectif du
+      // personnel passe par le SNAPSHOT de borne (encheck_borne_personnel,
+      // jeton borne `bk1_`) — remplacement intégral du cache, expiration
+      // cache_expire_le gérée par BorneService. Sans appareil autorisé, le
+      // cache des employés ne contient QUE les profils de ceux qui se sont
+      // identifiés sur cette tablette. Aucun repli sur les anciens accès.
+      if (await BorneService.aUnBailValide() || await BorneService.aUnSecret()) {
+        final snapshot = await BorneService.synchroniserPersonnel();
+        if (snapshot['ok'] == true) {
+          final employes = (snapshot['employes'] as List?)?.length ?? 0;
+          print('✅ Personnel de la borne synchronisé ($employes employé(s))');
+        } else {
+          print('⚠️ Personnel de la borne indisponible — ${snapshot['erreur']}');
+          print('   Le cache précédent a été purgé (pas de repli).');
+        }
+      }
 
       // Les appels de SupabaseService avalent leurs exceptions et renvoient du
       // vide : sans ce contrôle, un 401 « permission denied for table » passait

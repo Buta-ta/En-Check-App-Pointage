@@ -16,6 +16,7 @@ import '../widgets/qr_photo_scanner_widget.dart';
 import '../widgets/pin_photo_widget.dart';
 import '../widgets/web_camera_widget.dart';
 import '../services/supabase_service.dart';
+import '../services/borne_service.dart';
 import '../services/local_database.dart';
 import '../services/connectivity_service.dart';
 import '../services/theme_service.dart';
@@ -89,6 +90,10 @@ class _PointageScreenState extends State<PointageScreen> {
 
   // 🤖 Mode tablette
   bool _kioskMode = false;
+
+  /// 🖥️ CONTRAT ÉTAPE 3 — la borne est-elle authentifiée (bail `bk1_`
+  /// valide) ? Le personnel se synchronise alors par `encheck_borne_personnel`.
+  bool _bornePrete = false;
   String _kioskPhase = 'pointage';
   List<Map<String, dynamic>> _kioskEmployeesNonEnroles = [];
   int _kioskEnrolementIndex = 0;
@@ -229,37 +234,66 @@ class _PointageScreenState extends State<PointageScreen> {
     if (!ConnectivityService.isOnline) return;
     if (entrepriseSelectionnee == null) return;
 
-    try {
-      final enrollments = await SupabaseService.getTousEnrolementsApprouves(
-          entrepriseSelectionnee!['id']);
-
-      for (final enrollment in enrollments) {
-        final employeeId = enrollment['employee_id'] as String;
-        final embedding =
-        List<double>.from(enrollment['face_embedding'] as List);
-        await LocalDatabase.sauvegarderEmbedding(
-          employeeId: employeeId,
-          enterpriseId: entrepriseSelectionnee!['id'],
-          embedding: embedding,
-          enrollmentId: enrollment['id'],
-        );
+    // 🖥️ CONTRAT ÉTAPE 3 (26/10/2026) : le cache borne est le SNAPSHOT
+    // COMPLET de encheck_borne_personnel (jeton borne `bk1_`, remplacement
+    // intégral, expiration cache_expire_le). Aucun repli sur la v1 ni sur
+    // des lectures directes en cas d'erreur.
+    if (!await BorneService.aUnBailValide() && !await BorneService.aUnSecret()) {
+      // Jamais provisionnée : le bandeau « Borne non autorisée » suffit,
+      // pas de popup à chaque ouverture.
+      if (mounted) setState(() => _bornePrete = false);
+      return;
+    }
+    final resultat = await BorneService.synchroniserPersonnel();
+    if (resultat['ok'] == true) {
+      if (mounted) {
+        setState(() {
+          _bornePrete = true;
+        });
       }
-    } catch (e) {
-      print('❌ Erreur chargement embeddings: $e');
+    } else {
+      if (mounted) {
+        setState(() {
+          _bornePrete = false;
+        });
+        _afficherErreur(resultat['erreur'] ??
+            'Synchronisation du personnel impossible.');
+      }
     }
   }
 
+  /// 🔎 Balayage collectif « qui n'a pas encore donné son visage ? ».
+  ///
+  /// CONTRAT ÉTAPE 3 : calculé depuis le SNAPSHOT de borne (personnel
+  /// complet + embeddings approuvés actifs). Cache absent/expiré ou
+  /// hors-ligne : aucun balayage et un message honnête — jamais de faux
+  /// « Tous les employés sont déjà enrôlés ».
   Future<void> _detecterEmployesNonEnroles() async {
-    // CONTRAT D'ACCÈS EMPLOYÉS (25/10/2026) : la liste complète du personnel
-    // n'est plus téléchargée (lecture `employees_public` fermée). Le balayage
-    // collectif « qui n'a pas encore donné son visage ? » attend donc la
-    // synchronisation de BORNE AUTORISÉE (encheck_borne_personnel, côté
-    // Admin). En attendant : aucun balayage — et un message honnête au lieu
-    // du faux « Tous les employés sont déjà enrôlés ».
+    List<Map<String, dynamic>> nonEnroles = [];
+    String phase = 'pointage';
+
+    if (ConnectivityService.isOnline &&
+        entrepriseSelectionnee != null &&
+        await BorneService.cacheValide()) {
+      final employes = await LocalDatabase.getEmployeesCache();
+      final embeddings =
+          await LocalDatabase.getTousEmbeddings(entrepriseSelectionnee!['id']);
+      final avecVisage = embeddings
+          .map((e) => e['employee_id'] as String?)
+          .whereType<String>()
+          .toSet();
+      nonEnroles = employes
+          .where((e) =>
+              e['is_active'] != false &&
+              (e['id'] is String) &&
+              !avecVisage.contains(e['id']))
+          .toList();
+    }
+
     if (mounted) {
       setState(() {
-        _kioskEmployeesNonEnroles = [];
-        _kioskPhase = 'pointage';
+        _kioskEmployeesNonEnroles = nonEnroles;
+        _kioskPhase = phase;
         _kioskEnrolementIndex = 0;
       });
     }
@@ -2166,6 +2200,8 @@ class _PointageScreenState extends State<PointageScreen> {
         ],
         if (_kioskMode) ...[
           const SizedBox(height: 20),
+          _buildBandeauBorne(),
+          const SizedBox(height: 12),
           _buildBoutonEnrolerNouvelEmploye(),
         ],
       ],
@@ -2184,11 +2220,18 @@ class _PointageScreenState extends State<PointageScreen> {
       onTap: () async {
         await _detecterEmployesNonEnroles();
         if (_kioskEmployeesNonEnroles.isEmpty) {
-          _afficherErreur(
-              'Liste complète du personnel non disponible sur cette tablette.\n'
-              'L\'enrôlement collectif arrive avec la synchronisation de borne.\n'
-              'Pour l\'instant : un employé s\'enrôle en s\'identifiant avec '
-              'son matricule et son PIN.');
+          // CONTRAT ÉTAPE 3 : message honnête selon l'état du cache borne.
+          if (!await BorneService.cacheValide()) {
+            _afficherErreur(
+                'Personnel de la borne non disponible sur cette tablette.\n'
+                'Synchronisez la borne (bouton « 🖥 Borne ») — une autorisation '
+                'de borne est fournie par le superadmin.\n'
+                'En attendant : un employé peut s\'enrôler en s\'identifiant '
+                'avec son matricule et son PIN.');
+          } else {
+            _afficherErreur(
+                'Tous les employés actifs de cette borne sont déjà enrôlés.');
+          }
           return;
         }
         setState(() {
@@ -2222,6 +2265,176 @@ class _PointageScreenState extends State<PointageScreen> {
         ),
       ),
     );
+  }
+
+  /// 🖥️ CONTRAT ÉTAPE 3 — bandeau de la borne autorisée.
+  Widget _buildBandeauBorne() {
+    return GestureDetector(
+      onTap: _afficherDialogBorne,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+        decoration: BoxDecoration(
+          color: _bornePrete
+              ? Colors.green.withOpacity(0.08)
+              : Colors.indigo.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: _bornePrete
+                ? Colors.green.withOpacity(0.35)
+                : Colors.indigo.withOpacity(0.35),
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              _bornePrete ? Icons.laptop_mac : Icons.laptop,
+              size: 20,
+              color: _bornePrete
+                  ? Colors.green.shade700
+                  : Colors.indigo.shade400,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                _bornePrete
+                    ? "Borne autorisée — personnel synchronisé. Touchez pour gérer."
+                    : "Borne non autorisée — touchez pour saisir l'identifiant "
+                        "et le secret fournis par le superadmin.",
+                style: TextStyle(
+                  fontSize: 12.5,
+                  height: 1.35,
+                  color: _bornePrete
+                      ? Colors.green.shade800
+                      : Colors.indigo.shade700,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 🖥️ Dialogue de provisionnement de la borne (contrat étape 3).
+  /// Le secret `bs1_` est présenté une seule fois par le superadmin :
+  /// il est conservé dans le coffre sécurisé de l'OS, jamais dans les
+  /// préférences ordinaires ni les logs.
+  Future<void> _afficherDialogBorne() async {
+    final deviceCtrl = TextEditingController();
+    final secretCtrl = TextEditingController();
+    final dejaPrete = await BorneService.aUnBailValide();
+
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          title: Row(
+            children: [
+              const Icon(Icons.laptop_mac, color: EnCheckColors.terreChaude),
+              const SizedBox(width: 10),
+              Text(dejaPrete ? "Borne autorisée" : "Autoriser cette borne",
+                  style: const TextStyle(fontSize: 17)),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (dejaPrete) ...[
+                const Text(
+                  "Un bail de borne est actif sur cette tablette. "
+                  "Le personnel se synchronise depuis le serveur.",
+                  style: TextStyle(fontSize: 13, height: 1.5),
+                ),
+              ] else ...[
+                const Text(
+                  "Saisissez l'identifiant de l'appareil et le secret "
+                  "communiqués par le superadmin (présenté une seule fois).",
+                  style: TextStyle(fontSize: 13, height: 1.5),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: deviceCtrl,
+                  decoration: const InputDecoration(
+                    labelText: "Identifiant de l'appareil",
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: secretCtrl,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: "Secret de la borne (bs1_...)",
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            if (dejaPrete) ...[
+              TextButton(
+                onPressed: () async {
+                  Navigator.of(ctx).pop();
+                  await BorneService.seDeconnecter();
+                  if (mounted) {
+                    setState(() => _bornePrete = false);
+                    _afficherErreur(
+                        "Borne retirée de cette tablette. Le cache local a été purgé.");
+                  }
+                },
+                child: const Text("Retirer la borne"),
+              ),
+              TextButton(
+                onPressed: () async {
+                  Navigator.of(ctx).pop();
+                  await _chargerTousEmbeddingsEntreprise();
+                  await _detecterEmployesNonEnroles();
+                },
+                child: const Text("Synchroniser"),
+              ),
+            ] else ...[
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text("Annuler"),
+              ),
+              ElevatedButton(
+                onPressed: () async {
+                  final resultat = await BorneService.authentifier(
+                    deviceId: deviceCtrl.text,
+                    secret: secretCtrl.text,
+                  );
+                  if (resultat['ok'] == true) {
+                    if (ctx.mounted) Navigator.of(ctx).pop();
+                    await _chargerTousEmbeddingsEntreprise();
+                    await _detecterEmployesNonEnroles();
+                  } else {
+                    setDialogState(() {});
+                    if (ctx.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(resultat['erreur'] ??
+                              "Borne refusée — identifiants invalides."),
+                          backgroundColor: Colors.red.shade700,
+                        ),
+                      );
+                    }
+                  }
+                },
+                child: const Text("Activer la borne"),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+    deviceCtrl.dispose();
+    secretCtrl.dispose();
   }
 
   // ═══════════════════════════════════════════════════════════
