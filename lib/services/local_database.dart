@@ -205,6 +205,46 @@ class LocalDatabase {
     }
   }
 
+  /// 🔁 CONTRAT ÉTAPE 3 (26/10/2026) — REMPLACEMENT INTÉGRAL du cache
+  /// personnel (snapshot borne). Jamais de fusion : les sorties d'effectif,
+  /// révocations et suppressions ne doivent pas rester en mémoire.
+  /// Les pointages en attente de rejeu ne sont JAMAIS touchés.
+  static Future<void> remplacerCachePersonnel(
+    List<Map<String, dynamic>> employes,
+    List<Map<String, dynamic>> embeddings,
+  ) async {
+    var boxEmployes = Hive.box('employees_cache');
+    var boxEmbeddings = Hive.box('face_embeddings');
+    await boxEmployes.clear();
+    await boxEmbeddings.clear();
+    for (var employe in employes) {
+      if (employe['id'] is String) {
+        await boxEmployes.put(employe['id'], employe);
+      }
+    }
+    for (var enr in embeddings) {
+      final employeeId = enr['employee_id'];
+      if (employeeId is! String || employeeId.isEmpty) continue;
+      await boxEmbeddings.put(employeeId, {
+        'employee_id': employeeId,
+        'enterprise_id': enr['enterprise_id'],
+        'embedding': enr['face_embedding'],
+        'enrollment_id': enr['id'],
+        'cached_at': DateTime.now().toIso8601String(),
+      });
+    }
+  }
+
+  /// 🧹 CONTRAT ÉTAPE 3 — purge du cache borne (identités du snapshot +
+  /// embeddings). Expiré, recul d'horloge, changement d'appareil/d'entreprise,
+  /// sortie du mode borne ou refus explicite du serveur.
+  static Future<void> purgerCacheBorne() async {
+    var boxEmployes = Hive.box('employees_cache');
+    var boxEmbeddings = Hive.box('face_embeddings');
+    await boxEmployes.clear();
+    await boxEmbeddings.clear();
+  }
+
   // ═══════════════════════════════════════════════
   // 🔐 VÉRIFIER UN EMPLOYÉ EN CACHE (AVEC PIN)
   // ══
