@@ -739,7 +739,7 @@ class SupabaseService {
 
   /// 💬 Message honnête selon le code HTTP du service photos.
   /// En 503 : l'envoi n'est PAS confirmé — ne jamais affirmer l'enregistrement.
-  static String messageErreurPhoto(int status, dynamic brut) {
+  static String messageErreurPhoto(int? status, dynamic brut) {
     final detail = brut is Map
         ? (brut['message'] ?? brut['error'] ?? brut['raison'])
         : null;
@@ -756,7 +756,7 @@ class SupabaseService {
         return "Service photos indisponible : l'envoi n'a PAS été "
             "confirmé, la photo n'est pas enregistrée.";
       default:
-        return "Service photos en erreur ($status)"
+        return "Service photos en erreur (${status ?? 'réseau'})"
             "${detail != null ? ' — $detail' : ''}.";
     }
   }
