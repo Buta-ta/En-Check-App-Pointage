@@ -2288,7 +2288,7 @@ class _PointageScreenState extends State<PointageScreen> {
         child: Row(
           children: [
             Icon(
-              _bornePrete ? Icons.laptop_mac : Icons.laptop_off,
+              _bornePrete ? Icons.laptop_mac : Icons.laptop,
               size: 20,
               color: _bornePrete
                   ? Colors.green.shade700

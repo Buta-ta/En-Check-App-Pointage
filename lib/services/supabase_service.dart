@@ -692,7 +692,49 @@ class SupabaseService {
   static Future<String?> uploadPhotoEnrolement({
     required List<int> photoBytes,
   }) async {
-    return null; // BISECT
+    final jeton = TrustedPunchService.jeton;
+    if (jeton == null || jeton.isEmpty) {
+      derniereErreur = 'Session absente — reconnectez-vous.';
+      return null;
+    }
+    try {
+      // Garantir un JPEG brut : le codec serveur refuse les autres formats.
+      List<int> jpeg = photoBytes;
+      final estDejaJpeg = photoBytes.length > 2 &&
+          photoBytes[0] == 0xFF &&
+          photoBytes[1] == 0xD8;
+      if (!estDejaJpeg) {
+        final decoded = img.decodeImage(Uint8List.fromList(photoBytes));
+        if (decoded != null) {
+          jpeg = Uint8List.fromList(img.encodeJpg(decoded, quality: 92));
+        }
+      }
+      if (jpeg.length > 2 * 1024 * 1024) {
+        derniereErreur = 'Photo trop lourde (max 2 Mo) — rapprochez-vous '
+            'moins près ou réduisez la résolution.';
+        return null;
+      }
+      final reponse = await client.functions.invoke(
+        'pointage-enrollment-photo',
+        body: {
+          'action': 'upload',
+          'p_jeton': jeton,
+          'jpeg_base64': base64Encode(jpeg),
+        },
+      );
+      final brut = reponse.data;
+      if (reponse.status == 200 && brut is Map && brut['ok'] == true) {
+        derniereErreur = null;
+        return brut['photo_reference'] as String?;
+      }
+      derniereErreur = messageErreurPhoto(reponse.status, brut);
+      print('❌ Upload photo enrôlement refusé (${reponse.status})');
+      return null;
+    } catch (e) {
+      derniereErreur = 'Envoi de la photo impossible : $e';
+      print('❌ Erreur upload photo enrôlement: $e');
+      return null;
+    }
   }
 
   /// 💬 Message honnête selon le code HTTP du service photos.
@@ -725,9 +767,27 @@ class SupabaseService {
   /// NE PAS la persister, la journaliser ni la partager. Les anciennes
   /// références public/authenticated .jpg restent acceptées côté serveur.
   static Future<String?> getUrlPhotoEnrolement(String enrollmentId) async {
-    return null; // BISECT
+    final jeton = TrustedPunchService.jeton;
+    if (jeton == null || jeton.isEmpty) return null;
+    try {
+      final reponse = await client.functions.invoke(
+        'pointage-enrollment-photo',
+        body: {
+          'action': 'read',
+          'p_jeton': jeton,
+          'enrollment_id': enrollmentId,
+        },
+      );
+      final brut = reponse.data;
+      if (reponse.status == 200 && brut is Map && brut['ok'] == true) {
+        return brut['url'] as String?;
+      }
+      return null;
+    } catch (e) {
+      print('❌ Erreur lecture photo enrôlement: $e');
+      return null;
+    }
   }
-
 
   // ═══════════════════════════════════════════════════════════
   // 📝 RECONNAISSANCE FACIALE — LOG TENTATIVE

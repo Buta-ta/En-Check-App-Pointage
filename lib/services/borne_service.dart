@@ -1,5 +1,5 @@
 import 'dart:convert';
-// BISECT: import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'local_database.dart';
 import 'supabase_service.dart';
@@ -33,7 +33,7 @@ import 'supabase_service.dart';
 // ═══════════════════════════════════════════════════════════
 
 class BorneService {
-  static const _storage = _StockageMemoire(); // BISECT
+  static const _storage = FlutterSecureStorage();
   static const _kDeviceId = 'encheck_borne_device_id';
   static const _kSecret = 'encheck_borne_secret'; // coffre sécurisé OS
   static const _boxBorne = 'encheck_borne_local'; // jeton + métadonnées
@@ -281,15 +281,6 @@ class BorneService {
   /// Sortie du mode borne / changement d'appareil ou d'entreprise.
   static Future<void> seDeconnecter() async {
     await purgerCache();
-  }
-
-// BISECT — stand-in mémoire pour flutter_secure_storage
-class _StockageMemoire {
-  const _StockageMemoire();
-  static final Map<String, String?> _memoire = {};
-  Future<String?> read({required String key}) async => _memoire[key];
-  Future<void> write({required String key, String? value}) async {
-    _memoire[key] = value;
   }
 }
 }
