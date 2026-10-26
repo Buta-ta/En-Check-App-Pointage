@@ -283,4 +283,3 @@ class BorneService {
     await purgerCache();
   }
 }
-}
