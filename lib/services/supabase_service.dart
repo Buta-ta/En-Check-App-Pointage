@@ -745,21 +745,22 @@ class SupabaseService {
         : null;
     switch (status) {
       case 400:
-        return 'Photo refusée (format ou image invalide)'
-            '${detail != null ? ' — $detail' : ''}.';
+        return "Photo refusée (format ou image invalide)"
+            "${detail != null ? ' — $detail' : ''}.";
       case 403:
-        return 'Session refusée pour le service photos — reconnectez-vous.';
+        return "Session refusée pour le service photos — reconnectez-vous.";
       case 429:
-        return 'Quota de photos atteint (10 par heure et par employé) — '
-            'réessayez plus tard.';
+        return "Quota de photos atteint (10 par heure et par employé) — "
+            "réessayez plus tard.";
       case 503:
-        return 'Service photos indisponible : l\'envoi n\'a PAS été '
-            'confirmé, la photo n\'est pas enregistrée.';
+        return "Service photos indisponible : l'envoi n'a PAS été "
+            "confirmé, la photo n'est pas enregistrée.";
       default:
-        return 'Service photos en erreur ($status)'
-            '${detail != null ? ' — $detail' : ''}.';
+        return "Service photos en erreur ($status)"
+            "${detail != null ? ' — $detail' : ''}.";
     }
   }
+
 
   /// 🔎 URL signée (300 s) d'une photo d'enrôlement appartenant au TITULAIRE
   /// du jeton (action 'read', jeton personnel). L'URL est un porteur :

@@ -253,12 +253,14 @@ class BorneService {
     return maintenant.isBefore(expire);
   }
 
-  static Future<DateTime?> get cacheExpireLe async {
+  /// Date d'expiration du cache snapshot (null si jamais synchronisé).
+  static Future<DateTime?> getCacheExpireLe() async {
     final box = await _box();
     return DateTime.tryParse('${box.get(_kCacheExpireLe) ?? ''}');
   }
 
-  static Future<String?> get enterpriseId async {
+  /// Entreprise rattachée à la borne (imposée par le serveur).
+  static Future<String?> getEnterpriseId() async {
     final box = await _box();
     return box.get(_kEnterprise) as String?;
   }
