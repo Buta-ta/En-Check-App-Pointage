@@ -148,6 +148,14 @@ jobs:
 
           git add -A -f build/web
 
+          # On repose l'enregistrement sur la DERNIÈRE version de main, sans
+          # rebase (le rebase peut échouer et ne servait qu'à ce cas de figure).
+          # `reset --soft` conserve les fichiers compilés fraîchement produits :
+          # le commit qui suivra contiendra TOUJOURS la bonne compilation, même
+          # si quelqu'un a poussé sur main pendant que l'on compilait.
+          git fetch origin main
+          git reset --soft origin/main
+
           # Si la compilation a produit exactement les mêmes fichiers, il n'y a
           # rien à enregistrer : on s'arrête proprement au lieu de créer un
           # commit vide.
@@ -158,10 +166,13 @@ jobs:
 
           git commit -m "build: régénère build/web après compilation automatique"
 
-          # Au cas où quelqu'un aurait poussé autre chose pendant la
-          # compilation, on se replace à jour avant de pousser.
-          git pull --rebase origin main
-          git push origin HEAD:main
+          # Si ce push échoue, le site ne peut PAS se mettre à jour : on le dit
+          # explicitement dans les annotations de la vérification (« ::error:: »),
+          # car les journaux complets ne sont pas toujours consultables.
+          if ! git push origin HEAD:main; then
+            echo "::error::Enregistrement de build/web REFUSÉ par GitHub. Le site ne sera pas mis à jour. Causes possibles : une protection de branche sur main bloque github-actions[bot] (Réglages → Branches), ou les droits du jeton d'Action ne suffisent plus."
+            exit 1
+          fi
 
       # ── 6. Compte rendu ─────────────────────────────────────────────────
       # Affiche le poids des fichiers produits, visible dans l'onglet Actions.
