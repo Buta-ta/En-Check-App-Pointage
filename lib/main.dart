@@ -10,6 +10,7 @@ import 'services/sync_service.dart';
 import 'services/theme_service.dart';
 import 'services/face_recognition_service_provider.dart';
 import 'services/trusted_punch_service.dart';
+import 'widgets/cadre_motif.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -125,6 +126,8 @@ class _EnCheckAppState extends State<EnCheckApp> {
       theme: _buildLightTheme(),
       darkTheme: _buildDarkTheme(),
       themeMode: themeService.isDarkMode ? ThemeMode.dark : ThemeMode.light,
+      builder: (context, child) =>
+          CadreMotif(child: child ?? const SizedBox.shrink()),
       home: _hasEnterprise ? const PointageScreen() : const WelcomeScreen(),
     );
   }
