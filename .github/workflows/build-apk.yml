@@ -100,16 +100,14 @@ jobs:
           set -e
           if [ "$status" -ne 0 ]; then
             echo "::error::Compilation APK échouée (code $status) — diagnostic :"
-            # Retire les couleurs ANSI et les préfixes de journal, puis garde
-            # la fin (« What went wrong » de Gradle) sans les piles Java.
-            sed 's/\x1b\[[0-9;]*[mK]//g' /tmp/build-apk.log \
-              | sed 's/^\[[^]]*\] //' \
-              | grep -v "^[[:space:]]*at \|^[[:space:]]*\.\.\." \
-              | tail -n 60 \
-              | sed 's/%/%25/g' \
-              | while IFS= read -r line; do
-                  if [ -n "$line" ]; then echo "::error::$line"; fi
-                done
+            sed 's/\x1b\[[0-9;]*[mK]//g' /tmp/build-apk.log | sed 's/^\[[^]]*\] //' > /tmp/build-apk-propre.log
+            {
+              grep -n "What went wrong" -A 12 /tmp/build-apk-propre.log | head -n 16
+              grep -n "Error:" /tmp/build-apk-propre.log | head -n 12
+              tail -n 15 /tmp/build-apk-propre.log
+            } | sed 's/%/%25/g' | while IFS= read -r line; do
+              if [ -n "$line" ]; then echo "::error::$line"; fi
+            done
             exit "$status"
           fi
 
