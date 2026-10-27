@@ -99,8 +99,15 @@ jobs:
           status=${PIPESTATUS[0]}
           set -e
           if [ "$status" -ne 0 ]; then
-            echo "::error::Compilation APK échouée (code $status) — extrait du journal :"
-            tail -n 45 /tmp/build-apk.log | sed 's/%/%25/g' | while IFS= read -r line; do
+            echo "::error::Compilation APK échouée (code $status) — diagnostic :"
+            extracted=$(sed -n '/FAILURE: Build failed with an exception/,$p' /tmp/build-apk.log \
+              | sed 's/^\[[^]]*\] //' \
+              | grep -v "^[[:space:]]*at \|^[[:space:]]*\.\.\." \
+              | head -n 45)
+            if [ -z "$extracted" ]; then
+              extracted=$(tail -n 45 /tmp/build-apk.log | sed 's/^\[[^]]*\] //')
+            fi
+            echo "$extracted" | sed 's/%/%25/g' | while IFS= read -r line; do
               if [ -n "$line" ]; then echo "::error::$line"; fi
             done
             exit "$status"
