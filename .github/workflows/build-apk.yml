@@ -129,7 +129,7 @@ jobs:
             if ! gh release view apk-latest >/dev/null 2>&1; then
               gh release create apk-latest \
                 --target "${PR_HEAD_SHA:-$GITHUB_SHA}" \
-                --name "APK Android — En-Check Pointage" \
+                --title "APK Android — En-Check Pointage" \
                 --notes "APK de l'application En-Check Pointage (compilation automatique). Téléchargez en-check-pointage.apk, puis installez-le sur la tablette Android (autorisez les sources inconnues). Signé avec la clé de débogage : suffisant pour la recette, pas pour la production."
             fi
             gh release upload apk-latest en-check-pointage.apk --clobber
