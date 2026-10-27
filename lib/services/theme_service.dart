@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ThemeService extends ChangeNotifier {
-  static const String _themeKey = 'dark_mode';
+  static const String _themeKey = 'apparence_sombre_v2';
   bool _isDarkMode = false;
 
   bool get isDarkMode => _isDarkMode;
@@ -16,7 +16,7 @@ class ThemeService extends ChangeNotifier {
     // 🎨 Refonte design : le mode sombre « spotlight » est le visage par
     //    défaut du kiosque (fond profond + or). Le bouton ☀️/🌙 bascule
     //    toujours, et le choix est mémorisé pour la prochaine fois.
-    _isDarkMode = prefs.getBool(_themeKey) ?? true;
+    _isDarkMode = prefs.getBool(_themeKey) ?? false;
     notifyListeners();
   }
 

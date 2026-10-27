@@ -2084,63 +2084,83 @@ class _PointageScreenState extends State<PointageScreen> {
                       color: EnCheckColors.terreChaude))
               : LayoutBuilder(
                   builder: (context, constraints) {
-                    // ZERO SCROLL : la page tient d'un coup - sur petit
-                    // ecran elle se reduit legerement au lieu de scroller.
+                    // ZERO SCROLL en usage normal : la page s'affiche en
+                    // entier, a TAILLE NORMALE (jamais reduite). Le scroll
+                    // n'apparait qu'en secours si la fenetre est vraiment
+                    // trop courte.
+                    final scrollDeSecours = constraints.maxHeight < 780;
+                    final contenu = Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: _colonnePrincipale(
+                        estEnLigne,
+                        themeService,
+                        margeFlexible: !scrollDeSecours,
+                      ),
+                    );
+                    if (scrollDeSecours) {
+                      return SingleChildScrollView(
+                        physics: const ClampingScrollPhysics(),
+                        child: contenu,
+                      );
+                    }
                     return Center(
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: SizedBox(
-                          width: constraints.maxWidth
-                              .clamp(320.0, 560.0)
-                              .toDouble(),
-                          child: Padding(
-                            padding:
-                                const EdgeInsets.symmetric(horizontal: 24),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const SizedBox(height: 8),
-                                _buildEnteteVisuelle(estEnLigne, themeService),
-                                const SizedBox(height: 10),
-                                // Bandeau Borne : entreprises concernees
-                                // uniquement (reco faciale ou mode kiosque).
-                                if (_moduleRecoFacialeActif || _kioskMode) ...[
-                                  _buildBandeauBorne(),
-                                  const SizedBox(height: 10),
-                                ],
-                                // BLOC PAUSE - au-dessus de la carte
-                                // MATRICULE, toujours visible.
-                                _buildBlocPause(),
-                                const SizedBox(height: 12),
-                                _buildZonePointage(),
-                                const SizedBox(height: 12),
-                                Row(
-                                  children: [
-                                    Expanded(child: _buildBoutonMaJournee()),
-                                    const SizedBox(width: 10),
-                                    Expanded(child: _buildBoutonParametres()),
-                                  ],
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  'v1.0.0 \u2022 Chiffrement AES-256 \u2022 Serveur UE',
-                                  style: TextStyle(
-                                    fontFamily: 'JetBrainsMono',
-                                    fontSize: 10,
-                                    color: EnCheckColors.gris.withOpacity(0.9),
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                              ],
-                            ),
-                          ),
-                        ),
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 620),
+                        child: contenu,
                       ),
                     );
                   },
                 ),
         ),
       ),
+    );
+  }
+
+  Widget _colonnePrincipale(
+    bool estEnLigne,
+    ThemeService themeService, {
+    required bool margeFlexible,
+  }) {
+    return Column(
+      mainAxisSize: margeFlexible ? MainAxisSize.max : MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SizedBox(height: 6),
+        _buildEnteteVisuelle(estEnLigne, themeService),
+        const SizedBox(height: 8),
+        // Bandeau Borne : entreprises concernees uniquement
+        // (reco faciale ou mode kiosque).
+        if (_moduleRecoFacialeActif || _kioskMode) ...[
+          _buildBandeauBorne(),
+          const SizedBox(height: 8),
+        ],
+        // BLOC PAUSE - au-dessus de la carte MATRICULE, toujours visible.
+        _buildBlocPause(),
+        const SizedBox(height: 10),
+        _buildZonePointage(),
+        if (margeFlexible)
+          const Spacer()
+        else
+          const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(child: _buildBoutonMaJournee()),
+            const SizedBox(width: 10),
+            Expanded(child: _buildBoutonParametres()),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'v1.0.0 \u2022 Chiffrement AES-256 \u2022 Serveur UE',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontFamily: 'JetBrainsMono',
+            fontSize: 11,
+            color: EnCheckColors.gris.withOpacity(0.9),
+          ),
+        ),
+        const SizedBox(height: 8),
+      ],
     );
   }
   // ═══════════════════════════════════════════════════════════
@@ -2685,7 +2705,7 @@ class _PointageScreenState extends State<PointageScreen> {
               const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
               decoration: BoxDecoration(
                 color: EnCheckColors.terreChaude.withOpacity(0.12),
-                borderRadius: BorderRadius.circular(20),
+                borderRadius: BorderRadius.circular(16),
                 border: Border.all(
                     color: EnCheckColors.terreChaude.withOpacity(0.25)),
               ),
@@ -3678,15 +3698,25 @@ class _PointageScreenState extends State<PointageScreen> {
                 ),
             ],
           ),
-          const SizedBox(height: 10),
-          Center(
-            child: Text(
-              afficherPin
-                  ? (codePin.isEmpty ? '● ● ● ●' : '● ' * codePin.length)
-                  : matriculeComplet,
-              style: EnCheckTextStyles.chiffresMono.copyWith(
-                color: Theme.of(context).textTheme.bodyLarge?.color,
-                letterSpacing: afficherPin ? 8 : 4,
+          const SizedBox(height: 12),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            decoration: BoxDecoration(
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? Colors.white.withOpacity(0.07)
+                  : const Color(0xFFF7F2EA),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Center(
+              child: Text(
+                afficherPin
+                    ? (codePin.isEmpty ? '● ● ● ●' : '● ' * codePin.length)
+                    : matriculeComplet,
+                style: EnCheckTextStyles.chiffresMono.copyWith(
+                  color: Theme.of(context).textTheme.bodyLarge?.color,
+                  letterSpacing: afficherPin ? 8 : 4,
+                ),
               ),
             ),
           ),
@@ -3768,11 +3798,11 @@ class _PointageScreenState extends State<PointageScreen> {
     return Column(
       children: [
         _construireLigneClavier(['1', '2', '3']),
-        const SizedBox(height: 12),
+        const SizedBox(height: 8),
         _construireLigneClavier(['4', '5', '6']),
-        const SizedBox(height: 12),
+        const SizedBox(height: 8),
         _construireLigneClavier(['7', '8', '9']),
-        const SizedBox(height: 12),
+        const SizedBox(height: 8),
         _construireLigneClavier(['⌫', '0', '✓']),
       ],
     );
@@ -3806,8 +3836,8 @@ class _PointageScreenState extends State<PointageScreen> {
     return GestureDetector(
       onTap: () => _onToucheAppuyee(touche),
       child: Container(
-        width: 70,
-        height: 70,
+        width: 56,
+        height: 56,
         decoration: BoxDecoration(
           color: couleurFond,
           borderRadius: BorderRadius.circular(20),
@@ -3822,8 +3852,8 @@ class _PointageScreenState extends State<PointageScreen> {
           child: Text(touche,
               style: TextStyle(
                   color: couleurTexte,
-                  fontSize: 24,
-                  fontWeight: FontWeight.w400)),
+                  fontSize: 21,
+                  fontWeight: FontWeight.w500)),
         ),
       ),
     );
