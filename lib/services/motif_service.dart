@@ -66,7 +66,7 @@ class MotifCulturel {
   );
 
   static const List<MotifCulturel> tous = [raphia, adinkra, bogolan, zoulou];
-  static const String idDefaut = raphia.id;
+  static const String idDefaut = 'raphia';
 
   /// Retombe toujours sur le Raphia si l'id enregistré est inconnu.
   static MotifCulturel parId(String? id) {

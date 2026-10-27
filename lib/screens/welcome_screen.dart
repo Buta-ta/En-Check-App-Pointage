@@ -477,7 +477,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                       ),
                       const SizedBox(height: 8),
                       const Text(
-                        'Veuillez entrer le code de votre entreprise pour configurer l\'appareil.',
+                        "Veuillez entrer le code de votre entreprise pour configurer l'appareil.",
                         style: TextStyle(
                           fontSize: 12,
                           color: EnCheckColors.gris,
