@@ -24,6 +24,12 @@ class MotifCulturel {
   /// Teinte douce pour les cartes (l'identité du motif, en retenue).
   final Color couleurTint;
 
+  /// Pays d'origine du textile (affiché dans le cadre latéral).
+  final String pays;
+
+  /// Peuple à qui appartient le motif (affiché dans le cadre latéral).
+  final String peuple;
+
   const MotifCulturel({
     required this.id,
     required this.nom,
@@ -31,6 +37,8 @@ class MotifCulturel {
     required this.couleurBouton,
     required this.couleurAccent,
     required this.couleurTint,
+    required this.pays,
+    required this.peuple,
   });
 
   /// 🧺 Raphia tressé (Kuba) — LE MOTIF PAR DÉFAUT.
@@ -41,6 +49,8 @@ class MotifCulturel {
     couleurBouton: Color(0xFF3D2B1F),
     couleurAccent: Color(0xFFC98A2B),
     couleurTint: Color(0xFFF7EFE0),
+    pays: 'Congo',
+    peuple: 'Kuba',
   );
 
   /// Adinkra peint (Ghana) — l'univers « temps et travail ».
@@ -51,6 +61,8 @@ class MotifCulturel {
     couleurBouton: Color(0xFF1B2A4A),
     couleurAccent: Color(0xFFB4593A),
     couleurTint: Color(0xFFF4EAE3),
+    pays: 'Ghana',
+    peuple: 'Akan',
   );
 
   /// Bogolan (Mali) — la boue et le coton.
@@ -61,6 +73,8 @@ class MotifCulturel {
     couleurBouton: Color(0xFF2E2118),
     couleurAccent: Color(0xFF8B5E34),
     couleurTint: Color(0xFFF2EADD),
+    pays: 'Mali',
+    peuple: 'Bambara',
   );
 
   /// Perles zoulou — géométries colorées.
@@ -71,6 +85,8 @@ class MotifCulturel {
     couleurBouton: Color(0xFF1F4E4A),
     couleurAccent: Color(0xFF2E7D6B),
     couleurTint: Color(0xFFE9F1EE),
+    pays: 'Afrique du Sud',
+    peuple: 'Zoulou',
   );
 
   static const List<MotifCulturel> tous = [raphia, adinkra, bogolan, zoulou];
@@ -83,6 +99,13 @@ class MotifCulturel {
     }
     return raphia;
   }
+}
+
+/// « Motifs culturels du Congo » / « Motifs culturels d'Afrique du Sud »…
+String titreMotifsCulturels(String pays) {
+  final debutVoyelle = RegExp(r'^[AEIOUYÀÂÄÉÈÊËÎÏÔÖÙÛÜ]', caseSensitive: false);
+  final particule = debutVoyelle.hasMatch(pays) ? "d'" : 'du ';
+  return 'Motifs culturels $particule$pays';
 }
 
 class MotifService {
