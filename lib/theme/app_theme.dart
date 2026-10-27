@@ -35,10 +35,17 @@ class EnCheckColors {
   static const Color noirElegant = Color(0xFF1C1C1C);
   static const Color terreChaude = Color(0xFF8B6914);
   static const Color orDoux = Color(0xFFD4AF37);
+  static const Color orClair = Color(0xFFF5E6C8);
+  static const Color orFonce = Color(0xFFB8941F);
   static const Color blanc = Color(0xFFFFFBF5);
   static const Color gris = Color(0xFF9E9E9E);
-  static const Color succes = Color(0xFF4A7C59);
-  static const Color erreur = Color(0xFF9B2C2C);
+
+  // 🎭 Couleurs sémantiques alignées sur l'app En-Check Admin :
+  //    même langage pour les deux apps (vert = succès, ambre = alerte…).
+  static const Color succes = Color(0xFF10B981);
+  static const Color alerte = Color(0xFFF59E0B);
+  static const Color erreur = Color(0xFFEF4444);
+  static const Color info = Color(0xFF6366F1);
 }
 
 class EnCheckTextStyles {
@@ -61,6 +68,17 @@ class EnCheckTextStyles {
     fontSize: 44,
     fontWeight: FontWeight.w200,
     letterSpacing: 2,
+    // 🎨 Refonte design : les grands chiffres (horloge, heures de pointage)
+    //    sont en JetBrains Mono — le même « compteur fiable » que l'admin.
+    fontFamily: 'JetBrainsMono',
+  );
+
+  // Chiffres compacts (matricule ENN-____, clavier numérique) : même ADN.
+  static const TextStyle chiffresMono = TextStyle(
+    fontSize: 28,
+    fontWeight: FontWeight.w300,
+    letterSpacing: 4,
+    fontFamily: 'JetBrainsMono',
   );
 
   static const TextStyle texteNormal = TextStyle(

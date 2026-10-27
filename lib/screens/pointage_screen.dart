@@ -14,6 +14,7 @@ import '../widgets/logo_empreinte.dart';
 import '../widgets/qr_scanner_widget.dart';
 import '../widgets/qr_photo_scanner_widget.dart';
 import '../widgets/pin_photo_widget.dart';
+import '../widgets/bandes_motifs.dart';
 import '../widgets/web_camera_widget_provider.dart';
 import '../services/supabase_service.dart';
 import '../services/borne_service.dart';
@@ -930,7 +931,15 @@ class _PointageScreenState extends State<PointageScreen> {
   /// (retour du 17/10 au soir : visible sans jamais scroller).
   Widget _buildBoutonPause() {
     final enModePause = _intention == 'pause';
-    return SizedBox(
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // 🎨 Refonte design : la couverture basotho (Lesotho) veille sur le
+        //    bloc pause — repos, chaleur. La règle UX reste intacte : le bloc
+        //    pause est placé juste au-dessus de la carte MATRICULE.
+        const BandeMotif.lesotho(height: 12),
+        const SizedBox(height: 6),
+        SizedBox(
       width: double.infinity,
       child: ElevatedButton.icon(
         onPressed: enModePause ? null : _demarrerFluxPause,
@@ -952,6 +961,8 @@ class _PointageScreenState extends State<PointageScreen> {
           ),
         ),
       ),
+        ),
+      ],
     );
   }
 
@@ -1965,9 +1976,13 @@ class _PointageScreenState extends State<PointageScreen> {
                             ?.color,
                       ),
                     ),
-                    const SizedBox(height: 25),
+                    const SizedBox(height: 16),
+                    // 🎨 Refonte design : frise Adinkra sous le logo —
+                    //    l'étoffe « temps et travail » du kiosque.
+                    const BandeMotif.adinkra(height: 28),
+                    const SizedBox(height: 18),
                     _buildCarteEntreprise(),
-                    const SizedBox(height: 30),
+                    const SizedBox(height: 28),
                     Text(
                       heureActuelle,
                       style: EnCheckTextStyles.grosChiffres.copyWith(
@@ -3436,7 +3451,14 @@ class _PointageScreenState extends State<PointageScreen> {
   }
 
   Widget _buildInputCard() {
-    return Container(
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // 🎨 Refonte design : frise « perles zoulou » en tête de la carte
+        //    MATRICULE — l'écran où l'on rencontre les personnes.
+        const BandeMotif.zoulou(height: 14),
+        const SizedBox(height: 8),
+        Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
       decoration: BoxDecoration(
@@ -3475,16 +3497,16 @@ class _PointageScreenState extends State<PointageScreen> {
               afficherPin
                   ? (codePin.isEmpty ? '● ● ● ●' : '● ' * codePin.length)
                   : matriculeComplet,
-              style: TextStyle(
+              style: EnCheckTextStyles.chiffresMono.copyWith(
                 color: Theme.of(context).textTheme.bodyLarge?.color,
-                fontSize: 28,
-                fontWeight: FontWeight.w300,
                 letterSpacing: afficherPin ? 8 : 4,
               ),
             ),
           ),
         ],
       ),
+        ),
+      ],
     );
   }
 
