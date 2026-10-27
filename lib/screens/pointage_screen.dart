@@ -17,6 +17,7 @@ import '../widgets/pin_photo_widget.dart';
 import '../widgets/bandes_motifs.dart';
 import '../widgets/web_camera_widget_provider.dart';
 import '../services/supabase_service.dart';
+import '../services/appareil_service.dart';
 import '../services/borne_service.dart';
 import '../services/local_database.dart';
 import '../services/connectivity_service.dart';
@@ -91,6 +92,10 @@ class _PointageScreenState extends State<PointageScreen> {
 
   // 🤖 Mode tablette
   bool _kioskMode = false;
+
+  // 🖥️ Mode kiosque choisi à l'accueil (bouton « Mode kiosque ») :
+  //    cet appareil est une borne, même sans bail `bk1_` ni config serveur.
+  bool _modeKiosqueAppareil = false;
 
   /// 🖥️ CONTRAT ÉTAPE 3 — la borne est-elle authentifiée (bail `bk1_`
   /// valide) ? Le personnel se synchronise alors par `encheck_borne_personnel`.
@@ -196,12 +201,24 @@ class _PointageScreenState extends State<PointageScreen> {
       _faceEmployeeName = prefs.getString('face_employee_name');
     });
 
+    // 🖥️ Mode kiosque choisi à l'accueil : cet appareil est une borne.
+    if (prefs.getString('mode_appareil') == AppareilService.kiosque) {
+      if (mounted) {
+        setState(() {
+          _modeKiosqueAppareil = true;
+          _kioskMode = true;
+        });
+      }
+    }
+
     if (_moduleRecoFacialeActif) {
       final configCache = await LocalDatabase.getConfigFaciale();
       if (configCache != null && mounted) {
         setState(() {
           _faceConfig = configCache;
-          _kioskMode = configCache['kiosk_mode_enabled'] as bool? ?? false;
+          _kioskMode =
+              (configCache['kiosk_mode_enabled'] as bool? ?? false) ||
+              _modeKiosqueAppareil;
         });
       }
       FaceRecognitionService.initialiser();
@@ -224,7 +241,7 @@ class _PointageScreenState extends State<PointageScreen> {
       if (mounted) {
         setState(() {
           _faceConfig = config;
-          _kioskMode = kioskMode || bailBorne;
+          _kioskMode = kioskMode || bailBorne || _modeKiosqueAppareil;
         });
       }
 
