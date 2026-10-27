@@ -133,7 +133,7 @@ class _EnCheckAppState extends State<EnCheckApp> {
     return ThemeData(
       brightness: Brightness.light,
       primarySwatch: Colors.amber,
-      scaffoldBackgroundColor: const Color(0xFFE5D4C0),
+      scaffoldBackgroundColor: const Color(0xFFF6EFE3),
       appBarTheme: const AppBarTheme(
         backgroundColor: Color(0xFF3D2B1F),
         foregroundColor: Color(0xFFFFFBF5),
