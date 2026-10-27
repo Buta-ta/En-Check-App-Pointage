@@ -38,8 +38,8 @@ class SouhaitsService {
     'BFA': 'Wendkoom',
     'BF': 'Wendkoom',
     // Gabon — fang
-    'GAB': 'M'bolo',
-    'GA': 'M'bolo',
+    'GAB': 'M\'bolo',
+    'GA': 'M\'bolo',
   };
 
   /// Le souhait à afficher pour un pays (repli : « Bienvenue »).
