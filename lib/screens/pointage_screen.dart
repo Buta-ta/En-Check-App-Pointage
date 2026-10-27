@@ -376,9 +376,33 @@ class _PointageScreenState extends State<PointageScreen> {
         };
         chargementEntreprises = false;
       });
+      // Le souhait vient du pays : si la session est ancienne (pays pas
+      // encore mémorisé), on le récupère automatiquement au premier
+      // lancement en ligne.
+      if (pays == null) _completerPaysEntreprise(id);
     } else {
       setState(() => chargementEntreprises = false);
     }
+  }
+
+  Future<void> _completerPaysEntreprise(String entrepriseId) async {
+    if (!ConnectivityService.isOnline) return;
+    try {
+      final row = await SupabaseService.client
+          .from('enterprises')
+          .select('country_code')
+          .eq('id', entrepriseId)
+          .maybeSingle();
+      final paysTrouve = row?['country_code']?.toString();
+      if (paysTrouve == null || paysTrouve.isEmpty) return;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('enterprise_pays', paysTrouve);
+      if (mounted) {
+        setState(() {
+          entrepriseSelectionnee?['country_code'] = paysTrouve;
+        });
+      }
+    } catch (_) {}
   }
 
   Future<void> _verifierApprobationEnLigne() async {
@@ -3206,8 +3230,9 @@ class _PointageScreenState extends State<PointageScreen> {
     final nomEntreprise = entrepriseSelectionnee?['name']?.toString() ?? '';
     final pays = entrepriseSelectionnee?['country_code']?.toString();
     final souhait = SouhaitsService.souhait(pays);
-    final couleurTexte = Theme.of(context).textTheme.bodyLarge?.color ??
-        EnCheckColors.brunProfond;
+    final sombre = Theme.of(context).brightness == Brightness.dark;
+    final couleurTexte =
+        sombre ? const Color(0xFFF5F1EA) : const Color(0xFF2A2118);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -3221,9 +3246,14 @@ class _PointageScreenState extends State<PointageScreen> {
           ),
         ),
         const SizedBox(height: 4),
+        // Un SEUL souhait de bienvenue : le grand mot ci-dessus (dans la
+        // langue du pays) ; ici, simplement « chez l'entreprise ».
         Text(
-          'Bienvenue chez $nomEntreprise',
-          style: const TextStyle(fontSize: 15, color: EnCheckColors.gris),
+          'chez $nomEntreprise',
+          style: TextStyle(
+              fontSize: 15.5,
+              fontWeight: FontWeight.w500,
+              color: sombre ? const Color(0xFFB7AFA4) : const Color(0xFF7A6E60)),
         ),
       ],
     );
@@ -3264,14 +3294,20 @@ class _PointageScreenState extends State<PointageScreen> {
     required VoidCallback onTap,
   }) {
     final motif = MotifService.actif.value;
-    final couleurTexte = Theme.of(context).textTheme.bodyLarge?.color ??
-        EnCheckColors.brunProfond;
     final sombre = Theme.of(context).brightness == Brightness.dark;
+    // Contrastes EXPLICITES : lisibles en mode clair ET en mode sombre.
+    final couleurTexte =
+        sombre ? const Color(0xFFF5F1EA) : const Color(0xFF2A2118);
+    final couleurLegende =
+        sombre ? const Color(0xFFC9C2B8) : const Color(0xFF7A6E60);
     final fond = chaude
-        ? (sombre
-            ? motif.couleurTint.withOpacity(0.15)
-            : motif.couleurTint)
-        : Theme.of(context).dividerColor.withOpacity(0.12);
+        ? (sombre ? const Color(0xFF3B2E1E) : motif.couleurTint)
+        : (sombre ? const Color(0xFF2B2B30) : const Color(0xFFF1F0F2));
+    final cercleFond = chaude
+        ? motif.couleurAccent
+        : (sombre ? const Color(0xFFF5F1EA) : const Color(0xFF2A2118));
+    final cercleIcone =
+        chaude ? Colors.white : (sombre ? const Color(0xFF2A2118) : Colors.white);
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -3293,10 +3329,10 @@ class _PointageScreenState extends State<PointageScreen> {
               width: 42,
               height: 42,
               decoration: BoxDecoration(
-                color: chaude ? motif.couleurAccent : couleurTexte,
+                color: cercleFond,
                 shape: BoxShape.circle,
               ),
-              child: Icon(icone, color: EnCheckColors.blanc, size: 20),
+              child: Icon(icone, color: cercleIcone, size: 20),
             ),
             const SizedBox(height: 14),
             Text(
@@ -3309,8 +3345,8 @@ class _PointageScreenState extends State<PointageScreen> {
             const SizedBox(height: 4),
             Text(
               legende,
-              style: const TextStyle(
-                  fontSize: 12, color: EnCheckColors.gris, height: 1.35),
+              style: TextStyle(
+                  fontSize: 12, color: couleurLegende, height: 1.35),
             ),
           ],
         ),
@@ -3570,7 +3606,10 @@ class _PointageScreenState extends State<PointageScreen> {
     required VoidCallback onTap,
   }) {
     final motif = MotifService.actif.value;
-    final couleur = actif ? motif.couleurAccent : EnCheckColors.gris;
+    final sombre = Theme.of(context).brightness == Brightness.dark;
+    final couleur = actif
+        ? motif.couleurAccent
+        : (sombre ? const Color(0xFF9A938A) : const Color(0xFF8A7F72));
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
