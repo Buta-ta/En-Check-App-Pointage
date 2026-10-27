@@ -40,6 +40,9 @@ class EnCheckColors {
   static const Color blanc = Color(0xFFFFFBF5);
   static const Color gris = Color(0xFF9E9E9E);
 
+  // 🎨 Fond crème de l'accueil (maquette validée du 27/10).
+  static const Color cremePapier = Color(0xFFF6EFE3);
+
   // 🎭 Couleurs sémantiques alignées sur l'app En-Check Admin :
   //    même langage pour les deux apps (vert = succès, ambre = alerte…).
   static const Color succes = Color(0xFF10B981);

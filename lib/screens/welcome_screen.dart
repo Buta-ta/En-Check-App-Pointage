@@ -1,8 +1,25 @@
+// lib/screens/welcome_screen.dart
+// ═══════════════════════════════════════════════════════════
+// 🏠 ACCUEIL — code entreprise (page 1 de la refonte design)
+// ═══════════════════════════════════════════════════════════
+//
+//  MAQUETTE VALIDÉE le 27/10 : frise raphia (motif par défaut) en haut,
+//  plaque logo « En-Check — On gère ! », carte CODE ENTREPRISE, bouton
+//  « Se connecter », modes appareil (privé / kiosque), ligne technique.
+//  Le bouton ⚙️ ouvre le panneau « Motif culturel » (Raphia, Adinkra,
+//  Bogolan, Zoulou — Raphia = défaut).
+//
+//  ⚠️ La logique de connexion (_verifierCode) est inchangée : lecture du
+//  code dans `enterprises`, sauvegarde des modules, puis PointageScreen.
+// ═══════════════════════════════════════════════════════════
+
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/app_theme.dart';
+import '../services/appareil_service.dart';
+import '../services/motif_service.dart';
 import '../services/supabase_service.dart';
-import '../widgets/bandes_motifs.dart';
+import '../widgets/frise_motif.dart';
 import '../widgets/logo_empreinte.dart';
 import 'pointage_screen.dart';
 
@@ -17,6 +34,29 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   final _codeController = TextEditingController();
   bool _loading = false;
   String? _error;
+
+  // 📱 Mode de l'appareil : privé (défaut) ou kiosque (borne).
+  String _modeAppareil = AppareilService.prive;
+
+  @override
+  void initState() {
+    super.initState();
+    _chargerPreferences();
+  }
+
+  @override
+  void dispose() {
+    _codeController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _chargerPreferences() async {
+    await MotifService.charger();
+    final mode = await AppareilService.mode();
+    if (mounted) {
+      setState(() => _modeAppareil = mode);
+    }
+  }
 
   Future<void> _verifierCode() async {
     FocusScope.of(context).unfocus();
@@ -85,125 +125,504 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     }
   }
 
+  Future<void> _choisirModeAppareil(String mode) async {
+    setState(() => _modeAppareil = mode);
+    await AppareilService.definirMode(mode);
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // 🧵 PANNEAU « MOTIF CULTUREL »
+  // ═══════════════════════════════════════════════════════════
+
+  Future<void> _ouvrirChoixMotif() async {
+    MotifCulturel choix = MotifService.actif.value;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (sheetContext, setSheetState) {
+            return Container(
+              decoration: const BoxDecoration(
+                color: EnCheckColors.blanc,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+              ),
+              padding: const EdgeInsets.fromLTRB(22, 12, 22, 28),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          'Motif culturel',
+                          style: TextStyle(
+                            fontSize: 21,
+                            fontWeight: FontWeight.w800,
+                            color: EnCheckColors.brunProfond,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.pop(sheetContext),
+                        icon: const Icon(Icons.close, color: EnCheckColors.gris),
+                      ),
+                    ],
+                  ),
+                  const Text(
+                    'Choisissez le motif de votre entreprise',
+                    style: TextStyle(fontSize: 13.5, color: EnCheckColors.gris),
+                  ),
+                  const SizedBox(height: 18),
+                  GridView.count(
+                    crossAxisCount: 2,
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    mainAxisSpacing: 14,
+                    crossAxisSpacing: 14,
+                    childAspectRatio: 1.45,
+                    children: [
+                      for (final motif in MotifCulturel.tous)
+                        _vignetteMotif(
+                          motif,
+                          selectionne: motif.id == choix.id,
+                          onTap: () => setSheetState(() => choix = motif),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 22),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 52,
+                    child: ElevatedButton(
+                      onPressed: () async {
+                        await MotifService.enregistrer(choix);
+                        if (sheetContext.mounted) {
+                          Navigator.pop(sheetContext);
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: choix.couleurBouton,
+                        foregroundColor: EnCheckColors.blanc,
+                        elevation: 0,
+                        side: BorderSide(
+                          color: choix.couleurAccent.withOpacity(0.55),
+                          width: 1.4,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
+                      child: const Text(
+                        'Enregistrer',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.6,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _vignetteMotif(
+    MotifCulturel motif, {
+    required bool selectionne,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: onTap,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: selectionne
+                          ? EnCheckColors.orDoux
+                          : EnCheckColors.brunProfond.withOpacity(0.18),
+                      width: selectionne ? 3 : 1,
+                    ),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(13),
+                    child: Image.asset(
+                      motif.asset,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) =>
+                          Container(color: motif.couleurBouton),
+                    ),
+                  ),
+                ),
+                if (motif.id == MotifCulturel.idDefaut)
+                  Positioned(
+                    right: 6,
+                    bottom: 6,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: EnCheckColors.orDoux,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: const Text(
+                        '★ Défaut',
+                        style: TextStyle(
+                          fontSize: 9.5,
+                          fontWeight: FontWeight.w700,
+                          color: EnCheckColors.brunProfond,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            motif.nom,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: selectionne ? FontWeight.w800 : FontWeight.w600,
+              color: EnCheckColors.brunProfond,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // 🎨 INTERFACE
+  // ═══════════════════════════════════════════════════════════
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: EnCheckColors.sableClair,
+      backgroundColor: EnCheckColors.cremePapier,
       body: SafeArea(
         child: SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 20),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const SizedBox(height: 40),
-
-                const LogoEmpreinte(taille: 140),
-
-                const SizedBox(height: 20),
-
-                const Text(
-                  'EN-CHECK',
-                  style: EnCheckTextStyles.titrePrincipal,
-                  textAlign: TextAlign.center,
-                ),
-
-                const SizedBox(height: 10),
-
-                const Text(
-                  'Bienvenue',
-                  style: TextStyle(
-                    color: EnCheckColors.terreChaude,
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 1.5,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // ── Frise culturelle + bouton Paramètres ⚙️ ──
+              Stack(
+                children: [
+                  ValueListenableBuilder<MotifCulturel>(
+                    valueListenable: MotifService.actif,
+                    builder: (context, motif, _) => FriseMotif(motif: motif),
                   ),
-                ),
-
-                // 🎨 Refonte design : frise Adinkra (Ghana) — l'univers
-                //    « temps et travail » sous le titre de bienvenue.
-                const SizedBox(height: 22),
-                const BandeMotif.adinkra(height: 42),
-                const SizedBox(height: 28),
-
-                const Text(
-                  'Veuillez entrer le code de votre entreprise pour configurer l\'appareil.',
-                  style: TextStyle(color: EnCheckColors.brunProfond, fontSize: 16, height: 1.5),
-                  textAlign: TextAlign.center,
-                ),
-
-                const SizedBox(height: 30),
-
-                TextField(
-                  controller: _codeController,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 28,
-                    letterSpacing: 8,
-                    fontWeight: FontWeight.bold,
-                    color: EnCheckColors.brunProfond,
-                  ),
-                  decoration: InputDecoration(
-                    hintText: 'CODE',
-                    hintStyle: TextStyle(
-                      color: EnCheckColors.gris.withOpacity(0.5),
-                      letterSpacing: 4,
-                    ),
-                    filled: true,
-                    fillColor: EnCheckColors.blanc,
-                    contentPadding: const EdgeInsets.symmetric(vertical: 20),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(20),
-                      borderSide: BorderSide.none,
-                    ),
-                    errorText: _error,
-                    prefixIcon: const Icon(Icons.vpn_key, color: EnCheckColors.sableDore),
-                  ),
-                  textCapitalization: TextCapitalization.characters,
-                  onSubmitted: (_) => _verifierCode(),
-                ),
-
-                const SizedBox(height: 30),
-
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: _loading ? null : _verifierCode,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: EnCheckColors.terreChaude,
-                      foregroundColor: EnCheckColors.blanc,
-                      padding: const EdgeInsets.symmetric(vertical: 18),
-                      elevation: 5,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                    ),
-                    child:
-                    _loading
-                        ? const SizedBox(
-                      height: 24,
-                      width: 24,
-                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                    )
-                        : const Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          'VALIDER',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 2,
+                  Positioned(
+                    top: 12,
+                    right: 16,
+                    child: Material(
+                      color: Colors.white.withOpacity(0.85),
+                      shape: const CircleBorder(),
+                      elevation: 2,
+                      child: InkWell(
+                        customBorder: const CircleBorder(),
+                        onTap: _ouvrirChoixMotif,
+                        child: const Padding(
+                          padding: EdgeInsets.all(10),
+                          child: Icon(
+                            Icons.settings,
+                            color: EnCheckColors.brunProfond,
+                            size: 22,
                           ),
                         ),
-                        SizedBox(width: 10),
-                        Icon(Icons.arrow_forward),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+
+              // ── Plaque logo « En-Check — On gère ! » ──
+              Transform.translate(
+                offset: const Offset(0, -46),
+                child: Center(
+                  child: Container(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 26, 12),
+                    decoration: BoxDecoration(
+                      color: EnCheckColors.blanc,
+                      borderRadius: BorderRadius.circular(28),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.10),
+                          blurRadius: 16,
+                          offset: const Offset(0, 6),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const LogoEmpreinte(taille: 64),
+                        const SizedBox(width: 14),
+                        Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: const [
+                            Text(
+                              'En-Check',
+                              style: TextStyle(
+                                fontSize: 23,
+                                fontWeight: FontWeight.w800,
+                                color: EnCheckColors.brunProfond,
+                                letterSpacing: 0.2,
+                              ),
+                            ),
+                            SizedBox(height: 2),
+                            Text(
+                              'On gère !',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: EnCheckColors.orFonce,
+                                letterSpacing: 0.4,
+                              ),
+                            ),
+                          ],
+                        ),
                       ],
                     ),
                   ),
                 ),
+              ),
 
-                const SizedBox(height: 40),
-              ],
+              // ── Carte CODE ENTREPRISE ──
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 26),
+                child: Container(
+                  padding: const EdgeInsets.fromLTRB(22, 22, 22, 24),
+                  decoration: BoxDecoration(
+                    color: EnCheckColors.blanc,
+                    borderRadius: BorderRadius.circular(24),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.07),
+                        blurRadius: 14,
+                        offset: const Offset(0, 5),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'CODE ENTREPRISE',
+                        style: TextStyle(
+                          fontFamily: 'JetBrainsMono',
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 2.2,
+                          color: EnCheckColors.brunProfond,
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      TextField(
+                        controller: _codeController,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontFamily: 'JetBrainsMono',
+                          fontSize: 26,
+                          letterSpacing: 6,
+                          fontWeight: FontWeight.w700,
+                          color: EnCheckColors.brunProfond,
+                        ),
+                        decoration: InputDecoration(
+                          hintText: 'NOVA-7K2',
+                          hintStyle: TextStyle(
+                            fontFamily: 'JetBrainsMono',
+                            fontSize: 24,
+                            letterSpacing: 5,
+                            fontWeight: FontWeight.w600,
+                            color: EnCheckColors.gris.withOpacity(0.55),
+                          ),
+                          filled: true,
+                          fillColor: const Color(0xFFF7F2EA),
+                          contentPadding: const EdgeInsets.symmetric(
+                            vertical: 18,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: BorderSide.none,
+                          ),
+                          errorText: _error,
+                          errorStyle: const TextStyle(
+                            color: EnCheckColors.erreur,
+                            fontSize: 13,
+                          ),
+                        ),
+                        textCapitalization: TextCapitalization.characters,
+                        onSubmitted: (_) => _verifierCode(),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Veuillez entrer le code de votre entreprise pour configurer l\'appareil.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: EnCheckColors.gris,
+                          height: 1.4,
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 54,
+                        child: ValueListenableBuilder<MotifCulturel>(
+                          valueListenable: MotifService.actif,
+                          builder: (context, motif, _) => ElevatedButton(
+                            onPressed: _loading ? null : _verifierCode,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: motif.couleurBouton,
+                              foregroundColor: EnCheckColors.blanc,
+                              disabledBackgroundColor:
+                                  motif.couleurBouton.withOpacity(0.6),
+                              elevation: 0,
+                              side: BorderSide(
+                                color: motif.couleurAccent.withOpacity(0.55),
+                                width: 1.4,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            ),
+                            child: _loading
+                                ? const SizedBox(
+                                    height: 22,
+                                    width: 22,
+                                    child: CircularProgressIndicator(
+                                      color: Colors.white,
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Text(
+                                    'Se connecter',
+                                    style: TextStyle(
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: 0.6,
+                                    ),
+                                  ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 20),
+
+              // ── Modes de l'appareil ──
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 26),
+                child: Wrap(
+                  spacing: 12,
+                  runSpacing: 10,
+                  alignment: WrapAlignment.center,
+                  children: [
+                    _chipMode(
+                      icon: Icons.person_outline,
+                      label: 'Mode privé',
+                      actif: _modeAppareil == AppareilService.prive,
+                      onTap: () =>
+                          _choisirModeAppareil(AppareilService.prive),
+                    ),
+                    _chipMode(
+                      icon: Icons.desktop_windows_outlined,
+                      label: 'Mode kiosque',
+                      actif: _modeAppareil == AppareilService.kiosque,
+                      onTap: () =>
+                          _choisirModeAppareil(AppareilService.kiosque),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 26),
+
+              // ── Ligne technique ──
+              Text(
+                'v1.0.0 • Chiffrement AES-256 • Serveur UE',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontFamily: 'JetBrainsMono',
+                  fontSize: 11,
+                  color: EnCheckColors.gris.withOpacity(0.9),
+                  letterSpacing: 0.2,
+                ),
+              ),
+
+              const SizedBox(height: 18),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _chipMode({
+    required IconData icon,
+    required String label,
+    required bool actif,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: actif ? EnCheckColors.brunProfond : Colors.transparent,
+      borderRadius: BorderRadius.circular(30),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(30),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(30),
+            border: Border.all(
+              color: actif
+                  ? EnCheckColors.orDoux
+                  : EnCheckColors.brunProfond.withOpacity(0.35),
+              width: 1.3,
             ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                size: 18,
+                color: actif ? EnCheckColors.blanc : EnCheckColors.brunProfond,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w600,
+                  color:
+                      actif ? EnCheckColors.blanc : EnCheckColors.brunProfond,
+                ),
+              ),
+            ],
           ),
         ),
       ),
