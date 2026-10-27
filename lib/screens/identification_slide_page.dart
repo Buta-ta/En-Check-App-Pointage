@@ -147,7 +147,8 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
         child: SafeArea(
           child: LayoutBuilder(
             builder: (context, constraints) {
-              final scrollDeSecours = constraints.maxHeight < 700;
+              final scrollDeSecours = constraints.maxHeight < 700 ||
+                  constraints.maxWidth < 620;
               final contenu = Center(
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 620),

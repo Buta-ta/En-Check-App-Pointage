@@ -619,8 +619,15 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
         ),
         centerTitle: true,
       ),
-      body: Column(
-        children: [
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          return SingleChildScrollView(
+            physics: const ClampingScrollPhysics(),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
           // ═══════════════════════════════════════════
           // 👤 EN-TÊTE EMPLOYÉ AVEC PHOTO
           // ═══════════════════════════════════════════
@@ -753,22 +760,26 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
             const SizedBox(height: 12),
           ],
 
-          Expanded(
-            child:
-            chargement
-                ? const Center(
-              child: CircularProgressIndicator(color: EnCheckColors.terreChaude),
-            )
-                : (pointages.isEmpty && erreur != null)
-                ? _construireErreur()
-                : pointages.isEmpty
-                ? _construireVide()
-                : _construireListe(),
-          ),
-        ],
-      ),
-    );
-  }
+          chargement
+              ? const SizedBox(
+                  height: 220,
+                  child: Center(
+                    child: CircularProgressIndicator(color: EnCheckColors.terreChaude),
+                  ),
+                )
+              : (pointages.isEmpty && erreur != null)
+              ? _construireErreur()
+              : pointages.isEmpty
+              ? _construireVide()
+              : _construireListe(),
+                ],
+              ),
+            ),
+          );
+        },
+        ),
+      );
+    }
 
   /// 💬 Bandeau de session — contrat étape 2 (25/10/2026).
   Widget _construireBandeauSession() {
@@ -971,6 +982,8 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
 
     return ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 20),
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
       itemCount: jours.length,
       itemBuilder: (context, index) {
         final jour = jours[index];
