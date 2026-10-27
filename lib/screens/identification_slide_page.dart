@@ -1,16 +1,15 @@
 // lib/screens/identification_slide_page.dart
 // ═══════════════════════════════════════════════════════════
-// 🪪 PAGE D'IDENTIFICATION — identifiant + mot de passe + slide
+// 🪪 PAGE D'IDENTIFICATION — une action = une page
 // ═══════════════════════════════════════════════════════════
 //
-//  MAQUETTE VALIDÉE le 27/10 (page Pause) : scène chaleureuse en haut,
-//  frise raphia, carte « IDENTIFIEZ-VOUS » (identifiant + mot de passe),
-//  puis « Glisser pour valider ». Utilisée par la PAUSE et par le
-//  POINTAGE (le même écran, titre et scène adaptés).
+//  Identifiant (numéro seul, le préfixe est affiché) + code, puis
+//  « Glisser pour valider ». Utilisée par la PAUSE et par le POINTAGE
+//  (arrivée / départ) — même écran, titre et scène adaptés.
 //
-//  Vérification : SupabaseService.verifierEmployee (en ligne) ou
-//  LocalDatabase.verifierEmployeeCache (hors-ligne) — identique à
-//  l'ancien parcours matricule + PIN.
+//  Résultat : la page RENVOIE l'employé identifié (Navigator.pop) —
+//  l'appelant enregistre le pointage ou la pause, puis l'écran principal
+//  affiche le succès (« retour automatique vers la page principale »).
 // ═══════════════════════════════════════════════════════════
 
 import 'package:flutter/material.dart';
@@ -41,9 +40,6 @@ class IdentificationSlidePage extends StatefulWidget {
   /// Ligne d'état facultative (ex. pause en cours).
   final Widget? statut;
 
-  /// Appelée après identification réussie : true = succès (la page se ferme).
-  final Future<bool> Function(Map<String, dynamic> employe) onValide;
-
   const IdentificationSlidePage({
     super.key,
     required this.titre,
@@ -53,7 +49,6 @@ class IdentificationSlidePage extends StatefulWidget {
     this.matriculePrefix = '',
     this.matriculeInitial,
     this.statut,
-    required this.onValide,
   });
 
   @override
@@ -69,7 +64,8 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
   @override
   void initState() {
     super.initState();
-    _identifiantCtrl = TextEditingController(text: widget.matriculeInitial ?? '');
+    _identifiantCtrl =
+        TextEditingController(text: widget.matriculeInitial ?? '');
   }
 
   @override
@@ -79,7 +75,8 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
     super.dispose();
   }
 
-  Future<bool> _valider() async {
+  /// Vérifie les identifiants : renvoie l'employé, ou null (erreur affichée).
+  Future<Map<String, dynamic>?> _verifierEmploye() async {
     FocusScope.of(context).unfocus();
     final numero = _identifiantCtrl.text.trim().toUpperCase();
     final motDePasse = _motDePasseCtrl.text.trim();
@@ -93,8 +90,8 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
     }
 
     if (numero.isEmpty || motDePasse.length < 4) {
-      setState(() => _erreur = "Renseignez l'identifiant et le mot de passe.");
-      return false;
+      setState(() => _erreur = "Renseignez l'identifiant et le code.");
+      return null;
     }
     setState(() => _erreur = null);
 
@@ -110,16 +107,23 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
       if (employe == null) {
         setState(() {
           _erreur = ConnectivityService.isOnline
-              ? 'Identifiant ou mot de passe incorrect.'
+              ? 'Identifiant ou code incorrect.'
               : 'Employé introuvable dans le cache local (hors-ligne).';
         });
-        return false;
       }
-      return await widget.onValide(employe);
+      return employe;
     } catch (e) {
       setState(() => _erreur = 'Erreur : $e');
-      return false;
+      return null;
     }
+  }
+
+  Future<bool> _valider() async {
+    final employe = await _verifierEmploye();
+    if (employe == null) return false;
+    await Future.delayed(const Duration(milliseconds: 850));
+    if (mounted) Navigator.pop(context, employe);
+    return true;
   }
 
   @override
@@ -144,47 +148,52 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
           child: LayoutBuilder(
             builder: (context, constraints) {
               final scrollDeSecours = constraints.maxHeight < 700;
-              final contenu = Column(
-                mainAxisSize:
-                    scrollDeSecours ? MainAxisSize.min : MainAxisSize.max,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _buildScene(context, themeService),
-                  ValueListenableBuilder<MotifCulturel>(
-                    valueListenable: MotifService.actif,
-                    builder: (context, motif, _) =>
-                        FriseMotif(motif: motif, hauteur: 26),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 22, vertical: 16),
-                    child: _buildCarteIdentification(
-                        context, themeService, couleurTexte),
-                  ),
-                  if (!scrollDeSecours) const Spacer(),
-                  Center(
-                    child: TextButton.icon(
-                      onPressed: () => Navigator.pop(context),
-                      icon: const Icon(Icons.arrow_back,
-                          size: 16, color: EnCheckColors.gris),
-                      label: const Text(
-                        'Retour au pointage',
-                        style: TextStyle(
-                            fontSize: 13, color: EnCheckColors.gris),
+              final contenu = Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 620),
+                  child: Column(
+                    mainAxisSize:
+                        scrollDeSecours ? MainAxisSize.min : MainAxisSize.max,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _buildScene(context, themeService),
+                      ValueListenableBuilder<MotifCulturel>(
+                        valueListenable: MotifService.actif,
+                        builder: (context, motif, _) =>
+                            FriseMotif(motif: motif, hauteur: 10),
                       ),
-                    ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 22, vertical: 18),
+                        child: _buildCarteIdentification(
+                            context, couleurTexte),
+                      ),
+                      if (!scrollDeSecours) const Spacer(),
+                      Center(
+                        child: TextButton.icon(
+                          onPressed: () => Navigator.pop(context),
+                          icon: const Icon(Icons.arrow_back,
+                              size: 16, color: EnCheckColors.gris),
+                          label: const Text(
+                            'Retour',
+                            style: TextStyle(
+                                fontSize: 13, color: EnCheckColors.gris),
+                          ),
+                        ),
+                      ),
+                      Text(
+                        'v1.0.0 • Chiffrement AES-256 • Serveur UE',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontFamily: 'JetBrainsMono',
+                          fontSize: 10,
+                          color: EnCheckColors.gris.withOpacity(0.9),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                    ],
                   ),
-                  Text(
-                    'v1.0.0 • Chiffrement AES-256 • Serveur UE',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontFamily: 'JetBrainsMono',
-                      fontSize: 10,
-                      color: EnCheckColors.gris.withOpacity(0.9),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                ],
+                ),
               );
               if (scrollDeSecours) {
                 return SingleChildScrollView(
@@ -202,13 +211,14 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
 
   Widget _buildScene(BuildContext context, ThemeService themeService) {
     return SizedBox(
-      height: 235,
+      height: 195,
       child: Stack(
         fit: StackFit.expand,
         children: [
           Image.asset(
             widget.sceneAsset,
             fit: BoxFit.cover,
+            alignment: const Alignment(0, -0.1),
             errorBuilder: (_, __, ___) =>
                 Container(color: EnCheckColors.brunProfond),
           ),
@@ -218,11 +228,10 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 colors: [
-                  Colors.black.withOpacity(0.25),
+                  Colors.black.withOpacity(0.42),
                   Colors.transparent,
-                  Theme.of(context).scaffoldBackgroundColor.withOpacity(0.9),
                 ],
-                stops: const [0.0, 0.55, 1.0],
+                stops: const [0.0, 0.5],
               ),
             ),
           ),
@@ -237,35 +246,28 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
                   onTap: () => Navigator.pop(context),
                 ),
                 const Spacer(),
+                Text(
+                  widget.titre,
+                  style: const TextStyle(
+                    fontSize: 19,
+                    fontWeight: FontWeight.w800,
+                    color: EnCheckColors.blanc,
+                    shadows: [
+                      Shadow(color: Colors.black54, blurRadius: 6),
+                    ],
+                  ),
+                ),
+                const Spacer(),
                 _rondScene(
                   icon: Icons.light_mode,
                   actif: !themeService.isDarkMode,
                   onTap: () => themeService.setDarkMode(false),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 7),
                 _rondScene(
                   icon: Icons.dark_mode,
                   actif: themeService.isDarkMode,
                   onTap: () => themeService.setDarkMode(true),
-                ),
-              ],
-            ),
-          ),
-          Positioned(
-            left: 20,
-            bottom: 14,
-            child: Row(
-              children: [
-                const LogoEmpreinte(taille: 40),
-                const SizedBox(width: 12),
-                Text(
-                  widget.titre,
-                  style: const TextStyle(
-                    fontSize: 27,
-                    fontWeight: FontWeight.w800,
-                    color: EnCheckColors.blanc,
-                    letterSpacing: 0.4,
-                  ),
                 ),
               ],
             ),
@@ -283,37 +285,25 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.all(9),
+        padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
-          color: actif
-              ? EnCheckColors.orDoux
-              : Colors.white.withOpacity(0.82),
+          color:
+              actif ? EnCheckColors.orDoux : Colors.white.withOpacity(0.85),
           shape: BoxShape.circle,
         ),
-        child: Icon(
-          icon,
-          size: 18,
-          color:
-              actif ? EnCheckColors.brunProfond : EnCheckColors.brunProfond,
-        ),
+        child: Icon(icon, size: 17, color: EnCheckColors.brunProfond),
       ),
     );
   }
 
-  Widget _buildCarteIdentification(BuildContext context,
-      ThemeService themeService, Color couleurTexte) {
+  Widget _buildCarteIdentification(BuildContext context, Color couleurTexte) {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(22),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.08),
-            blurRadius: 14,
-            offset: const Offset(0, 5),
-          ),
-        ],
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+            color: Theme.of(context).dividerColor.withOpacity(0.35)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -323,10 +313,10 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
             textAlign: TextAlign.center,
             style: TextStyle(
               fontFamily: 'JetBrainsMono',
-              fontSize: 13,
+              fontSize: 12.5,
               fontWeight: FontWeight.w700,
               letterSpacing: 2.2,
-              color: couleurTexte,
+              color: EnCheckColors.gris,
             ),
           ),
           const SizedBox(height: 16),
@@ -340,7 +330,7 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
           ),
           const SizedBox(height: 12),
           _champ(
-            label: 'Mot de passe',
+            label: 'Code',
             controller: _motDePasseCtrl,
             obscure: true,
             couleurTexte: couleurTexte,
@@ -389,7 +379,7 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
       children: [
         Text(
           label,
-          style: TextStyle(
+          style: const TextStyle(
             fontSize: 12,
             fontWeight: FontWeight.w700,
             color: EnCheckColors.gris,
@@ -406,7 +396,6 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
               ? [FilteringTextInputFormatter.digitsOnly]
               : null,
           maxLength: chiffresSeuls ? 6 : null,
-          textCapitalization: TextCapitalization.characters,
           onSubmitted: onSubmis,
           style: TextStyle(
             fontFamily: 'JetBrainsMono',
@@ -430,11 +419,11 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
             filled: true,
             fillColor: Theme.of(context).brightness == Brightness.dark
                 ? Colors.white.withOpacity(0.07)
-                : const Color(0xFFF3EADA),
+                : const Color(0xFFF6F1E8),
             contentPadding:
                 const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(14),
               borderSide: BorderSide.none,
             ),
           ),

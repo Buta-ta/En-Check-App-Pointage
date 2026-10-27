@@ -16,6 +16,7 @@ import '../widgets/frise_motif.dart';
 import 'identification_slide_page.dart';
 import '../widgets/panneau_motif.dart';
 import '../services/motif_service.dart';
+import '../services/souhaits_service.dart';
 import '../widgets/qr_scanner_widget.dart';
 import '../widgets/qr_photo_scanner_widget.dart';
 import '../widgets/pin_photo_widget.dart';
@@ -362,6 +363,7 @@ class _PointageScreenState extends State<PointageScreen> {
     final name = prefs.getString('enterprise_name');
     final logo = prefs.getString('enterprise_logo');
     final prefix = prefs.getString('matricule_prefix');
+    final pays = prefs.getString('enterprise_pays');
 
     if (id != null) {
       setState(() {
@@ -370,6 +372,7 @@ class _PointageScreenState extends State<PointageScreen> {
           'name': name,
           'logo_url': logo,
           'matricule_prefix': prefix,
+          'country_code': pays,
         };
         chargementEntreprises = false;
       });
@@ -1997,50 +2000,49 @@ class _PointageScreenState extends State<PointageScreen> {
         _buildScenePointage(estEnLigne, themeService),
         ValueListenableBuilder<MotifCulturel>(
           valueListenable: MotifService.actif,
-          builder: (context, motif, _) => FriseMotif(motif: motif, hauteur: 28),
+          builder: (context, motif, _) => FriseMotif(motif: motif, hauteur: 10),
         ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 22),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const SizedBox(height: 12),
-              if (_moduleRecoFacialeActif || _kioskMode) ...[
+              const SizedBox(height: 18),
+              _buildSalutation(),
+              const SizedBox(height: 18),
+              // Le rappel d'activation disparait des que la borne est
+              // deja autorisee (bail valide).
+              if ((_moduleRecoFacialeActif || _kioskMode) && !_bornePrete) ...[
                 _buildBandeauBorne(),
                 const SizedBox(height: 12),
               ],
-              _buildChipsNoms(),
-              const SizedBox(height: 12),
-              _buildBoutonPauseVisible(),
-              const SizedBox(height: 12),
-              _buildCarteMatricule(),
-              if (_moduleQRActif || _moduleRecoFacialeActif || _kioskMode) ...[
-                const SizedBox(height: 12),
-                _buildCarteModules(),
-              ],
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  Expanded(child: _buildBoutonMaJournee()),
-                  const SizedBox(width: 10),
-                  Expanded(child: _buildBoutonParametres()),
-                ],
+              ValueListenableBuilder<MotifCulturel>(
+                valueListenable: MotifService.actif,
+                builder: (context, motif, _) => _buildCartesAction(),
               ),
+              const SizedBox(height: 12),
+              if (_moduleQRActif || _moduleRecoFacialeActif || _kioskMode) ...[
+                _buildCarteModules(),
+                const SizedBox(height: 12),
+              ],
+              _buildCarteStatutJour(),
+              if (margeFlexible) const Spacer(),
+              const SizedBox(height: 12),
+              _buildBarreNavigation(),
               const SizedBox(height: 8),
               Text(
                 'v1.0.0 • Chiffrement AES-256 • Serveur UE',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontFamily: 'JetBrainsMono',
-                  fontSize: 11,
+                  fontSize: 10,
                   color: EnCheckColors.gris.withOpacity(0.9),
                 ),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 6),
             ],
           ),
         ),
-        if (margeFlexible) const Spacer(),
       ],
     );
   }
@@ -3083,19 +3085,19 @@ class _PointageScreenState extends State<PointageScreen> {
     );
   }
 
-  /// SCENE DU HAUT : photo chaude (visuels de l'Admin), horloge doree,
-  /// boutons clair/sombre et etat connexion. La frise du motif fait la
-  /// couture avec le panneau.
+  /// SCENE DU HAUT : la photo de la jeune femme en train de pointer
+  /// (l'image actuelle de l'app), l'identite et l'heure par-dessus.
   Widget _buildScenePointage(bool estEnLigne, ThemeService themeService) {
     final nomEntreprise = entrepriseSelectionnee?['name']?.toString() ?? '';
     return SizedBox(
-      height: 240,
+      height: 250,
       child: Stack(
         fit: StackFit.expand,
         children: [
           Image.asset(
             'assets/scenes/scene_pointage.jpg',
             fit: BoxFit.cover,
+            alignment: const Alignment(0, -0.12),
             errorBuilder: (_, __, ___) =>
                 Container(color: EnCheckColors.brunProfond),
           ),
@@ -3105,165 +3107,72 @@ class _PointageScreenState extends State<PointageScreen> {
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 colors: [
-                  Colors.black.withOpacity(0.38),
-                  Colors.black.withOpacity(0.06),
-                  Colors.black.withOpacity(0.58),
+                  Colors.black.withOpacity(0.42),
+                  Colors.transparent,
                 ],
-                stops: const [0.0, 0.45, 1.0],
+                stops: const [0.0, 0.45],
               ),
             ),
           ),
           Positioned(
             top: 12,
-            left: 14,
-            right: 14,
+            left: 16,
+            right: 16,
             child: Row(
               children: [
-                if (_moduleRecoFacialeActif || _kioskMode)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 11, vertical: 7),
-                    decoration: BoxDecoration(
-                      color: EnCheckColors.brunProfond.withOpacity(0.82),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.desktop_windows,
-                            size: 15, color: EnCheckColors.orDoux),
-                        SizedBox(width: 6),
-                        Text('Borne - session active',
-                            style: TextStyle(
-                                fontSize: 11.5,
-                                color: EnCheckColors.blanc,
-                                fontWeight: FontWeight.w600)),
-                        SizedBox(width: 6),
-                        Icon(Icons.circle,
-                            size: 8, color: EnCheckColors.succes),
-                      ],
-                    ),
-                  ),
-                const Spacer(),
-                GestureDetector(
-                  onTap: syncEnCours ? null : _lancerSynchronisation,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 7),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.82),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(estEnLigne ? Icons.wifi : Icons.wifi_off,
-                            size: 14,
-                            color: estEnLigne
-                                ? EnCheckColors.succes
-                                : EnCheckColors.erreur),
-                        const SizedBox(width: 5),
-                        Text(
-                          pointagesEnAttente > 0
-                              ? '$pointagesEnAttente en attente'
-                              : 'Sync',
-                          style: const TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: EnCheckColors.brunProfond),
-                        ),
+                const LogoEmpreinte(taille: 36),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    nomEntreprise,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 15.5,
+                      fontWeight: FontWeight.w700,
+                      color: EnCheckColors.blanc,
+                      shadows: [
+                        Shadow(color: Colors.black54, blurRadius: 6),
                       ],
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      heureActuelle,
+                      style: const TextStyle(
+                        fontFamily: 'JetBrainsMono',
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                        color: EnCheckColors.blanc,
+                        shadows: [
+                          Shadow(color: Colors.black54, blurRadius: 6),
+                        ],
+                      ),
+                    ),
+                    Text(
+                      dateActuelle,
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        color: EnCheckColors.blanc.withOpacity(0.9),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(width: 10),
                 _rondScene(
                   icon: Icons.light_mode,
                   actif: !themeService.isDarkMode,
                   onTap: () => themeService.setDarkMode(false),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
                 _rondScene(
                   icon: Icons.dark_mode,
                   actif: themeService.isDarkMode,
                   onTap: () => themeService.setDarkMode(true),
-                ),
-              ],
-            ),
-          ),
-          Positioned(
-            left: 20,
-            right: 20,
-            bottom: 12,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const LogoEmpreinte(taille: 40),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Text('Pointage',
-                              style: TextStyle(
-                                  fontSize: 26,
-                                  fontWeight: FontWeight.w800,
-                                  color: EnCheckColors.blanc,
-                                  shadows: [
-                                    Shadow(
-                                        color: Colors.black54,
-                                        blurRadius: 8,
-                                        offset: Offset(0, 2)),
-                                  ])),
-                          if (nomEntreprise.isNotEmpty)
-                            Text(nomEntreprise,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                    fontSize: 12.5,
-                                    fontWeight: FontWeight.w600,
-                                    color:
-                                        EnCheckColors.blanc.withOpacity(0.95),
-                                    shadows: const [
-                                      Shadow(
-                                          color: Colors.black54,
-                                          blurRadius: 8,
-                                          offset: Offset(0, 2)),
-                                    ])),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 2),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(heureActuelle,
-                        style: const TextStyle(
-                            fontFamily: 'JetBrainsMono',
-                            fontSize: 38,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 2,
-                            color: EnCheckColors.orDoux,
-                            shadows: [
-                              Shadow(
-                                  color: Colors.black54,
-                                  blurRadius: 10,
-                                  offset: Offset(0, 2)),
-                            ])),
-                    const SizedBox(width: 10),
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 5),
-                      child: Text(dateActuelle,
-                          style: TextStyle(
-                              fontSize: 10.5,
-                              color: EnCheckColors.blanc.withOpacity(0.8))),
-                    ),
-                  ],
                 ),
               ],
             ),
@@ -3281,23 +3190,143 @@ class _PointageScreenState extends State<PointageScreen> {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.all(9),
+        padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
           color:
-              actif ? EnCheckColors.orDoux : Colors.white.withOpacity(0.82),
+              actif ? EnCheckColors.orDoux : Colors.white.withOpacity(0.85),
           shape: BoxShape.circle,
         ),
-        child: Icon(icon, size: 18, color: EnCheckColors.brunProfond),
+        child: Icon(icon, size: 17, color: EnCheckColors.brunProfond),
       ),
     );
   }
 
-  /// Bandeau avec noms (contrat UX) : qui est en pause, qui vient de pointer.
-  Widget _buildChipsNoms() {
+  /// Le souhait de bienvenue, dans la langue du pays de l'entreprise.
+  Widget _buildSalutation() {
+    final nomEntreprise = entrepriseSelectionnee?['name']?.toString() ?? '';
+    final pays = entrepriseSelectionnee?['country_code']?.toString();
+    final souhait = SouhaitsService.souhait(pays);
+    final couleurTexte = Theme.of(context).textTheme.bodyLarge?.color ??
+        EnCheckColors.brunProfond;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          souhait,
+          style: TextStyle(
+            fontSize: 32,
+            fontWeight: FontWeight.w800,
+            height: 1.1,
+            color: couleurTexte,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Bienvenue chez $nomEntreprise',
+          style: const TextStyle(fontSize: 15, color: EnCheckColors.gris),
+        ),
+      ],
+    );
+  }
+
+  /// Les deux actions : Arrivée et Départ (une page = une action).
+  Widget _buildCartesAction() {
+    return Row(
+      children: [
+        Expanded(
+          child: _carteAction(
+            titre: 'Arrivée',
+            legende: 'Je commence mon service',
+            icone: Icons.login,
+            chaude: true,
+            onTap: () => _ouvrirValidationPointage('arrivee'),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: _carteAction(
+            titre: 'Départ',
+            legende: 'Je quitte mon poste',
+            icone: Icons.logout,
+            chaude: false,
+            onTap: () => _ouvrirValidationPointage('depart'),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _carteAction({
+    required String titre,
+    required String legende,
+    required IconData icone,
+    required bool chaude,
+    required VoidCallback onTap,
+  }) {
+    final motif = MotifService.actif.value;
+    final couleurTexte = Theme.of(context).textTheme.bodyLarge?.color ??
+        EnCheckColors.brunProfond;
+    final sombre = Theme.of(context).brightness == Brightness.dark;
+    final fond = chaude
+        ? (sombre
+            ? motif.couleurTint.withOpacity(0.15)
+            : motif.couleurTint)
+        : Theme.of(context).dividerColor.withOpacity(0.12);
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: fond,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 10,
+                offset: const Offset(0, 4)),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: chaude ? motif.couleurAccent : couleurTexte,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icone, color: EnCheckColors.blanc, size: 20),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              titre,
+              style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: couleurTexte),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              legende,
+              style: const TextStyle(
+                  fontSize: 12, color: EnCheckColors.gris, height: 1.35),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// La carte « Aujourd'hui » : qui est en pause, qui vient de pointer
+  /// (contrat UX : le bandeau avec noms), et l'état de la synchronisation.
+  Widget _buildCarteStatutJour() {
+    final couleurTexte = Theme.of(context).textTheme.bodyLarge?.color ??
+        EnCheckColors.brunProfond;
     final chips = <Widget>[];
     for (final pause in _pausesOuvertes) {
-      final nom = (pause['nom'] ?? 'Employe').toString();
-      chips.add(_pastilleNom(nom, EnCheckColors.alerte));
+      chips.add(
+          _pastilleNom((pause['nom'] ?? 'Employe').toString(), EnCheckColors.alerte));
     }
     if (_dernierEmployePointe != null) {
       final nom =
@@ -3305,17 +3334,73 @@ class _PointageScreenState extends State<PointageScreen> {
               .trim();
       if (nom.isNotEmpty) chips.add(_pastilleNom(nom, EnCheckColors.succes));
     }
+
+    String statut = 'Aucun pointage ni pause en cours';
+    Color statutCouleur = EnCheckColors.gris;
+    if (_pausesOuvertes.isNotEmpty) {
+      final p = _pausesOuvertes.first;
+      final nom = (p['nom'] ?? 'Employe').toString();
+      final depuis = p['debut'] == null
+          ? ''
+          : PauseService.heureCourteDe(p['debut'] as String);
+      statut = '$nom - en pause depuis $depuis';
+      statutCouleur = EnCheckColors.alerte;
+    } else if (_dernierEmployePointe != null) {
+      final nom =
+          '${_dernierEmployePointe!['first_name'] ?? ''} ${_dernierEmployePointe!['last_name'] ?? ''}'
+              .trim();
+      if (nom.isNotEmpty) {
+        statut = '$nom - dernier pointage';
+        statutCouleur = EnCheckColors.succes;
+      }
+    }
+
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(16),
+        border:
+            Border.all(color: Theme.of(context).dividerColor.withOpacity(0.35)),
       ),
-      child: chips.isEmpty
-          ? const Text('Aucun pointage ni pause en cours',
-              style: TextStyle(fontSize: 12.5, color: EnCheckColors.gris))
-          : Wrap(spacing: 8, runSpacing: 8, children: chips),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Text("AUJOURD'HUI",
+                  style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1.4,
+                      color: EnCheckColors.gris)),
+              const Spacer(),
+              _pillSync(),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Icon(Icons.circle, size: 9, color: statutCouleur),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  statut,
+                  style: TextStyle(
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w600,
+                      color: couleurTexte),
+                ),
+              ),
+            ],
+          ),
+          if (chips.length > 1) ...[
+            const SizedBox(height: 10),
+            Wrap(spacing: 8, runSpacing: 8, children: chips),
+          ],
+        ],
+      ),
     );
   }
 
@@ -3323,19 +3408,19 @@ class _PointageScreenState extends State<PointageScreen> {
     final couleurTexte = Theme.of(context).textTheme.bodyLarge?.color ??
         EnCheckColors.brunProfond;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: couleur.withOpacity(0.5), width: 1.2),
+        borderRadius: BorderRadius.circular(20),
+        color: couleur.withOpacity(0.10),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.circle, size: 8, color: couleur),
+          Icon(Icons.circle, size: 7, color: couleur),
           const SizedBox(width: 6),
           Text(nom,
               style: TextStyle(
-                  fontSize: 12.5,
+                  fontSize: 12,
                   fontWeight: FontWeight.w600,
                   color: couleurTexte)),
         ],
@@ -3343,25 +3428,42 @@ class _PointageScreenState extends State<PointageScreen> {
     );
   }
 
-  /// Bouton PAUSE bien visible en haut de la page (la carte pause a ete
-  /// retiree de la page principale) : un seul bouton, vers la page Pause.
-  Widget _buildBoutonPauseVisible() {
-    return SizedBox(
-      height: 56,
-      child: ElevatedButton.icon(
-        onPressed: _ouvrirPagePause,
-        icon: const Icon(Icons.pause_circle, size: 22),
-        label: const Text(
-          'Pause / Reprendre',
-          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+  Widget _pillSync() {
+    final estEnLigne = ConnectivityService.isOnline;
+    final couleurTexte = Theme.of(context).textTheme.bodyLarge?.color ??
+        EnCheckColors.brunProfond;
+    return GestureDetector(
+      onTap: syncEnCours ? null : _lancerSynchronisation,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: Theme.of(context).dividerColor.withOpacity(0.12),
+          borderRadius: BorderRadius.circular(20),
         ),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: EnCheckColors.brunProfond,
-          foregroundColor: EnCheckColors.blanc,
-          elevation: 0,
-          side: const BorderSide(color: EnCheckColors.orDoux, width: 1.4),
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16)),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(estEnLigne ? Icons.wifi : Icons.wifi_off,
+                size: 13,
+                color: estEnLigne ? EnCheckColors.succes : EnCheckColors.erreur),
+            const SizedBox(width: 5),
+            if (syncEnCours)
+              const SizedBox(
+                  width: 11,
+                  height: 11,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: EnCheckColors.terreChaude))
+            else
+              Text(
+                pointagesEnAttente > 0
+                    ? '$pointagesEnAttente en attente'
+                    : 'Sync',
+                style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: couleurTexte),
+              ),
+          ],
         ),
       ),
     );
@@ -3412,89 +3514,48 @@ class _PointageScreenState extends State<PointageScreen> {
     );
   }
 
-  /// Carte MATRICULE — champ + sens Arrivée/Départ + validation par slide.
-  Widget _buildCarteMatricule() {
-    final couleurTexte = Theme.of(context).textTheme.bodyLarge?.color ??
-        EnCheckColors.brunProfond;
-    final estArrivee = _sensSouhaite == 'arrivee';
-    final prefix = entrepriseSelectionnee?['matricule_prefix']?.toString() ?? '';
+  /// La barre de navigation : une page par action.
+  Widget _buildBarreNavigation() {
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(vertical: 10),
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withOpacity(0.07),
-              blurRadius: 12,
-              offset: const Offset(0, 4)),
-        ],
+        borderRadius: BorderRadius.circular(18),
+        border:
+            Border.all(color: Theme.of(context).dividerColor.withOpacity(0.35)),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
-          Row(
-            children: [
-              Text('MATRICULE',
-                  style: TextStyle(
-                      fontFamily: 'JetBrainsMono',
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 2,
-                      color: couleurTexte)),
-              const Spacer(),
-              _segmentedSens(),
-            ],
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _matriculeNouveauCtrl,
-            textAlign: TextAlign.center,
-            keyboardType: TextInputType.number,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            maxLength: 6,
-            style: TextStyle(
-                fontFamily: 'JetBrainsMono',
-                fontSize: 26,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 3,
-                color: couleurTexte),
-            decoration: InputDecoration(
-              counterText: '',
-              prefixText: prefix.isEmpty ? null : '$prefix-',
-              prefixStyle: TextStyle(
-                  fontFamily: 'JetBrainsMono',
-                  fontSize: 26,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 3,
-                  color: couleurTexte),
-              hintText: '0002',
-              hintStyle: TextStyle(
-                  fontFamily: 'JetBrainsMono',
-                  fontSize: 22,
-                  letterSpacing: 3,
-                  fontWeight: FontWeight.w600,
-                  color: EnCheckColors.gris.withOpacity(0.55)),
-              filled: true,
-              fillColor: Theme.of(context).brightness == Brightness.dark
-                  ? Colors.white.withOpacity(0.07)
-                  : const Color(0xFFF3EADA),
-              contentPadding: const EdgeInsets.symmetric(vertical: 16),
-              border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  borderSide: BorderSide.none),
+          Expanded(
+            child: _itemNav(
+              icon: Icons.home_filled,
+              label: 'Accueil',
+              actif: true,
+              onTap: () {},
             ),
           ),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            height: 50,
-            child: _boutonScene(
-              label: estArrivee ? "Pointer l'arrivée" : 'Pointer le départ',
-              icon: Icons.touch_app,
-              rempli: true,
-              onTap: _ouvrirValidationPointage,
+          Expanded(
+            child: _itemNav(
+              icon: Icons.pause_circle_outline,
+              label: 'Pause',
+              actif: false,
+              onTap: _ouvrirPagePause,
+            ),
+          ),
+          Expanded(
+            child: _itemNav(
+              icon: Icons.history,
+              label: 'Historique',
+              actif: false,
+              onTap: _ouvrirHistoriqueJournee,
+            ),
+          ),
+          Expanded(
+            child: _itemNav(
+              icon: Icons.settings_outlined,
+              label: 'Paramètres',
+              actif: false,
+              onTap: () => ouvrirPanneauMotif(context),
             ),
           ),
         ],
@@ -3502,35 +3563,31 @@ class _PointageScreenState extends State<PointageScreen> {
     );
   }
 
-  Widget _segmentedSens() {
-    Widget option(String label, String valeur) {
-      final actif = _sensSouhaite == valeur;
-      return GestureDetector(
-        onTap: () => setState(() => _sensSouhaite = valeur),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(
-            color: actif ? EnCheckColors.terreChaude : Colors.transparent,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-                color: EnCheckColors.terreChaude.withOpacity(actif ? 1 : 0.4)),
+  Widget _itemNav({
+    required IconData icon,
+    required String label,
+    required bool actif,
+    required VoidCallback onTap,
+  }) {
+    final motif = MotifService.actif.value;
+    final couleur = actif ? motif.couleurAccent : EnCheckColors.gris;
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 22, color: couleur),
+          const SizedBox(height: 3),
+          Text(
+            label,
+            style: TextStyle(
+                fontSize: 11,
+                fontWeight: actif ? FontWeight.w700 : FontWeight.w500,
+                color: couleur),
           ),
-          child: Text(label,
-              style: TextStyle(
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w700,
-                  color: actif ? EnCheckColors.blanc : EnCheckColors.gris)),
-        ),
-      );
-    }
-
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        option('Arrivée', 'arrivee'),
-        const SizedBox(width: 6),
-        option('Départ', 'depart'),
-      ],
+        ],
+      ),
     );
   }
 
@@ -3586,41 +3643,11 @@ class _PointageScreenState extends State<PointageScreen> {
     );
   }
 
-  // NAVIGATION VERS LES PAGES
+  // NAVIGATION VERS LES PAGES (une page = une action)
 
   Future<void> _ouvrirPagePause() async {
     final entrepriseId = entrepriseSelectionnee?['id']?.toString() ?? '';
-    Widget? statut;
-    if (_pausesOuvertes.isNotEmpty) {
-      final p = _pausesOuvertes.first;
-      final nom = (p['nom'] ?? 'Employe').toString();
-      final depuis = p['debut'] == null
-          ? ''
-          : PauseService.heureCourteDe(p['debut'] as String);
-      statut = Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: EnCheckColors.alerte.withOpacity(0.10),
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.pause_circle,
-                size: 18, color: EnCheckColors.alerte),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text('$nom - en pause depuis $depuis',
-                  style: const TextStyle(
-                      fontFamily: 'JetBrainsMono',
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w600)),
-            ),
-          ],
-        ),
-      );
-    }
-
-    await Navigator.push(
+    final employe = await Navigator.push<Map<String, dynamic>?>(
       context,
       MaterialPageRoute(
         builder: (context) => IdentificationSlidePage(
@@ -3630,95 +3657,100 @@ class _PointageScreenState extends State<PointageScreen> {
           entrepriseId: entrepriseId,
           matriculePrefix:
               entrepriseSelectionnee?['matricule_prefix']?.toString() ?? '',
-          statut: statut,
-          onValide: (employe) async {
-            final employeId = employe['id'] as String?;
-            if (employeId == null) return false;
-            final nom =
-                '${employe['first_name'] ?? ''} ${employe['last_name'] ?? ''}'
-                    .trim();
-            final liste = await PauseService.pausesOuvertes(
-                enterpriseId: entrepriseId);
-            Map<String, dynamic>? ouverte;
-            for (final p in liste) {
-              if (p['employee_id'] == employeId) ouverte = p;
-            }
-            if (ouverte != null) {
-              await PauseService.reprendre(
-                  employeeId: employeId, enterpriseId: entrepriseId);
-            } else {
-              await PauseService.partirEnPause(
-                employeeId: employeId,
-                enterpriseId: entrepriseId,
-                nom: nom,
-                matricule: employe['matricule']?.toString(),
-              );
-            }
-            return true;
-          },
         ),
       ),
     );
-    if (mounted) await _chargerPausesOuvertes();
+    if (employe == null || !mounted) return;
+
+    final employeId = employe['id'] as String?;
+    if (employeId == null) return;
+    final nom =
+        '${employe['first_name'] ?? ''} ${employe['last_name'] ?? ''}'.trim();
+    final liste =
+        await PauseService.pausesOuvertes(enterpriseId: entrepriseId);
+    Map<String, dynamic>? ouverte;
+    for (final p in liste) {
+      if (p['employee_id'] == employeId) ouverte = p;
+    }
+    if (ouverte != null) {
+      await PauseService.reprendre(
+          employeeId: employeId, enterpriseId: entrepriseId);
+    } else {
+      await PauseService.partirEnPause(
+        employeeId: employeId,
+        enterpriseId: entrepriseId,
+        nom: nom,
+        matricule: employe['matricule']?.toString(),
+      );
+    }
+    if (!mounted) return;
+    await _chargerPausesOuvertes();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(ouverte != null
+          ? 'Reprise enregistree. Bon service !'
+          : 'Pause demarree pour $nom.'),
+    ));
   }
 
-  Future<void> _ouvrirValidationPointage() async {
+  Future<void> _ouvrirValidationPointage(String sens) async {
     final entrepriseId = entrepriseSelectionnee?['id']?.toString() ?? '';
     if (entrepriseId.isEmpty) {
-      _afficherErreur('Aucune entreprise sélectionnée.');
+      _afficherErreur('Aucune entreprise selectionnee.');
       return;
     }
     if (_moduleGeofencingActif) {
       final gpsOk = await _verifierPositionGPS();
       if (!gpsOk) return;
     }
-    final estArrivee = _sensSouhaite == 'arrivee';
-    await Navigator.push(
+    final estArrivee = sens == 'arrivee';
+    final employe = await Navigator.push<Map<String, dynamic>?>(
       context,
       MaterialPageRoute(
         builder: (context) => IdentificationSlidePage(
           titre: estArrivee ? 'Arrivée' : 'Départ',
           sceneAsset: 'assets/scenes/scene_pointage.jpg',
-          aide: 'Validez votre pointage avec le curseur',
+          aide: estArrivee
+              ? 'Validez votre arrivée avec le curseur'
+              : 'Validez votre départ avec le curseur',
           entrepriseId: entrepriseId,
-          matriculePrefix: entrepriseSelectionnee?['matricule_prefix']
-                  ?.toString() ??
-              '',
-          matriculeInitial: _matriculeNouveauCtrl.text.trim(),
-          onValide: (employe) async {
-            _extraireSchedule(employe);
-            final estHorsLigne = !ConnectivityService.isOnline;
-            if (_modulePhotoActif && !_moduleQRActif) {
-              if (kIsWeb) {
-                setState(() {
-                  _pendingEmployeeWebCamera = employe;
-                  _webCameraRaison = 'pin';
-                  _showWebCamera = true;
-                });
-              } else {
-                setState(() {
-                  _pendingEmployee = employe;
-                  _showPinPhoto = true;
-                });
-              }
-            } else {
-              await _traiterPointage(employe, 'pin', estHorsLigne, null);
-              setState(() {
-                numeroMatricule = '';
-                codePin = '';
-                afficherPin = false;
-                _modeSelectionne = null;
-                _gpsVerifie = false;
-                _currentPosition = null;
-                _verificationZone = null;
-              });
-            }
-            return true;
-          },
+          matriculePrefix:
+              entrepriseSelectionnee?['matricule_prefix']?.toString() ?? '',
         ),
       ),
     );
+    if (employe == null || !mounted) return;
+
+    // Retour automatique deja fait : on enregistre le pointage ici, sur la
+    // page principale (le succes s'affiche donc en page principale).
+    _extraireSchedule(employe);
+    final estHorsLigne = !ConnectivityService.isOnline;
+    if (_modulePhotoActif && !_moduleQRActif) {
+      if (kIsWeb) {
+        setState(() {
+          _pendingEmployeeWebCamera = employe;
+          _webCameraRaison = 'pin';
+          _showWebCamera = true;
+        });
+      } else {
+        setState(() {
+          _pendingEmployee = employe;
+          _showPinPhoto = true;
+        });
+      }
+    } else {
+      await _traiterPointage(employe, 'pin', estHorsLigne, null);
+      setState(() {
+        numeroMatricule = '';
+        codePin = '';
+        afficherPin = false;
+        _modeSelectionne = null;
+        _gpsVerifie = false;
+        _currentPosition = null;
+        _verificationZone = null;
+      });
+    }
   }
+
   // ═══════════════════════════════════════════════════════════
   // 📅 « MA JOURNÉE » — CONSULTER SANS POINTER
   // ═══════════════════════════════════════════════════════════

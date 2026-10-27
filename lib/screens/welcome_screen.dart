@@ -107,6 +107,12 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
 
         await prefs.setString('license_type', response['license_type'] ?? 'basic');
 
+        // 🌍 Pays de l'entreprise : pilote le souhait de bienvenue.
+        if (response['country_code'] != null) {
+          await prefs.setString(
+              'enterprise_pays', response['country_code'].toString());
+        }
+
         if (mounted) {
           Navigator.pushReplacement(
             context,
