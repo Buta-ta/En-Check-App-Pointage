@@ -6,11 +6,15 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/services.dart';
 import 'dart:async';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/app_theme.dart';
 import '../widgets/logo_empreinte.dart';
+import '../widgets/frise_motif.dart';
+import '../widgets/panneau_motif.dart';
+import '../services/motif_service.dart';
 import '../widgets/qr_scanner_widget.dart';
 import '../widgets/qr_photo_scanner_widget.dart';
 import '../widgets/pin_photo_widget.dart';
@@ -160,6 +164,7 @@ class _PointageScreenState extends State<PointageScreen> {
   // ═══════════════════════════════════════════════════════════
 
   Future<void> _initialiserApp() async {
+    await MotifService.charger();
     await _chargerModulesLocaux();
     await _chargerEntrepriseLocale();
 
@@ -633,7 +638,9 @@ class _PointageScreenState extends State<PointageScreen> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => StatefulBuilder(
+      builder: (ctx) => _avecEchapFermeture(
+        ctx,
+        StatefulBuilder(
         builder: (ctx, setEtat) {
           final estOuverte = ouverte != null;
           DateTime? debut;
@@ -841,6 +848,7 @@ class _PointageScreenState extends State<PointageScreen> {
             ),
           );
         },
+        ),
       ),
     );
 
@@ -944,45 +952,143 @@ class _PointageScreenState extends State<PointageScreen> {
     );
   }
 
-  /// Le bouton PAUSE, collé JUSTE AU-DESSUS de la carte MATRICULE
-  /// (retour du 17/10 au soir : visible sans jamais scroller).
-  Widget _buildBoutonPause() {
+  /// LE BLOC PAUSE - toujours visible, JUSTE AU-DESSUS de la carte
+  /// MATRICULE (contrat UX). Noms, depuis quand, et les deux actions.
+  Widget _buildBlocPause() {
     final enModePause = _intention == 'pause';
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // 🎨 Refonte design : la couverture basotho (Lesotho) veille sur le
-        //    bloc pause — repos, chaleur. La règle UX reste intacte : le bloc
-        //    pause est placé juste au-dessus de la carte MATRICULE.
-        const BandeMotif.lesotho(height: 12),
-        const SizedBox(height: 6),
-        SizedBox(
+    final pauseEnCours = _pausesOuvertes.isNotEmpty;
+    final couleurTexte = Theme.of(context).textTheme.bodyLarge?.color ??
+        EnCheckColors.brunProfond;
+    return Container(
       width: double.infinity,
-      child: ElevatedButton.icon(
-        onPressed: enModePause ? null : _demarrerFluxPause,
-        icon: Icon(enModePause ? Icons.hourglass_top : Icons.pause_circle),
-        label: Text(
-          enModePause ? 'MODE PAUSE EN COURS…' : '⏸ PAUSE / REPRISE',
-          style: const TextStyle(
-              letterSpacing: 1.2,
-              fontWeight: FontWeight.w700,
-              fontSize: 15),
-        ),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: EnCheckColors.terreChaude,
-          foregroundColor: EnCheckColors.blanc,
-          disabledBackgroundColor: EnCheckColors.gris.withOpacity(0.5),
-          padding: const EdgeInsets.symmetric(vertical: 16),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
-          ),
-        ),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.08),
+              blurRadius: 12,
+              offset: const Offset(0, 4)),
+        ],
       ),
-        ),
-      ],
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.pause_circle,
+                  color: EnCheckColors.terreChaude, size: 20),
+              const SizedBox(width: 8),
+              Text('PAUSE',
+                  style: TextStyle(
+                      fontFamily: 'JetBrainsMono',
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 2,
+                      color: couleurTexte)),
+              const Spacer(),
+              if (pauseEnCours)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: EnCheckColors.alerte.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Text('En cours',
+                      style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: EnCheckColors.alerte)),
+                ),
+            ],
+          ),
+          if (pauseEnCours) ...[
+            const SizedBox(height: 10),
+            _construireBandeauPauses(),
+          ],
+          if (enModePause) ...[
+            const SizedBox(height: 10),
+            _construireLigneModePause(),
+          ],
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _boutonActionPause(
+                  label: 'Démarrer la pause',
+                  icon: Icons.pause,
+                  rempli: false,
+                  actif: !enModePause,
+                  onTap: _demarrerFluxPause,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _boutonActionPause(
+                  label: 'Reprendre le travail',
+                  icon: Icons.play_arrow,
+                  rempli: true,
+                  actif: !enModePause && pauseEnCours,
+                  onTap: _demarrerFluxPause,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
+  Widget _boutonActionPause({
+    required String label,
+    required IconData icon,
+    required bool rempli,
+    required bool actif,
+    required VoidCallback onTap,
+  }) {
+    final couleur = actif ? EnCheckColors.terreChaude : EnCheckColors.gris;
+    if (rempli) {
+      return SizedBox(
+        height: 44,
+        child: ElevatedButton.icon(
+          onPressed: actif ? onTap : null,
+          icon: Icon(icon, size: 17),
+          label: Text(label,
+              style: const TextStyle(
+                  fontSize: 12.5, fontWeight: FontWeight.w700)),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: EnCheckColors.terreChaude,
+            foregroundColor: EnCheckColors.blanc,
+            disabledBackgroundColor: EnCheckColors.gris.withOpacity(0.35),
+            elevation: 0,
+            side: const BorderSide(color: EnCheckColors.orDoux, width: 1.2),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14)),
+          ),
+        ),
+      );
+    }
+    return SizedBox(
+      height: 44,
+      child: OutlinedButton.icon(
+        onPressed: actif ? onTap : null,
+        icon: Icon(icon, size: 17),
+        label: Text(label,
+            style:
+                const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: couleur,
+          disabledForegroundColor: EnCheckColors.gris.withOpacity(0.6),
+          side: BorderSide(color: couleur.withOpacity(0.5), width: 1.3),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        ),
+      ),
+    );
+  }
   // ═══════════════════════════════════════════════════════════
   // 🤖 LOGIQUE RECONNAISSANCE FACIALE
   // ═══════════════════════════════════════════════════════════
@@ -1966,97 +2072,77 @@ class _PointageScreenState extends State<PointageScreen> {
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: SafeArea(
-        child: chargementEntreprises
-            ? const Center(
-            child: CircularProgressIndicator(
-                color: EnCheckColors.terreChaude))
-            : Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 500),
-            child: SingleChildScrollView(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 30),
-                child: Column(
-                  children: [
-                    const SizedBox(height: 20),
-                    _buildHeader(estEnLigne, themeService),
-                    const SizedBox(height: 30),
-                    const LogoEmpreinte(taille: 100),
-                    const SizedBox(height: 20),
-                    Text(
-                      'EN-CHECK',
-                      style: EnCheckTextStyles.titrePrincipal.copyWith(
-                        color: Theme.of(context)
-                            .textTheme
-                            .bodyLarge
-                            ?.color,
+      // CLAVIER PHYSIQUE (PWA sur ordinateur) : chiffres, Retour arriere,
+      // Entree et Echap fonctionnent sans toucher l'ecran.
+      body: Focus(
+        autofocus: true,
+        onKeyEvent: _gererClavierPhysique,
+        child: SafeArea(
+          child: chargementEntreprises
+              ? const Center(
+                  child: CircularProgressIndicator(
+                      color: EnCheckColors.terreChaude))
+              : LayoutBuilder(
+                  builder: (context, constraints) {
+                    // ZERO SCROLL : la page tient d'un coup - sur petit
+                    // ecran elle se reduit legerement au lieu de scroller.
+                    return Center(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: SizedBox(
+                          width: constraints.maxWidth
+                              .clamp(320.0, 560.0)
+                              .toDouble(),
+                          child: Padding(
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 24),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const SizedBox(height: 8),
+                                _buildEnteteVisuelle(estEnLigne, themeService),
+                                const SizedBox(height: 10),
+                                // Bandeau Borne : entreprises concernees
+                                // uniquement (reco faciale ou mode kiosque).
+                                if (_moduleRecoFacialeActif || _kioskMode) ...[
+                                  _buildBandeauBorne(),
+                                  const SizedBox(height: 10),
+                                ],
+                                // BLOC PAUSE - au-dessus de la carte
+                                // MATRICULE, toujours visible.
+                                _buildBlocPause(),
+                                const SizedBox(height: 12),
+                                _buildZonePointage(),
+                                const SizedBox(height: 12),
+                                Row(
+                                  children: [
+                                    Expanded(child: _buildBoutonMaJournee()),
+                                    const SizedBox(width: 10),
+                                    Expanded(child: _buildBoutonParametres()),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  'v1.0.0 \u2022 Chiffrement AES-256 \u2022 Serveur UE',
+                                  style: TextStyle(
+                                    fontFamily: 'JetBrainsMono',
+                                    fontSize: 10,
+                                    color: EnCheckColors.gris.withOpacity(0.9),
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                              ],
+                            ),
+                          ),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 16),
-                    // 🎨 Refonte design : frise Adinkra sous le logo —
-                    //    l'étoffe « temps et travail » du kiosque.
-                    const BandeMotif.adinkra(height: 28),
-                    const SizedBox(height: 18),
-                    _buildCarteEntreprise(),
-                    const SizedBox(height: 28),
-                    Text(
-                      heureActuelle,
-                      style: EnCheckTextStyles.grosChiffres.copyWith(
-                        color: Theme.of(context)
-                            .textTheme
-                            .bodyLarge
-                            ?.color,
-                      ),
-                    ),
-                    Text(dateActuelle,
-                        style: EnCheckTextStyles.titreSecondaire),
-                    _buildAvisFuseau(),
-                    if (_moduleGeofencingActif || _kioskMode) ...[
-                      const SizedBox(height: 16),
-                      _buildIndicateursModules(),
-                    ],
-
-                    const SizedBox(height: 24),
-
-                    // ⏸ LE BLOC PAUSE — GLISSÉ JUSTE AU-DESSUS DE LA CARTE
-                    //    « MATRICULE » (retour du 17/10 au soir) : c'est là
-                    //    que se posent les yeux des employés. En bas de page,
-                    //    il fallait scroller tout le temps pour le voir.
-                    if (_pausesOuvertes.isNotEmpty) ...[
-                      _construireBandeauPauses(),
-                      const SizedBox(height: 12),
-                    ],
-                    _buildBoutonPause(),
-                    const SizedBox(height: 12),
-                    if (_intention == 'pause') ...[
-                      _construireLigneModePause(),
-                      const SizedBox(height: 12),
-                    ],
-                    // 🖥️ CONTRAT ÉTAPE 3 — le provisionnement d'une borne reste
-                    //    joignable sans session employé. Le bandeau s'affiche si
-                    //    l'entreprise utilise la reco faciale ou le mode kiosque,
-                    //    ou si cette tablette a déjà un bail de borne — et
-                    //    SEULEMENT dans ces cas : les entreprises en pointage
-                    //    PIN/QR pur retrouvent leur écran d'avant, sans bruit.
-                    if (_moduleRecoFacialeActif || _kioskMode) ...[
-                      _buildBandeauBorne(),
-                      const SizedBox(height: 12),
-                    ],
-                    _buildZonePointage(),
-                    const SizedBox(height: 30),
-                    _buildSeparateur(),
-                    const SizedBox(height: 20),
-                  ],
+                    );
+                  },
                 ),
-              ),
-            ),
-          ),
         ),
       ),
     );
   }
-
   // ═══════════════════════════════════════════════════════════
   // 📱 ÉCRAN ENRÔLEMENT TABLETTE
   // ═══════════════════════════════════════════════════════════
@@ -3096,99 +3182,168 @@ class _PointageScreenState extends State<PointageScreen> {
     );
   }
 
-  Widget _buildHeader(bool estEnLigne, ThemeService themeService) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+  /// ENTETE : frise du motif choisi, plaque Pointage + entreprise,
+  /// horloge vivante, etat connexion/sync, puis les boutons clair/sombre.
+  Widget _buildEnteteVisuelle(bool estEnLigne, ThemeService themeService) {
+    final nomEntreprise = entrepriseSelectionnee?['name']?.toString() ?? '';
+    final couleurTexte = Theme.of(context).textTheme.bodyLarge?.color ??
+        EnCheckColors.brunProfond;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
+        ValueListenableBuilder<MotifCulturel>(
+          valueListenable: MotifService.actif,
+          builder: (context, motif, _) => FriseMotif(motif: motif, hauteur: 54),
+        ),
+        const SizedBox(height: 10),
         Row(
           children: [
-            Container(
-              padding:
-              const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: estEnLigne ? EnCheckColors.succes : EnCheckColors.erreur,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Row(
+            const LogoEmpreinte(taille: 42),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(estEnLigne ? Icons.wifi : Icons.wifi_off,
-                      color: EnCheckColors.blanc, size: 16),
-                  const SizedBox(width: 5),
-                  Text(estEnLigne ? 'En ligne' : 'Hors-ligne',
-                      style: const TextStyle(
-                          color: EnCheckColors.blanc, fontSize: 12)),
+                  Text('Pointage',
+                      style: TextStyle(
+                          fontSize: 21,
+                          fontWeight: FontWeight.w800,
+                          color: couleurTexte)),
+                  if (nomEntreprise.isNotEmpty)
+                    Text(nomEntreprise,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 11, color: EnCheckColors.gris)),
                 ],
               ),
             ),
-            const SizedBox(width: 10),
-            GestureDetector(
-              onTap: syncEnCours ? null : _lancerSynchronisation,
-              child: Container(
-                padding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: EnCheckColors.terreChaude,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Row(
-                  children: [
-                    if (syncEnCours)
-                      const SizedBox(
-                        width: 12,
-                        height: 12,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white),
-                      )
-                    else
-                      const Icon(Icons.sync,
-                          color: EnCheckColors.blanc, size: 16),
-                    const SizedBox(width: 5),
-                    Text(
-                      pointagesEnAttente > 0
-                          ? '$pointagesEnAttente en attente'
-                          : 'Sync',
-                      style: const TextStyle(
-                          color: EnCheckColors.blanc,
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold),
-                    ),
-                  ],
-                ),
-              ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(heureActuelle,
+                    style: EnCheckTextStyles.grosChiffres
+                        .copyWith(fontSize: 26, color: couleurTexte)),
+                Text(dateActuelle,
+                    style: EnCheckTextStyles.titreSecondaire
+                        .copyWith(fontSize: 9.5)),
+              ],
             ),
           ],
         ),
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _buildBoutonMaJournee(),
-            const SizedBox(width: 10),
-            GestureDetector(
-              onTap: () => themeService.toggleTheme(),
-              child: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).cardColor,
-                  borderRadius: BorderRadius.circular(10),
-                  boxShadow: [
-                    BoxShadow(
-                        color: Colors.black.withOpacity(0.1), blurRadius: 5),
-                  ],
-                ),
-                child: Icon(
-                  themeService.isDarkMode ? Icons.light_mode : Icons.dark_mode,
-                  color: EnCheckColors.terreChaude,
-                  size: 20,
-                ),
-              ),
+        const SizedBox(height: 8),
+        _buildHeader(estEnLigne, themeService),
+        if (_moduleGeofencingActif || _kioskMode) ...[
+          const SizedBox(height: 8),
+          _buildIndicateursModules(),
+        ],
+        _buildAvisFuseau(),
+      ],
+    );
+  }
+
+  Widget _buildHeader(bool estEnLigne, ThemeService themeService) {
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+            color: estEnLigne ? EnCheckColors.succes : EnCheckColors.erreur,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(estEnLigne ? Icons.wifi : Icons.wifi_off,
+                  color: EnCheckColors.blanc, size: 14),
+              const SizedBox(width: 5),
+              Text(estEnLigne ? 'En ligne' : 'Hors-ligne',
+                  style: const TextStyle(
+                      color: EnCheckColors.blanc, fontSize: 11)),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        GestureDetector(
+          onTap: syncEnCours ? null : _lancerSynchronisation,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: EnCheckColors.terreChaude,
+              borderRadius: BorderRadius.circular(20),
             ),
-          ],
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (syncEnCours)
+                  const SizedBox(
+                      width: 11,
+                      height: 11,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white))
+                else
+                  const Icon(Icons.sync, color: EnCheckColors.blanc, size: 14),
+                const SizedBox(width: 5),
+                Text(
+                  pointagesEnAttente > 0
+                      ? '$pointagesEnAttente en attente'
+                      : 'Sync',
+                  style: const TextStyle(
+                      color: EnCheckColors.blanc,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const Spacer(),
+        // Les boutons CLAIR et SOMBRE - le choix est memorise.
+        _buildBoutonTheme(
+          clair: true,
+          actif: !themeService.isDarkMode,
+          onTap: () => themeService.setDarkMode(false),
+        ),
+        const SizedBox(width: 6),
+        _buildBoutonTheme(
+          clair: false,
+          actif: themeService.isDarkMode,
+          onTap: () => themeService.setDarkMode(true),
         ),
       ],
     );
   }
 
+  Widget _buildBoutonTheme({
+    required bool clair,
+    required bool actif,
+    required VoidCallback onTap,
+  }) {
+    final iconeCouleur = Theme.of(context).brightness == Brightness.dark
+        ? EnCheckColors.orDoux
+        : EnCheckColors.terreChaude;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(7),
+        decoration: BoxDecoration(
+          color: actif ? EnCheckColors.orDoux : Theme.of(context).cardColor,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+              color: actif
+                  ? EnCheckColors.orDoux
+                  : EnCheckColors.orDoux.withOpacity(0.45)),
+        ),
+        child: Icon(
+          clair ? Icons.light_mode : Icons.dark_mode,
+          size: 17,
+          color: actif ? EnCheckColors.brunProfond : iconeCouleur,
+        ),
+      ),
+    );
+  }
   // ═══════════════════════════════════════════════════════════
   // 📅 « MA JOURNÉE » — CONSULTER SANS POINTER
   // ═══════════════════════════════════════════════════════════
@@ -3204,33 +3359,52 @@ class _PointageScreenState extends State<PointageScreen> {
   /// Ce bouton demande le matricule et le PIN, puis ouvre l'historique sans
   /// rien enregistrer.
   Widget _buildBoutonMaJournee() {
-    return GestureDetector(
+    return _chipAction(
+      icon: Icons.today_outlined,
+      label: 'Historique',
       onTap: _ouvrirHistoriqueJournee,
+    );
+  }
+
+  Widget _buildBoutonParametres() {
+    return _chipAction(
+      icon: Icons.settings,
+      label: 'Paramètres',
+      onTap: () => ouvrirPanneauMotif(context),
+    );
+  }
+
+  Widget _chipAction({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    final couleurTexte = Theme.of(context).textTheme.bodyLarge?.color ??
+        EnCheckColors.brunProfond;
+    return GestureDetector(
+      onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.symmetric(vertical: 11),
         decoration: BoxDecoration(
-          color: EnCheckColors.terreChaude,
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(30),
+          border:
+              Border.all(color: couleurTexte.withOpacity(0.35), width: 1.3),
         ),
-        child: const Row(
-          mainAxisSize: MainAxisSize.min,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.today_outlined, color: EnCheckColors.blanc, size: 16),
-            SizedBox(width: 6),
-            Text(
-              'Ma journée',
-              style: TextStyle(
-                color: EnCheckColors.blanc,
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
+            Icon(icon, size: 17, color: couleurTexte),
+            const SizedBox(width: 7),
+            Text(label,
+                style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: couleurTexte)),
           ],
         ),
       ),
     );
   }
-
   /// Demande matricule + PIN, vérifie l'employé, puis ouvre l'historique.
   ///
   /// Aucun pointage n'est créé : c'est toute la différence avec
@@ -3471,10 +3645,6 @@ class _PointageScreenState extends State<PointageScreen> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        // 🎨 Refonte design : frise « perles zoulou » en tête de la carte
-        //    MATRICULE — l'écran où l'on rencontre les personnes.
-        const BandeMotif.zoulou(height: 14),
-        const SizedBox(height: 8),
         Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
@@ -3524,6 +3694,73 @@ class _PointageScreenState extends State<PointageScreen> {
       ),
         ),
       ],
+    );
+  }
+
+  // CLAVIER PHYSIQUE (PWA sur ordinateur)
+
+  /// Le clavier ecran est affiche - les touches physiques doivent taper.
+  bool get _clavierVisible {
+    if (_showScanner || _showPhotoScanner || _showPinPhoto || _showWebCamera) {
+      return false;
+    }
+    if (_showFacePointage || _showFaceEnrollment) return false;
+    if (_kioskPhase == 'enrolling') return false;
+    if (!_moduleRecoFacialeActif) return !_moduleQRActif;
+    return _modeSelectionne == 'pin';
+  }
+
+  KeyEventResult _gererClavierPhysique(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final touche = event.logicalKey;
+
+    // Echap : annuler ce qui est en cours (pause, saisie PIN...).
+    if (touche == LogicalKeyboardKey.escape) {
+      if (_intention == 'pause') {
+        _annulerFluxPause();
+      } else if (afficherPin) {
+        setState(() {
+          afficherPin = false;
+          codePin = '';
+        });
+      } else {
+        FocusManager.instance.primaryFocus?.unfocus();
+      }
+      return KeyEventResult.handled;
+    }
+
+    if (!_clavierVisible) return KeyEventResult.ignored;
+
+    if (touche == LogicalKeyboardKey.enter ||
+        touche == LogicalKeyboardKey.numpadEnter) {
+      _onToucheAppuyee('\u2713');
+      return KeyEventResult.handled;
+    }
+    if (touche == LogicalKeyboardKey.backspace) {
+      _onToucheAppuyee('\u232B');
+      return KeyEventResult.handled;
+    }
+    final label = touche.keyLabel;
+    if (label.length == 1 && '0123456789'.contains(label)) {
+      _onToucheAppuyee(label);
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  /// Enveloppe une feuille : la touche Echap la ferme.
+  Widget _avecEchapFermeture(BuildContext ctx, Widget child) {
+    return Focus(
+      autofocus: true,
+      onKeyEvent: (noeud, event) {
+        if (event is KeyDownEvent &&
+            event.logicalKey == LogicalKeyboardKey.escape) {
+          Navigator.pop(ctx);
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: child,
     );
   }
 
