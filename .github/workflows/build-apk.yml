@@ -118,16 +118,40 @@ jobs:
       # ── 7. Publier en téléchargement direct ─────────────────────────────
       # La Release « apk-latest » sert de comptoir permanent : le lien ne
       # change jamais, chaque nouvelle compilation remplace l'ancien fichier.
+      # En cas d'échec, le message réel est remonté dans les annotations.
       - name: Publier l'APK (Release apk-latest)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          if ! gh release view apk-latest >/dev/null 2>&1; then
-            gh release create apk-latest \
-              --name "APK Android — En-Check Pointage" \
-              --notes "APK de l'application En-Check Pointage (compilation automatique). Téléchargez en-check-pointage.apk, puis installez-le sur la tablette Android (autorisez les « sources inconnues »). Signé avec la clé de débogage : suffisant pour la recette, pas pour la production."
+          set +e
+          out=$({
+            if ! gh release view apk-latest >/dev/null 2>&1; then
+              gh release create apk-latest \
+                --target "${PR_HEAD_SHA:-$GITHUB_SHA}" \
+                --name "APK Android — En-Check Pointage" \
+                --notes "APK de l'application En-Check Pointage (compilation automatique). Téléchargez en-check-pointage.apk, puis installez-le sur la tablette Android (autorisez les sources inconnues). Signé avec la clé de débogage : suffisant pour la recette, pas pour la production."
+            fi
+            gh release upload apk-latest en-check-pointage.apk --clobber
+          } 2>&1)
+          status=$?
+          set -e
+          echo "$out"
+          if [ "$status" -ne 0 ]; then
+            echo "::error::Publication de l'APK échouée (code $status) :"
+            echo "$out" | tail -n 15 | sed 's/%/%25/g' | while IFS= read -r line; do
+              if [ -n "$line" ]; then echo "::error::$line"; fi
+            done
+            exit "$status"
           fi
-          gh release upload apk-latest en-check-pointage.apk --clobber
+          echo "::notice::APK publié : https://github.com/${{ github.repository }}/releases/download/apk-latest/en-check-pointage.apk"
+
+      # ── 7bis. Secours : l'APK reste téléchargeable depuis la course ─────
+      - name: Téléverser l'APK en artefact (secours)
+        uses: actions/upload-artifact@v4
+        with:
+          name: en-check-pointage-apk
+          path: en-check-pointage.apk
 
       # ── 8. Compte rendu ─────────────────────────────────────────────────
       - name: Compte rendu
