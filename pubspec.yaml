@@ -54,6 +54,7 @@ flutter:
     - assets/icon/icon.png
     - assets/models/          # ← Dossier pour le modèle IA
     - assets/motifs/          # 🧵 Étoffes culturelles (Raphia par défaut)
+    - assets/scenes/          # 📸 Scènes photo (visuels de l'Admin)
 
   # 🎨 Refonte design : chiffres en JetBrains Mono (horloge, matricule,
   #    heures de pointage) — le même « compteur » que l'app En-Check Admin.

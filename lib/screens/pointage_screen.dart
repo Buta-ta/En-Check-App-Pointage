@@ -13,6 +13,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/app_theme.dart';
 import '../widgets/logo_empreinte.dart';
 import '../widgets/frise_motif.dart';
+import 'identification_slide_page.dart';
 import '../widgets/panneau_motif.dart';
 import '../services/motif_service.dart';
 import '../widgets/qr_scanner_widget.dart';
@@ -101,6 +102,10 @@ class _PointageScreenState extends State<PointageScreen> {
   //    cet appareil est une borne, même sans bail `bk1_` ni config serveur.
   bool _modeKiosqueAppareil = false;
 
+  // Nouvelle carte MATRICULE (maquette affiche vivante).
+  final _matriculeNouveauCtrl = TextEditingController();
+  String _sensSouhaite = 'arrivee';
+
   /// 🖥️ CONTRAT ÉTAPE 3 — la borne est-elle authentifiée (bail `bk1_`
   /// valide) ? Le personnel se synchronise alors par `encheck_borne_personnel`.
   bool _bornePrete = false;
@@ -156,6 +161,7 @@ class _PointageScreenState extends State<PointageScreen> {
   void dispose() {
     _timer?.cancel();
     _timerPauses?.cancel();
+    _matriculeNouveauCtrl.dispose();
     super.dispose();
   }
 
@@ -952,143 +958,7 @@ class _PointageScreenState extends State<PointageScreen> {
     );
   }
 
-  /// LE BLOC PAUSE - toujours visible, JUSTE AU-DESSUS de la carte
-  /// MATRICULE (contrat UX). Noms, depuis quand, et les deux actions.
-  Widget _buildBlocPause() {
-    final enModePause = _intention == 'pause';
-    final pauseEnCours = _pausesOuvertes.isNotEmpty;
-    final couleurTexte = Theme.of(context).textTheme.bodyLarge?.color ??
-        EnCheckColors.brunProfond;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(18),
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withOpacity(0.08),
-              blurRadius: 12,
-              offset: const Offset(0, 4)),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.pause_circle,
-                  color: EnCheckColors.terreChaude, size: 20),
-              const SizedBox(width: 8),
-              Text('PAUSE',
-                  style: TextStyle(
-                      fontFamily: 'JetBrainsMono',
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 2,
-                      color: couleurTexte)),
-              const Spacer(),
-              if (pauseEnCours)
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: EnCheckColors.alerte.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Text('En cours',
-                      style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          color: EnCheckColors.alerte)),
-                ),
-            ],
-          ),
-          if (pauseEnCours) ...[
-            const SizedBox(height: 10),
-            _construireBandeauPauses(),
-          ],
-          if (enModePause) ...[
-            const SizedBox(height: 10),
-            _construireLigneModePause(),
-          ],
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: _boutonActionPause(
-                  label: 'Démarrer la pause',
-                  icon: Icons.pause,
-                  rempli: false,
-                  actif: !enModePause,
-                  onTap: _demarrerFluxPause,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _boutonActionPause(
-                  label: 'Reprendre le travail',
-                  icon: Icons.play_arrow,
-                  rempli: true,
-                  actif: !enModePause && pauseEnCours,
-                  onTap: _demarrerFluxPause,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _boutonActionPause({
-    required String label,
-    required IconData icon,
-    required bool rempli,
-    required bool actif,
-    required VoidCallback onTap,
-  }) {
-    final couleur = actif ? EnCheckColors.terreChaude : EnCheckColors.gris;
-    if (rempli) {
-      return SizedBox(
-        height: 44,
-        child: ElevatedButton.icon(
-          onPressed: actif ? onTap : null,
-          icon: Icon(icon, size: 17),
-          label: Text(label,
-              style: const TextStyle(
-                  fontSize: 12.5, fontWeight: FontWeight.w700)),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: EnCheckColors.terreChaude,
-            foregroundColor: EnCheckColors.blanc,
-            disabledBackgroundColor: EnCheckColors.gris.withOpacity(0.35),
-            elevation: 0,
-            side: const BorderSide(color: EnCheckColors.orDoux, width: 1.2),
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14)),
-          ),
-        ),
-      );
-    }
-    return SizedBox(
-      height: 44,
-      child: OutlinedButton.icon(
-        onPressed: actif ? onTap : null,
-        icon: Icon(icon, size: 17),
-        label: Text(label,
-            style:
-                const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
-        style: OutlinedButton.styleFrom(
-          foregroundColor: couleur,
-          disabledForegroundColor: EnCheckColors.gris.withOpacity(0.6),
-          side: BorderSide(color: couleur.withOpacity(0.5), width: 1.3),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        ),
-      ),
-    );
-  }
+  // L'ancien bloc pause a ete remplace par la carte PAUSE (nouvelle page).
   // ═══════════════════════════════════════════════════════════
   // 🤖 LOGIQUE RECONNAISSANCE FACIALE
   // ═══════════════════════════════════════════════════════════
@@ -2125,41 +1995,53 @@ class _PointageScreenState extends State<PointageScreen> {
       mainAxisSize: margeFlexible ? MainAxisSize.max : MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const SizedBox(height: 6),
-        _buildEnteteVisuelle(estEnLigne, themeService),
-        const SizedBox(height: 8),
-        // Bandeau Borne : entreprises concernees uniquement
-        // (reco faciale ou mode kiosque).
-        if (_moduleRecoFacialeActif || _kioskMode) ...[
-          _buildBandeauBorne(),
-          const SizedBox(height: 8),
-        ],
-        // BLOC PAUSE - au-dessus de la carte MATRICULE, toujours visible.
-        _buildBlocPause(),
-        const SizedBox(height: 10),
-        _buildZonePointage(),
-        if (margeFlexible)
-          const Spacer()
-        else
-          const SizedBox(height: 10),
-        Row(
-          children: [
-            Expanded(child: _buildBoutonMaJournee()),
-            const SizedBox(width: 10),
-            Expanded(child: _buildBoutonParametres()),
-          ],
+        _buildScenePointage(estEnLigne, themeService),
+        ValueListenableBuilder<MotifCulturel>(
+          valueListenable: MotifService.actif,
+          builder: (context, motif, _) => FriseMotif(motif: motif, hauteur: 28),
         ),
-        const SizedBox(height: 8),
-        Text(
-          'v1.0.0 \u2022 Chiffrement AES-256 \u2022 Serveur UE',
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            fontFamily: 'JetBrainsMono',
-            fontSize: 11,
-            color: EnCheckColors.gris.withOpacity(0.9),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 22),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const SizedBox(height: 12),
+              if (_moduleRecoFacialeActif || _kioskMode) ...[
+                _buildBandeauBorne(),
+                const SizedBox(height: 12),
+              ],
+              _buildChipsNoms(),
+              const SizedBox(height: 12),
+              _buildCartePause(),
+              const SizedBox(height: 12),
+              _buildCarteMatricule(),
+              if (_moduleQRActif || _moduleRecoFacialeActif || _kioskMode) ...[
+                const SizedBox(height: 12),
+                _buildCarteModules(),
+              ],
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(child: _buildBoutonMaJournee()),
+                  const SizedBox(width: 10),
+                  Expanded(child: _buildBoutonParametres()),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'v1.0.0 • Chiffrement AES-256 • Serveur UE',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontFamily: 'JetBrainsMono',
+                  fontSize: 11,
+                  color: EnCheckColors.gris.withOpacity(0.9),
+                ),
+              ),
+              const SizedBox(height: 10),
+            ],
           ),
         ),
-        const SizedBox(height: 8),
+        if (margeFlexible) const Spacer(),
       ],
     );
   }
@@ -3202,164 +3084,678 @@ class _PointageScreenState extends State<PointageScreen> {
     );
   }
 
-  /// ENTETE : frise du motif choisi, plaque Pointage + entreprise,
-  /// horloge vivante, etat connexion/sync, puis les boutons clair/sombre.
-  Widget _buildEnteteVisuelle(bool estEnLigne, ThemeService themeService) {
+  /// SCENE DU HAUT : photo chaude (visuels de l'Admin), horloge doree,
+  /// boutons clair/sombre et etat connexion. La frise du motif fait la
+  /// couture avec le panneau.
+  Widget _buildScenePointage(bool estEnLigne, ThemeService themeService) {
     final nomEntreprise = entrepriseSelectionnee?['name']?.toString() ?? '';
-    final couleurTexte = Theme.of(context).textTheme.bodyLarge?.color ??
-        EnCheckColors.brunProfond;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        ValueListenableBuilder<MotifCulturel>(
-          valueListenable: MotifService.actif,
-          builder: (context, motif, _) => FriseMotif(motif: motif, hauteur: 54),
-        ),
-        const SizedBox(height: 10),
-        Row(
-          children: [
-            const LogoEmpreinte(taille: 42),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text('Pointage',
-                      style: TextStyle(
-                          fontSize: 21,
-                          fontWeight: FontWeight.w800,
-                          color: couleurTexte)),
-                  if (nomEntreprise.isNotEmpty)
-                    Text(nomEntreprise,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            fontSize: 11, color: EnCheckColors.gris)),
+    return SizedBox(
+      height: 240,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.asset(
+            'assets/scenes/scene_pointage.jpg',
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) =>
+                Container(color: EnCheckColors.brunProfond),
+          ),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.black.withOpacity(0.25),
+                  Colors.transparent,
+                  Theme.of(context).scaffoldBackgroundColor.withOpacity(0.9),
                 ],
+                stops: const [0.0, 0.55, 1.0],
               ),
             ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(heureActuelle,
-                    style: EnCheckTextStyles.grosChiffres
-                        .copyWith(fontSize: 26, color: couleurTexte)),
-                Text(dateActuelle,
-                    style: EnCheckTextStyles.titreSecondaire
-                        .copyWith(fontSize: 9.5)),
-              ],
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        _buildHeader(estEnLigne, themeService),
-        if (_moduleGeofencingActif || _kioskMode) ...[
-          const SizedBox(height: 8),
-          _buildIndicateursModules(),
-        ],
-        _buildAvisFuseau(),
-      ],
-    );
-  }
-
-  Widget _buildHeader(bool estEnLigne, ThemeService themeService) {
-    return Row(
-      children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-          decoration: BoxDecoration(
-            color: estEnLigne ? EnCheckColors.succes : EnCheckColors.erreur,
-            borderRadius: BorderRadius.circular(20),
           ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(estEnLigne ? Icons.wifi : Icons.wifi_off,
-                  color: EnCheckColors.blanc, size: 14),
-              const SizedBox(width: 5),
-              Text(estEnLigne ? 'En ligne' : 'Hors-ligne',
-                  style: const TextStyle(
-                      color: EnCheckColors.blanc, fontSize: 11)),
-            ],
-          ),
-        ),
-        const SizedBox(width: 8),
-        GestureDetector(
-          onTap: syncEnCours ? null : _lancerSynchronisation,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            decoration: BoxDecoration(
-              color: EnCheckColors.terreChaude,
-              borderRadius: BorderRadius.circular(20),
-            ),
+          Positioned(
+            top: 12,
+            left: 14,
+            right: 14,
             child: Row(
-              mainAxisSize: MainAxisSize.min,
               children: [
-                if (syncEnCours)
-                  const SizedBox(
-                      width: 11,
-                      height: 11,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white))
-                else
-                  const Icon(Icons.sync, color: EnCheckColors.blanc, size: 14),
-                const SizedBox(width: 5),
-                Text(
-                  pointagesEnAttente > 0
-                      ? '$pointagesEnAttente en attente'
-                      : 'Sync',
-                  style: const TextStyle(
-                      color: EnCheckColors.blanc,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold),
+                if (_moduleRecoFacialeActif || _kioskMode)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 11, vertical: 7),
+                    decoration: BoxDecoration(
+                      color: EnCheckColors.brunProfond.withOpacity(0.82),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.desktop_windows,
+                            size: 15, color: EnCheckColors.orDoux),
+                        SizedBox(width: 6),
+                        Text('Borne - session active',
+                            style: TextStyle(
+                                fontSize: 11.5,
+                                color: EnCheckColors.blanc,
+                                fontWeight: FontWeight.w600)),
+                        SizedBox(width: 6),
+                        Icon(Icons.circle,
+                            size: 8, color: EnCheckColors.succes),
+                      ],
+                    ),
+                  ),
+                const Spacer(),
+                GestureDetector(
+                  onTap: syncEnCours ? null : _lancerSynchronisation,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 7),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.82),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(estEnLigne ? Icons.wifi : Icons.wifi_off,
+                            size: 14,
+                            color: estEnLigne
+                                ? EnCheckColors.succes
+                                : EnCheckColors.erreur),
+                        const SizedBox(width: 5),
+                        Text(
+                          pointagesEnAttente > 0
+                              ? '$pointagesEnAttente en attente'
+                              : 'Sync',
+                          style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: EnCheckColors.brunProfond),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _rondScene(
+                  icon: Icons.light_mode,
+                  actif: !themeService.isDarkMode,
+                  onTap: () => themeService.setDarkMode(false),
+                ),
+                const SizedBox(width: 8),
+                _rondScene(
+                  icon: Icons.dark_mode,
+                  actif: themeService.isDarkMode,
+                  onTap: () => themeService.setDarkMode(true),
                 ),
               ],
             ),
           ),
+          Positioned(
+            left: 20,
+            right: 20,
+            bottom: 12,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const LogoEmpreinte(taille: 40),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Text('Pointage',
+                              style: TextStyle(
+                                  fontSize: 23,
+                                  fontWeight: FontWeight.w800,
+                                  color: EnCheckColors.blanc)),
+                          if (nomEntreprise.isNotEmpty)
+                            Text(nomEntreprise,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    color:
+                                        EnCheckColors.blanc.withOpacity(0.85))),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(heureActuelle,
+                        style: const TextStyle(
+                            fontFamily: 'JetBrainsMono',
+                            fontSize: 34,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 2,
+                            color: EnCheckColors.orDoux)),
+                    const SizedBox(width: 10),
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 5),
+                      child: Text(dateActuelle,
+                          style: TextStyle(
+                              fontSize: 10.5,
+                              color: EnCheckColors.blanc.withOpacity(0.8))),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _rondScene({
+    required IconData icon,
+    required VoidCallback onTap,
+    bool actif = false,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(9),
+        decoration: BoxDecoration(
+          color:
+              actif ? EnCheckColors.orDoux : Colors.white.withOpacity(0.82),
+          shape: BoxShape.circle,
         ),
-        const Spacer(),
-        // Les boutons CLAIR et SOMBRE - le choix est memorise.
-        _buildBoutonTheme(
-          clair: true,
-          actif: !themeService.isDarkMode,
-          onTap: () => themeService.setDarkMode(false),
+        child: Icon(icon, size: 18, color: EnCheckColors.brunProfond),
+      ),
+    );
+  }
+
+  /// Bandeau avec noms (contrat UX) : qui est en pause, qui vient de pointer.
+  Widget _buildChipsNoms() {
+    final chips = <Widget>[];
+    for (final pause in _pausesOuvertes) {
+      final nom = (pause['nom'] ?? 'Employe').toString();
+      chips.add(_pastilleNom(nom, EnCheckColors.alerte));
+    }
+    if (_dernierEmployePointe != null) {
+      final nom =
+          '${_dernierEmployePointe!['first_name'] ?? ''} ${_dernierEmployePointe!['last_name'] ?? ''}'
+              .trim();
+      if (nom.isNotEmpty) chips.add(_pastilleNom(nom, EnCheckColors.succes));
+    }
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: chips.isEmpty
+          ? const Text('Aucun pointage ni pause en cours',
+              style: TextStyle(fontSize: 12.5, color: EnCheckColors.gris))
+          : Wrap(spacing: 8, runSpacing: 8, children: chips),
+    );
+  }
+
+  Widget _pastilleNom(String nom, Color couleur) {
+    final couleurTexte = Theme.of(context).textTheme.bodyLarge?.color ??
+        EnCheckColors.brunProfond;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: couleur.withOpacity(0.5), width: 1.2),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.circle, size: 8, color: couleur),
+          const SizedBox(width: 6),
+          Text(nom,
+              style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: couleurTexte)),
+        ],
+      ),
+    );
+  }
+
+  /// Carte PAUSE — ouvre la PAGE PAUSE (identifiant + mot de passe + slide).
+  Widget _buildCartePause() {
+    final pauseEnCours = _pausesOuvertes.isNotEmpty;
+    final couleurTexte = Theme.of(context).textTheme.bodyLarge?.color ??
+        EnCheckColors.brunProfond;
+    String statut = 'Aucune pause en cours';
+    if (pauseEnCours) {
+      final p = _pausesOuvertes.first;
+      final nom = (p['nom'] ?? 'Employe').toString();
+      final depuis = p['debut'] == null
+          ? ''
+          : PauseService.heureCourteDe(p['debut'] as String);
+      statut = '$nom - en pause depuis $depuis';
+      if (_pausesOuvertes.length > 1) {
+        statut += ' (+${_pausesOuvertes.length - 1} autre)';
+      }
+    }
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.07),
+              blurRadius: 12,
+              offset: const Offset(0, 4)),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: const BoxDecoration(
+                    color: EnCheckColors.orDoux, shape: BoxShape.circle),
+                child: const Icon(Icons.pause,
+                    color: EnCheckColors.brunProfond, size: 22),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('PAUSE',
+                        style: TextStyle(
+                            fontFamily: 'JetBrainsMono',
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 2,
+                            color: couleurTexte)),
+                    const SizedBox(height: 2),
+                    Text(statut,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 12.5,
+                            color: pauseEnCours
+                                ? EnCheckColors.alerte
+                                : EnCheckColors.gris,
+                            fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: _boutonScene(
+                  label: 'Démarrer la pause',
+                  icon: Icons.pause,
+                  rempli: false,
+                  onTap: _ouvrirPagePause,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _boutonScene(
+                  label: 'Reprendre le travail',
+                  icon: Icons.play_arrow,
+                  rempli: true,
+                  onTap: _ouvrirPagePause,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _boutonScene({
+    required String label,
+    required IconData icon,
+    required bool rempli,
+    required VoidCallback onTap,
+  }) {
+    if (rempli) {
+      return SizedBox(
+        height: 46,
+        child: ElevatedButton.icon(
+          onPressed: onTap,
+          icon: Icon(icon, size: 17),
+          label: Text(label,
+              style: const TextStyle(
+                  fontSize: 12.5, fontWeight: FontWeight.w700)),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: EnCheckColors.brunProfond,
+            foregroundColor: EnCheckColors.blanc,
+            elevation: 0,
+            side: const BorderSide(color: EnCheckColors.orDoux, width: 1.2),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14)),
+          ),
         ),
+      );
+    }
+    return SizedBox(
+      height: 46,
+      child: OutlinedButton.icon(
+        onPressed: onTap,
+        icon: Icon(icon, size: 17),
+        label: Text(label,
+            style: const TextStyle(
+                fontSize: 12.5, fontWeight: FontWeight.w700)),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: EnCheckColors.terreChaude,
+          side: BorderSide(
+              color: EnCheckColors.terreChaude.withOpacity(0.55), width: 1.3),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        ),
+      ),
+    );
+  }
+
+  /// Carte MATRICULE — champ + sens Arrivée/Départ + validation par slide.
+  Widget _buildCarteMatricule() {
+    final couleurTexte = Theme.of(context).textTheme.bodyLarge?.color ??
+        EnCheckColors.brunProfond;
+    final estArrivee = _sensSouhaite == 'arrivee';
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.07),
+              blurRadius: 12,
+              offset: const Offset(0, 4)),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text('MATRICULE',
+                  style: TextStyle(
+                      fontFamily: 'JetBrainsMono',
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 2,
+                      color: couleurTexte)),
+              const Spacer(),
+              _segmentedSens(),
+            ],
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _matriculeNouveauCtrl,
+            textAlign: TextAlign.center,
+            textCapitalization: TextCapitalization.characters,
+            style: TextStyle(
+                fontFamily: 'JetBrainsMono',
+                fontSize: 26,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 3,
+                color: couleurTexte),
+            decoration: InputDecoration(
+              hintText: 'ENN-0002',
+              hintStyle: TextStyle(
+                  fontFamily: 'JetBrainsMono',
+                  fontSize: 22,
+                  letterSpacing: 3,
+                  fontWeight: FontWeight.w600,
+                  color: EnCheckColors.gris.withOpacity(0.55)),
+              filled: true,
+              fillColor: Theme.of(context).brightness == Brightness.dark
+                  ? Colors.white.withOpacity(0.07)
+                  : const Color(0xFFF3EADA),
+              contentPadding: const EdgeInsets.symmetric(vertical: 16),
+              border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: BorderSide.none),
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: _boutonScene(
+              label: estArrivee ? "Pointer l'arrivée" : 'Pointer le départ',
+              icon: Icons.touch_app,
+              rempli: true,
+              onTap: _ouvrirValidationPointage,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _segmentedSens() {
+    Widget option(String label, String valeur) {
+      final actif = _sensSouhaite == valeur;
+      return GestureDetector(
+        onTap: () => setState(() => _sensSouhaite = valeur),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: actif ? EnCheckColors.terreChaude : Colors.transparent,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+                color: EnCheckColors.terreChaude.withOpacity(actif ? 1 : 0.4)),
+          ),
+          child: Text(label,
+              style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
+                  color: actif ? EnCheckColors.blanc : EnCheckColors.gris)),
+        ),
+      );
+    }
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        option('Arrivée', 'arrivee'),
         const SizedBox(width: 6),
-        _buildBoutonTheme(
-          clair: false,
-          actif: themeService.isDarkMode,
-          onTap: () => themeService.setDarkMode(true),
-        ),
+        option('Départ', 'depart'),
       ],
     );
   }
 
-  Widget _buildBoutonTheme({
-    required bool clair,
-    required bool actif,
-    required VoidCallback onTap,
-  }) {
-    final iconeCouleur = Theme.of(context).brightness == Brightness.dark
-        ? EnCheckColors.orDoux
-        : EnCheckColors.terreChaude;
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(7),
+  /// Autres modes (QR, visage, enrôlement borne) — modules actifs seulement.
+  Widget _buildCarteModules() {
+    final enfants = <Widget>[];
+    if (_moduleQRActif) {
+      enfants.add(_boutonScene(
+        label: 'Scanner QR',
+        icon: Icons.qr_code_scanner,
+        rempli: false,
+        onTap: () => setState(() {
+          if (_modulePhotoActif) {
+            _showPhotoScanner = true;
+          } else {
+            _showScanner = true;
+          }
+        }),
+      ));
+    }
+    if (_moduleRecoFacialeActif) {
+      enfants.add(_boutonScene(
+        label: 'Reconnaissance faciale',
+        icon: Icons.face,
+        rempli: false,
+        onTap: _onBoutonFaceClique,
+      ));
+    }
+    if (_kioskMode) {
+      enfants.add(_buildBoutonEnrolerNouvelEmploye());
+    }
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text('AUTRES MODES',
+              style: TextStyle(
+                  fontFamily: 'JetBrainsMono',
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.8,
+                  color: EnCheckColors.gris)),
+          const SizedBox(height: 10),
+          for (final b in enfants) ...[b, const SizedBox(height: 8)],
+        ],
+      ),
+    );
+  }
+
+  // NAVIGATION VERS LES PAGES
+
+  Future<void> _ouvrirPagePause() async {
+    final entrepriseId = entrepriseSelectionnee?['id']?.toString() ?? '';
+    Widget? statut;
+    if (_pausesOuvertes.isNotEmpty) {
+      final p = _pausesOuvertes.first;
+      final nom = (p['nom'] ?? 'Employe').toString();
+      final depuis = p['debut'] == null
+          ? ''
+          : PauseService.heureCourteDe(p['debut'] as String);
+      statut = Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color: actif ? EnCheckColors.orDoux : Theme.of(context).cardColor,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-              color: actif
-                  ? EnCheckColors.orDoux
-                  : EnCheckColors.orDoux.withOpacity(0.45)),
+          color: EnCheckColors.alerte.withOpacity(0.10),
+          borderRadius: BorderRadius.circular(14),
         ),
-        child: Icon(
-          clair ? Icons.light_mode : Icons.dark_mode,
-          size: 17,
-          color: actif ? EnCheckColors.brunProfond : iconeCouleur,
+        child: Row(
+          children: [
+            const Icon(Icons.pause_circle,
+                size: 18, color: EnCheckColors.alerte),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text('$nom - en pause depuis $depuis',
+                  style: const TextStyle(
+                      fontFamily: 'JetBrainsMono',
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600)),
+            ),
+          ],
+        ),
+      );
+    }
+
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => IdentificationSlidePage(
+          titre: 'Pause',
+          sceneAsset: 'assets/scenes/scene_pause.jpg',
+          aide: 'Pour démarrer ou reprendre une pause',
+          entrepriseId: entrepriseId,
+          statut: statut,
+          onValide: (employe) async {
+            final employeId = employe['id'] as String?;
+            if (employeId == null) return false;
+            final nom =
+                '${employe['first_name'] ?? ''} ${employe['last_name'] ?? ''}'
+                    .trim();
+            final liste = await PauseService.pausesOuvertes(
+                enterpriseId: entrepriseId);
+            Map<String, dynamic>? ouverte;
+            for (final p in liste) {
+              if (p['employee_id'] == employeId) ouverte = p;
+            }
+            if (ouverte != null) {
+              await PauseService.reprendre(
+                  employeeId: employeId, enterpriseId: entrepriseId);
+            } else {
+              await PauseService.partirEnPause(
+                employeeId: employeId,
+                enterpriseId: entrepriseId,
+                nom: nom,
+                matricule: employe['matricule']?.toString(),
+              );
+            }
+            return true;
+          },
+        ),
+      ),
+    );
+    if (mounted) await _chargerPausesOuvertes();
+  }
+
+  Future<void> _ouvrirValidationPointage() async {
+    final entrepriseId = entrepriseSelectionnee?['id']?.toString() ?? '';
+    if (entrepriseId.isEmpty) {
+      _afficherErreur('Aucune entreprise sélectionnée.');
+      return;
+    }
+    if (_moduleGeofencingActif) {
+      final gpsOk = await _verifierPositionGPS();
+      if (!gpsOk) return;
+    }
+    final estArrivee = _sensSouhaite == 'arrivee';
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => IdentificationSlidePage(
+          titre: estArrivee ? 'Arrivée' : 'Départ',
+          sceneAsset: 'assets/scenes/scene_pointage.jpg',
+          aide: 'Validez votre pointage avec le curseur',
+          entrepriseId: entrepriseId,
+          matriculeInitial: _matriculeNouveauCtrl.text.trim().isEmpty
+              ? null
+              : _matriculeNouveauCtrl.text.trim(),
+          onValide: (employe) async {
+            _extraireSchedule(employe);
+            final estHorsLigne = !ConnectivityService.isOnline;
+            if (_modulePhotoActif && !_moduleQRActif) {
+              if (kIsWeb) {
+                setState(() {
+                  _pendingEmployeeWebCamera = employe;
+                  _webCameraRaison = 'pin';
+                  _showWebCamera = true;
+                });
+              } else {
+                setState(() {
+                  _pendingEmployee = employe;
+                  _showPinPhoto = true;
+                });
+              }
+            } else {
+              await _traiterPointage(employe, 'pin', estHorsLigne, null);
+              setState(() {
+                numeroMatricule = '';
+                codePin = '';
+                afficherPin = false;
+                _modeSelectionne = null;
+                _gpsVerifie = false;
+                _currentPosition = null;
+                _verificationZone = null;
+              });
+            }
+            return true;
+          },
         ),
       ),
     );
@@ -3729,23 +4125,10 @@ class _PointageScreenState extends State<PointageScreen> {
 
   // CLAVIER PHYSIQUE (PWA sur ordinateur)
 
-  /// Le clavier ecran est affiche - les touches physiques doivent taper.
-  bool get _clavierVisible {
-    if (_showScanner || _showPhotoScanner || _showPinPhoto || _showWebCamera) {
-      return false;
-    }
-    if (_showFacePointage || _showFaceEnrollment) return false;
-    if (_kioskPhase == 'enrolling') return false;
-    if (!_moduleRecoFacialeActif) return !_moduleQRActif;
-    return _modeSelectionne == 'pin';
-  }
-
+  /// Les champs texte captent la frappe ; Echap annule ou ferme.
   KeyEventResult _gererClavierPhysique(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
-    final touche = event.logicalKey;
-
-    // Echap : annuler ce qui est en cours (pause, saisie PIN...).
-    if (touche == LogicalKeyboardKey.escape) {
+    if (event.logicalKey == LogicalKeyboardKey.escape) {
       if (_intention == 'pause') {
         _annulerFluxPause();
       } else if (afficherPin) {
@@ -3756,23 +4139,6 @@ class _PointageScreenState extends State<PointageScreen> {
       } else {
         FocusManager.instance.primaryFocus?.unfocus();
       }
-      return KeyEventResult.handled;
-    }
-
-    if (!_clavierVisible) return KeyEventResult.ignored;
-
-    if (touche == LogicalKeyboardKey.enter ||
-        touche == LogicalKeyboardKey.numpadEnter) {
-      _onToucheAppuyee('\u2713');
-      return KeyEventResult.handled;
-    }
-    if (touche == LogicalKeyboardKey.backspace) {
-      _onToucheAppuyee('\u232B');
-      return KeyEventResult.handled;
-    }
-    final label = touche.keyLabel;
-    if (label.length == 1 && '0123456789'.contains(label)) {
-      _onToucheAppuyee(label);
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
