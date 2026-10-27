@@ -21,12 +21,16 @@ class MotifCulturel {
   final Color couleurBouton;
   final Color couleurAccent;
 
+  /// Teinte douce pour les cartes (l'identité du motif, en retenue).
+  final Color couleurTint;
+
   const MotifCulturel({
     required this.id,
     required this.nom,
     required this.asset,
     required this.couleurBouton,
     required this.couleurAccent,
+    required this.couleurTint,
   });
 
   /// 🧺 Raphia tressé (Kuba) — LE MOTIF PAR DÉFAUT.
@@ -35,7 +39,8 @@ class MotifCulturel {
     nom: 'Raphia',
     asset: 'assets/motifs/raphia.webp',
     couleurBouton: Color(0xFF3D2B1F),
-    couleurAccent: Color(0xFFD4AF37),
+    couleurAccent: Color(0xFFC98A2B),
+    couleurTint: Color(0xFFF7EFE0),
   );
 
   /// Adinkra peint (Ghana) — l'univers « temps et travail ».
@@ -45,6 +50,7 @@ class MotifCulturel {
     asset: 'assets/motifs/adinkra.webp',
     couleurBouton: Color(0xFF1B2A4A),
     couleurAccent: Color(0xFFB4593A),
+    couleurTint: Color(0xFFF4EAE3),
   );
 
   /// Bogolan (Mali) — la boue et le coton.
@@ -53,7 +59,8 @@ class MotifCulturel {
     nom: 'Bogolan',
     asset: 'assets/motifs/bogolan.webp',
     couleurBouton: Color(0xFF2E2118),
-    couleurAccent: Color(0xFFC9A227),
+    couleurAccent: Color(0xFF8B5E34),
+    couleurTint: Color(0xFFF2EADD),
   );
 
   /// Perles zoulou — géométries colorées.
@@ -62,7 +69,8 @@ class MotifCulturel {
     nom: 'Zoulou',
     asset: 'assets/motifs/zoulou.webp',
     couleurBouton: Color(0xFF1F4E4A),
-    couleurAccent: Color(0xFFE0A82E),
+    couleurAccent: Color(0xFF2E7D6B),
+    couleurTint: Color(0xFFE9F1EE),
   );
 
   static const List<MotifCulturel> tous = [raphia, adinkra, bogolan, zoulou];
