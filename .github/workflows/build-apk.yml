@@ -44,7 +44,7 @@ permissions:
 
 jobs:
   apk:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     # Une PR ne compile l'APK QUE si elle porte l'étiquette « apk » :
     # les autres PR gardent uniquement le contrôle de compilation web,
@@ -58,7 +58,7 @@ jobs:
 
       # ── 2. Java 17 (exigé par les outils Android) ────────────────────────
       - name: Installer Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -81,12 +81,30 @@ jobs:
       # ── 5. Compiler l'APK ───────────────────────────────────────────────
       # Le dossier android/ du projet demande le NDK 27 : on s'assure qu'il
       # est présent (déjà installé sur la plupart des machines GitHub).
+      # En cas d'échec, les dernières lignes du journal sont remontées dans
+      # les annotations (« ::error:: ») : c'est ainsi qu'on lit l'erreur
+      # depuis l'extérieur, quand le journal complet n'est pas consultable.
       - name: Compiler l'APK Android
         run: |
-          if [ -n "${ANDROID_HOME:-}" ] && [ ! -d "$ANDROID_HOME/ndk/27.0.12077973" ]; then
-            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.0.12077973" >/dev/null 2>&1 || true
+          if [ -n "${ANDROID_HOME:-}" ]; then
+            echo "NDK présents sur la machine :"
+            ls "$ANDROID_HOME/ndk" 2>/dev/null || echo "(aucun)"
+            if [ ! -d "$ANDROID_HOME/ndk/27.0.12077973" ]; then
+              echo "Installation du NDK 27.0.12077973…"
+              (yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.0.12077973") || echo "sdkmanager n'a pas pu installer le NDK : on laisse Gradle gérer."
+            fi
           fi
-          flutter build apk --release
+          set +e
+          flutter build apk --release -v 2>&1 | tee /tmp/build-apk.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            echo "::error::Compilation APK échouée (code $status) — extrait du journal :"
+            tail -n 45 /tmp/build-apk.log | sed 's/%/%25/g' | while IFS= read -r line; do
+              if [ -n "$line" ]; then echo "::error::$line"; fi
+            done
+            exit "$status"
+          fi
 
       # ── 6. Renommer le fichier pour un lien de téléchargement stable ────
       - name: Renommer l'APK
