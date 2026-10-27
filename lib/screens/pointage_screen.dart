@@ -1984,8 +1984,11 @@ class _PointageScreenState extends State<PointageScreen> {
                     // ZERO SCROLL en usage normal : la page s'affiche en
                     // entier, a TAILLE NORMALE (jamais reduite). Le scroll
                     // n'apparait qu'en secours si la fenetre est vraiment
-                    // trop courte.
-                    final scrollDeSecours = constraints.maxHeight < 780;
+                    // trop courte — OU trop etroite : sous 620 px de large,
+                    // le contenu se replie et devient plus haut, il doit
+                    // alors pouvoir defiler.
+                    final scrollDeSecours = constraints.maxHeight < 780 ||
+                        constraints.maxWidth < 620;
                     final contenu = Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 24),
                       child: _colonnePrincipale(
