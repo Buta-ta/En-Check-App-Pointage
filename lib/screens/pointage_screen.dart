@@ -171,6 +171,13 @@ class _PointageScreenState extends State<PointageScreen> {
     if (_moduleRecoFacialeActif && entrepriseSelectionnee != null) {
       await _chargerConfigRecoFacialeEnLigne();
     }
+
+    // 🖥️ CONTRAT ÉTAPE 3 — une tablette DÉJÀ provisionnée est une borne,
+    //    même si la config serveur est injoignable ou exige un jeton employé :
+    //    le bail `bk1_` en coffre sécurisé est la preuve, pas le réglage distant.
+    if (await BorneService.aUnBailValide()) {
+      if (mounted) setState(() => _kioskMode = true);
+    }
   }
 
   Future<void> _chargerModulesLocaux() async {
@@ -209,15 +216,18 @@ class _PointageScreenState extends State<PointageScreen> {
           entrepriseSelectionnee!['id']);
       await LocalDatabase.sauvegarderConfigFaciale(config);
       final kioskMode = config['kiosk_mode_enabled'] as bool? ?? false;
+      // 🖥️ CONTRAT ÉTAPE 3 — un défaut de config ne rétrograde JAMAIS une
+      //    tablette déjà provisionnée : le bail `bk1_` garde le mode kiosque.
+      final bailBorne = await BorneService.aUnBailValide();
 
       if (mounted) {
         setState(() {
           _faceConfig = config;
-          _kioskMode = kioskMode;
+          _kioskMode = kioskMode || bailBorne;
         });
       }
 
-      if (kioskMode) {
+      if (kioskMode || bailBorne) {
         await _chargerTousEmbeddingsEntreprise();
         await _detecterEmployesNonEnroles();
       } else {
@@ -1991,6 +2001,12 @@ class _PointageScreenState extends State<PointageScreen> {
                       _construireLigneModePause(),
                       const SizedBox(height: 12),
                     ],
+                    // 🖥️ CONTRAT ÉTAPE 3 — le provisionnement d'une borne doit
+                    //    rester joignable sur une tablette vierge : sans session
+                    //    employé, sans module particulier. Le bandeau est donc
+                    //    affiché TOUJOURS, jamais seulement en mode kiosque.
+                    _buildBandeauBorne(),
+                    const SizedBox(height: 12),
                     _buildZonePointage(),
                     const SizedBox(height: 30),
                     _buildSeparateur(),
@@ -2200,8 +2216,6 @@ class _PointageScreenState extends State<PointageScreen> {
         ],
         if (_kioskMode) ...[
           const SizedBox(height: 20),
-          _buildBandeauBorne(),
-          const SizedBox(height: 12),
           _buildBoutonEnrolerNouvelEmploye(),
         ],
       ],
@@ -2411,6 +2425,14 @@ class _PointageScreenState extends State<PointageScreen> {
                   );
                   if (resultat['ok'] == true) {
                     if (ctx.mounted) Navigator.of(ctx).pop();
+                    // 🖥️ La tablette devient une borne : bascule immédiate en
+                    //    mode kiosque, sans attendre un rechargement de config.
+                    if (mounted) {
+                      setState(() {
+                        _kioskMode = true;
+                        _bornePrete = true;
+                      });
+                    }
                     await _chargerTousEmbeddingsEntreprise();
                     await _detecterEmployesNonEnroles();
                   } else {
