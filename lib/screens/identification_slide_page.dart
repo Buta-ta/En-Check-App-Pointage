@@ -14,7 +14,8 @@
 // ═══════════════════════════════════════════════════════════
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show KeyDownEvent, LogicalKeyboardKey;
+import 'package:flutter/services.dart'
+    show KeyDownEvent, LogicalKeyboardKey, FilteringTextInputFormatter;
 import 'package:provider/provider.dart';
 import '../theme/app_theme.dart';
 import '../services/connectivity_service.dart';
@@ -33,6 +34,10 @@ class IdentificationSlidePage extends StatefulWidget {
   final String entrepriseId;
   final String? matriculeInitial;
 
+  /// Préfixe du matricule (ex. ENN) : affiché devant le champ, l'employé
+  /// ne tape que son numéro.
+  final String matriculePrefix;
+
   /// Ligne d'état facultative (ex. pause en cours).
   final Widget? statut;
 
@@ -45,6 +50,7 @@ class IdentificationSlidePage extends StatefulWidget {
     required this.sceneAsset,
     required this.aide,
     required this.entrepriseId,
+    this.matriculePrefix = '',
     this.matriculeInitial,
     this.statut,
     required this.onValide,
@@ -75,10 +81,18 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
 
   Future<bool> _valider() async {
     FocusScope.of(context).unfocus();
-    final identifiant = _identifiantCtrl.text.trim().toUpperCase();
+    final numero = _identifiantCtrl.text.trim().toUpperCase();
     final motDePasse = _motDePasseCtrl.text.trim();
 
-    if (identifiant.isEmpty || motDePasse.length < 4) {
+    // Le champ contient le numéro seul : le préfixe est ajouté ici.
+    String identifiant = numero;
+    if (identifiant.isNotEmpty && !identifiant.contains('-')) {
+      identifiant = widget.matriculePrefix.isEmpty
+          ? identifiant
+          : '${widget.matriculePrefix}-$identifiant';
+    }
+
+    if (numero.isEmpty || motDePasse.length < 4) {
       setState(() => _erreur = "Renseignez l'identifiant et le mot de passe.");
       return false;
     }
@@ -322,6 +336,7 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
             obscure: false,
             couleurTexte: couleurTexte,
             action: TextInputAction.next,
+            chiffresSeuls: true,
           ),
           const SizedBox(height: 12),
           _champ(
@@ -367,6 +382,7 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
     required Color couleurTexte,
     required TextInputAction action,
     void Function(String)? onSubmis,
+    bool chiffresSeuls = false,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -385,6 +401,11 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
           controller: controller,
           obscureText: obscure,
           textInputAction: action,
+          keyboardType: chiffresSeuls ? TextInputType.number : null,
+          inputFormatters: chiffresSeuls
+              ? [FilteringTextInputFormatter.digitsOnly]
+              : null,
+          maxLength: chiffresSeuls ? 6 : null,
           textCapitalization: TextCapitalization.characters,
           onSubmitted: onSubmis,
           style: TextStyle(
@@ -395,6 +416,17 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
             color: couleurTexte,
           ),
           decoration: InputDecoration(
+            counterText: chiffresSeuls ? '' : null,
+            prefixText: chiffresSeuls && widget.matriculePrefix.isNotEmpty
+                ? '${widget.matriculePrefix}-'
+                : null,
+            prefixStyle: TextStyle(
+              fontFamily: 'JetBrainsMono',
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.5,
+              color: couleurTexte,
+            ),
             filled: true,
             fillColor: Theme.of(context).brightness == Brightness.dark
                 ? Colors.white.withOpacity(0.07)

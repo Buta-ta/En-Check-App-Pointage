@@ -1967,16 +1967,15 @@ class _PointageScreenState extends State<PointageScreen> {
                         margeFlexible: !scrollDeSecours,
                       ),
                     );
-                    if (scrollDeSecours) {
-                      return SingleChildScrollView(
-                        physics: const ClampingScrollPhysics(),
-                        child: contenu,
-                      );
-                    }
                     return Center(
                       child: ConstrainedBox(
                         constraints: const BoxConstraints(maxWidth: 620),
-                        child: contenu,
+                        child: scrollDeSecours
+                            ? SingleChildScrollView(
+                                physics: const ClampingScrollPhysics(),
+                                child: contenu,
+                              )
+                            : contenu,
                       ),
                     );
                   },
@@ -2012,7 +2011,7 @@ class _PointageScreenState extends State<PointageScreen> {
               ],
               _buildChipsNoms(),
               const SizedBox(height: 12),
-              _buildCartePause(),
+              _buildBoutonPauseVisible(),
               const SizedBox(height: 12),
               _buildCarteMatricule(),
               if (_moduleQRActif || _moduleRecoFacialeActif || _kioskMode) ...[
@@ -3106,11 +3105,11 @@ class _PointageScreenState extends State<PointageScreen> {
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 colors: [
-                  Colors.black.withOpacity(0.25),
-                  Colors.transparent,
-                  Theme.of(context).scaffoldBackgroundColor.withOpacity(0.9),
+                  Colors.black.withOpacity(0.38),
+                  Colors.black.withOpacity(0.06),
+                  Colors.black.withOpacity(0.58),
                 ],
-                stops: const [0.0, 0.55, 1.0],
+                stops: const [0.0, 0.45, 1.0],
               ),
             ),
           ),
@@ -3210,17 +3209,30 @@ class _PointageScreenState extends State<PointageScreen> {
                         children: [
                           const Text('Pointage',
                               style: TextStyle(
-                                  fontSize: 23,
+                                  fontSize: 26,
                                   fontWeight: FontWeight.w800,
-                                  color: EnCheckColors.blanc)),
+                                  color: EnCheckColors.blanc,
+                                  shadows: [
+                                    Shadow(
+                                        color: Colors.black54,
+                                        blurRadius: 8,
+                                        offset: Offset(0, 2)),
+                                  ])),
                           if (nomEntreprise.isNotEmpty)
                             Text(nomEntreprise,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
-                                    fontSize: 11,
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w600,
                                     color:
-                                        EnCheckColors.blanc.withOpacity(0.85))),
+                                        EnCheckColors.blanc.withOpacity(0.95),
+                                    shadows: const [
+                                      Shadow(
+                                          color: Colors.black54,
+                                          blurRadius: 8,
+                                          offset: Offset(0, 2)),
+                                    ])),
                         ],
                       ),
                     ),
@@ -3233,10 +3245,16 @@ class _PointageScreenState extends State<PointageScreen> {
                     Text(heureActuelle,
                         style: const TextStyle(
                             fontFamily: 'JetBrainsMono',
-                            fontSize: 34,
+                            fontSize: 38,
                             fontWeight: FontWeight.w700,
                             letterSpacing: 2,
-                            color: EnCheckColors.orDoux)),
+                            color: EnCheckColors.orDoux,
+                            shadows: [
+                              Shadow(
+                                  color: Colors.black54,
+                                  blurRadius: 10,
+                                  offset: Offset(0, 2)),
+                            ])),
                     const SizedBox(width: 10),
                     Padding(
                       padding: const EdgeInsets.only(bottom: 5),
@@ -3325,99 +3343,26 @@ class _PointageScreenState extends State<PointageScreen> {
     );
   }
 
-  /// Carte PAUSE — ouvre la PAGE PAUSE (identifiant + mot de passe + slide).
-  Widget _buildCartePause() {
-    final pauseEnCours = _pausesOuvertes.isNotEmpty;
-    final couleurTexte = Theme.of(context).textTheme.bodyLarge?.color ??
-        EnCheckColors.brunProfond;
-    String statut = 'Aucune pause en cours';
-    if (pauseEnCours) {
-      final p = _pausesOuvertes.first;
-      final nom = (p['nom'] ?? 'Employe').toString();
-      final depuis = p['debut'] == null
-          ? ''
-          : PauseService.heureCourteDe(p['debut'] as String);
-      statut = '$nom - en pause depuis $depuis';
-      if (_pausesOuvertes.length > 1) {
-        statut += ' (+${_pausesOuvertes.length - 1} autre)';
-      }
-    }
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withOpacity(0.07),
-              blurRadius: 12,
-              offset: const Offset(0, 4)),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 42,
-                height: 42,
-                decoration: const BoxDecoration(
-                    color: EnCheckColors.orDoux, shape: BoxShape.circle),
-                child: const Icon(Icons.pause,
-                    color: EnCheckColors.brunProfond, size: 22),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('PAUSE',
-                        style: TextStyle(
-                            fontFamily: 'JetBrainsMono',
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 2,
-                            color: couleurTexte)),
-                    const SizedBox(height: 2),
-                    Text(statut,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            fontSize: 12.5,
-                            color: pauseEnCours
-                                ? EnCheckColors.alerte
-                                : EnCheckColors.gris,
-                            fontWeight: FontWeight.w600)),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(
-                child: _boutonScene(
-                  label: 'Démarrer la pause',
-                  icon: Icons.pause,
-                  rempli: false,
-                  onTap: _ouvrirPagePause,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _boutonScene(
-                  label: 'Reprendre le travail',
-                  icon: Icons.play_arrow,
-                  rempli: true,
-                  onTap: _ouvrirPagePause,
-                ),
-              ),
-            ],
-          ),
-        ],
+  /// Bouton PAUSE bien visible en haut de la page (la carte pause a ete
+  /// retiree de la page principale) : un seul bouton, vers la page Pause.
+  Widget _buildBoutonPauseVisible() {
+    return SizedBox(
+      height: 56,
+      child: ElevatedButton.icon(
+        onPressed: _ouvrirPagePause,
+        icon: const Icon(Icons.pause_circle, size: 22),
+        label: const Text(
+          'Pause / Reprendre',
+          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+        ),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: EnCheckColors.brunProfond,
+          foregroundColor: EnCheckColors.blanc,
+          elevation: 0,
+          side: const BorderSide(color: EnCheckColors.orDoux, width: 1.4),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16)),
+        ),
       ),
     );
   }
@@ -3472,6 +3417,7 @@ class _PointageScreenState extends State<PointageScreen> {
     final couleurTexte = Theme.of(context).textTheme.bodyLarge?.color ??
         EnCheckColors.brunProfond;
     final estArrivee = _sensSouhaite == 'arrivee';
+    final prefix = entrepriseSelectionnee?['matricule_prefix']?.toString() ?? '';
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
@@ -3505,7 +3451,9 @@ class _PointageScreenState extends State<PointageScreen> {
           TextField(
             controller: _matriculeNouveauCtrl,
             textAlign: TextAlign.center,
-            textCapitalization: TextCapitalization.characters,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            maxLength: 6,
             style: TextStyle(
                 fontFamily: 'JetBrainsMono',
                 fontSize: 26,
@@ -3513,7 +3461,15 @@ class _PointageScreenState extends State<PointageScreen> {
                 letterSpacing: 3,
                 color: couleurTexte),
             decoration: InputDecoration(
-              hintText: 'ENN-0002',
+              counterText: '',
+              prefixText: prefix.isEmpty ? null : '$prefix-',
+              prefixStyle: TextStyle(
+                  fontFamily: 'JetBrainsMono',
+                  fontSize: 26,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 3,
+                  color: couleurTexte),
+              hintText: '0002',
               hintStyle: TextStyle(
                   fontFamily: 'JetBrainsMono',
                   fontSize: 22,
@@ -3672,6 +3628,8 @@ class _PointageScreenState extends State<PointageScreen> {
           sceneAsset: 'assets/scenes/scene_pause.jpg',
           aide: 'Pour démarrer ou reprendre une pause',
           entrepriseId: entrepriseId,
+          matriculePrefix:
+              entrepriseSelectionnee?['matricule_prefix']?.toString() ?? '',
           statut: statut,
           onValide: (employe) async {
             final employeId = employe['id'] as String?;
@@ -3723,9 +3681,10 @@ class _PointageScreenState extends State<PointageScreen> {
           sceneAsset: 'assets/scenes/scene_pointage.jpg',
           aide: 'Validez votre pointage avec le curseur',
           entrepriseId: entrepriseId,
-          matriculeInitial: _matriculeNouveauCtrl.text.trim().isEmpty
-              ? null
-              : _matriculeNouveauCtrl.text.trim(),
+          matriculePrefix: entrepriseSelectionnee?['matricule_prefix']
+                  ?.toString() ??
+              '',
+          matriculeInitial: _matriculeNouveauCtrl.text.trim(),
           onValide: (employe) async {
             _extraireSchedule(employe);
             final estHorsLigne = !ConnectivityService.isOnline;
