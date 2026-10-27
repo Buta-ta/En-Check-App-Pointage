@@ -2001,12 +2001,16 @@ class _PointageScreenState extends State<PointageScreen> {
                       _construireLigneModePause(),
                       const SizedBox(height: 12),
                     ],
-                    // 🖥️ CONTRAT ÉTAPE 3 — le provisionnement d'une borne doit
-                    //    rester joignable sur une tablette vierge : sans session
-                    //    employé, sans module particulier. Le bandeau est donc
-                    //    affiché TOUJOURS, jamais seulement en mode kiosque.
-                    _buildBandeauBorne(),
-                    const SizedBox(height: 12),
+                    // 🖥️ CONTRAT ÉTAPE 3 — le provisionnement d'une borne reste
+                    //    joignable sans session employé. Le bandeau s'affiche si
+                    //    l'entreprise utilise la reco faciale ou le mode kiosque,
+                    //    ou si cette tablette a déjà un bail de borne — et
+                    //    SEULEMENT dans ces cas : les entreprises en pointage
+                    //    PIN/QR pur retrouvent leur écran d'avant, sans bruit.
+                    if (_moduleRecoFacialeActif || _kioskMode) ...[
+                      _buildBandeauBorne(),
+                      const SizedBox(height: 12),
+                    ],
                     _buildZonePointage(),
                     const SizedBox(height: 30),
                     _buildSeparateur(),
