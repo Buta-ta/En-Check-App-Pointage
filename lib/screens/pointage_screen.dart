@@ -14,7 +14,7 @@ import '../widgets/logo_empreinte.dart';
 import '../widgets/qr_scanner_widget.dart';
 import '../widgets/qr_photo_scanner_widget.dart';
 import '../widgets/pin_photo_widget.dart';
-import '../widgets/web_camera_widget.dart';
+import '../widgets/web_camera_widget_provider.dart';
 import '../services/supabase_service.dart';
 import '../services/borne_service.dart';
 import '../services/local_database.dart';

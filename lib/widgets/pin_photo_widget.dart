@@ -5,7 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import '../theme/app_theme.dart';
-import 'web_camera_widget.dart';
+import 'web_camera_widget_provider.dart';
 import 'dart:async';
 
 // Import conditionnel caméra mobile
