@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/app_theme.dart';
 import '../services/supabase_service.dart';
+import '../widgets/bandes_motifs.dart';
 import '../widgets/logo_empreinte.dart';
 import 'pointage_screen.dart';
 
@@ -119,7 +120,11 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                   ),
                 ),
 
-                const SizedBox(height: 40),
+                // 🎨 Refonte design : frise Adinkra (Ghana) — l'univers
+                //    « temps et travail » sous le titre de bienvenue.
+                const SizedBox(height: 22),
+                const BandeMotif.adinkra(height: 42),
+                const SizedBox(height: 28),
 
                 const Text(
                   'Veuillez entrer le code de votre entreprise pour configurer l\'appareil.',

@@ -1,0 +1,165 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  COMPILATION DE L'APPLICATION ANDROID (APK)
+# ═══════════════════════════════════════════════════════════════════════════
+#
+#  CE QUE FAIT CE FICHIER
+#  ----------------------
+#  Compile l'application en APK Android (pour l'installer sur une tablette)
+#  et le publie en téléchargement direct sur une Release GitHub nommée
+#  « apk-latest » :
+#
+#      https://github.com/Buta-ta/En-Check-App-Pointage/releases/download/apk-latest/en-check-pointage.apk
+#
+#  QUAND IL SE DÉCLENCHE
+#  ---------------------
+#  • À la main : onglet « Actions » → « Compiler l'application Android » →
+#    « Run workflow » (utile après une mise à jour du code).
+#  • Sur une Pull Request portant l'étiquette « apk » — pratique pour livrer
+#    un APK de recette sans rien fusionner.
+#
+#  POURQUOI UN APK EN PLUS DU SITE WEB ?
+#  ------------------------------------
+#  La reconnaissance faciale (ML Kit + TFLite) ne fonctionne que dans
+#  l'application native Android — pas dans un navigateur/PWA. La recette
+#  visage (enrôlement, pointage facial) exige donc cet APK.
+#
+#  ⚠️ L'APK est signé avec la clé de débogage : parfait pour la recette,
+#  mais il faudra une vraie clé de signature pour une mise en production.
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+name: Compiler l'application Android
+
+on:
+  # Déclenchement à la main depuis l'onglet « Actions ».
+  workflow_dispatch:
+
+  # Déclenchement automatique sur les Pull Requests étiquetées « apk ».
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+# Nécessaire pour créer la Release et y déposer le fichier.
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-24.04
+
+    # Une PR ne compile l'APK QUE si elle porte l'étiquette « apk » :
+    # les autres PR gardent uniquement le contrôle de compilation web,
+    # sans dépenser le temps de compilation Android.
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'apk')
+
+    steps:
+      # ── 1. Récupérer le code ─────────────────────────────────────────────
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+
+      # ── 2. Java 17 (exigé par les outils Android) ────────────────────────
+      - name: Installer Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # ── 3. Installer Flutter (MÊME version que le build web) ────────────
+      - name: Installer Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.44.9'
+          cache: true
+
+      - name: Vérifier l'installation
+        run: flutter --version
+
+      # ── 4. Télécharger les bibliothèques ────────────────────────────────
+      - name: Télécharger les bibliothèques
+        run: flutter pub get
+
+      # ── 5. Compiler l'APK ───────────────────────────────────────────────
+      # Le dossier android/ du projet demande le NDK 27 : on s'assure qu'il
+      # est présent (déjà installé sur la plupart des machines GitHub).
+      # En cas d'échec, les dernières lignes du journal sont remontées dans
+      # les annotations (« ::error:: ») : c'est ainsi qu'on lit l'erreur
+      # depuis l'extérieur, quand le journal complet n'est pas consultable.
+      - name: Compiler l'APK Android
+        run: |
+          if [ -n "${ANDROID_HOME:-}" ]; then
+            echo "NDK présents sur la machine :"
+            ls "$ANDROID_HOME/ndk" 2>/dev/null || echo "(aucun)"
+            if [ ! -d "$ANDROID_HOME/ndk/27.0.12077973" ]; then
+              echo "Installation du NDK 27.0.12077973…"
+              (yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.0.12077973") || echo "sdkmanager n'a pas pu installer le NDK : on laisse Gradle gérer."
+            fi
+          fi
+          set +e
+          flutter build apk --release 2>&1 | tee /tmp/build-apk.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            echo "::error::Compilation APK échouée (code $status) — diagnostic :"
+            sed 's/\x1b\[[0-9;]*[mK]//g' /tmp/build-apk.log | sed 's/^\[[^]]*\] //' > /tmp/build-apk-propre.log
+            {
+              grep -n "What went wrong" -A 12 /tmp/build-apk-propre.log | head -n 16
+              grep -n "Error:" /tmp/build-apk-propre.log | head -n 12
+              tail -n 15 /tmp/build-apk-propre.log
+            } | sed 's/%/%25/g' | while IFS= read -r line; do
+              if [ -n "$line" ]; then echo "::error::$line"; fi
+            done
+            exit "$status"
+          fi
+
+      # ── 6. Renommer le fichier pour un lien de téléchargement stable ────
+      - name: Renommer l'APK
+        run: cp build/app/outputs/flutter-apk/app-release.apk en-check-pointage.apk
+
+      # ── 7. Publier en téléchargement direct ─────────────────────────────
+      # La Release « apk-latest » sert de comptoir permanent : le lien ne
+      # change jamais, chaque nouvelle compilation remplace l'ancien fichier.
+      # En cas d'échec, le message réel est remonté dans les annotations.
+      - name: Publier l'APK (Release apk-latest)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set +e
+          out=$({
+            if ! gh release view apk-latest >/dev/null 2>&1; then
+              gh release create apk-latest \
+                --target "${PR_HEAD_SHA:-$GITHUB_SHA}" \
+                --title "APK Android — En-Check Pointage" \
+                --notes "APK de l'application En-Check Pointage (compilation automatique). Téléchargez en-check-pointage.apk, puis installez-le sur la tablette Android (autorisez les sources inconnues). Signé avec la clé de débogage : suffisant pour la recette, pas pour la production."
+            fi
+            gh release upload apk-latest en-check-pointage.apk --clobber
+          } 2>&1)
+          status=$?
+          set -e
+          echo "$out"
+          if [ "$status" -ne 0 ]; then
+            echo "::error::Publication de l'APK échouée (code $status) :"
+            echo "$out" | tail -n 15 | sed 's/%/%25/g' | while IFS= read -r line; do
+              if [ -n "$line" ]; then echo "::error::$line"; fi
+            done
+            exit "$status"
+          fi
+          echo "::notice::APK publié : https://github.com/${{ github.repository }}/releases/download/apk-latest/en-check-pointage.apk"
+
+      # ── 7bis. Secours : l'APK reste téléchargeable depuis la course ─────
+      - name: Téléverser l'APK en artefact (secours)
+        uses: actions/upload-artifact@v4
+        with:
+          name: en-check-pointage-apk
+          path: en-check-pointage.apk
+
+      # ── 8. Compte rendu ─────────────────────────────────────────────────
+      - name: Compte rendu
+        run: |
+          echo "### APK compilé" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Fichier | Poids |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| \`en-check-pointage.apk\` | $(du -h en-check-pointage.apk | cut -f1) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Téléchargement :** https://github.com/${{ github.repository }}/releases/download/apk-latest/en-check-pointage.apk" >> "$GITHUB_STEP_SUMMARY"

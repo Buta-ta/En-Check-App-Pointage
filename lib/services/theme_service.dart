@@ -13,7 +13,10 @@ class ThemeService extends ChangeNotifier {
 
   Future<void> _loadTheme() async {
     final prefs = await SharedPreferences.getInstance();
-    _isDarkMode = prefs.getBool(_themeKey) ?? false;
+    // 🎨 Refonte design : le mode sombre « spotlight » est le visage par
+    //    défaut du kiosque (fond profond + or). Le bouton ☀️/🌙 bascule
+    //    toujours, et le choix est mémorisé pour la prochaine fois.
+    _isDarkMode = prefs.getBool(_themeKey) ?? true;
     notifyListeners();
   }
 

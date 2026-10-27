@@ -54,6 +54,18 @@ flutter:
     - assets/icon/icon.png
     - assets/models/          # ← Dossier pour le modèle IA
 
+  # 🎨 Refonte design : chiffres en JetBrains Mono (horloge, matricule,
+  #    heures de pointage) — le même « compteur » que l'app En-Check Admin.
+  fonts:
+    - family: JetBrainsMono
+      fonts:
+        - asset: assets/fonts/JetBrainsMono-Light.ttf
+          weight: 300
+        - asset: assets/fonts/JetBrainsMono-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/JetBrainsMono-Bold.ttf
+          weight: 700
+
 flutter_launcher_icons:
   android: "launcher_icon"
   ios: true
