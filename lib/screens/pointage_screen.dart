@@ -35,6 +35,9 @@ import '../services/heure_pointage.dart';   // ⭐ LIVRAISON 21
 import '../services/pause_service.dart'; // ⏸ VISIBILITÉ DES PAUSES — le bouton du haut de l'écran
 import '../services/trusted_punch_service.dart';   // ⭐ LIVRAISON 22
 import 'historique_screen.dart';
+import 'tutoriel_screen.dart';
+import '../services/checklist_service.dart';
+import '../widgets/checklist_demarrage.dart';
 import 'face_enrollment_screen.dart';
 import 'face_pointage_screen.dart';
 import '../services/face_recognition_service_provider.dart';
@@ -156,6 +159,19 @@ class _PointageScreenState extends State<PointageScreen> {
     _timer = Timer.periodic(
         const Duration(seconds: 1), (timer) => _mettreAJourHeure());
     _initialiserApp();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _verifierTutoriel());
+  }
+
+  /// 🧭 Première ouverture : le tutoriel joue une seule fois par appareil.
+  Future<void> _verifierTutoriel() async {
+    if (await ChecklistService.tutorielDejaVu()) return;
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => const TutorielScreen(),
+      ),
+    );
   }
 
   @override
@@ -172,6 +188,7 @@ class _PointageScreenState extends State<PointageScreen> {
 
   Future<void> _initialiserApp() async {
     await MotifService.charger();
+    await ChecklistService.charger();
     await _chargerModulesLocaux();
     await _chargerEntrepriseLocale();
 
@@ -1367,6 +1384,8 @@ class _PointageScreenState extends State<PointageScreen> {
   // ═══════════════════════════════════════════════════════════
 
   void _afficherSuccesFacial(Map<String, dynamic> result) {
+    // 🧭 Checklist : le premier pointage est fait.
+    ChecklistService.marquerPremierPointage();
     final estEntree = result['check_type'] == 'in';
     final emp = result['employee'] as Map<String, dynamic>?;
     final nomAffiche = emp != null
@@ -2020,11 +2039,19 @@ class _PointageScreenState extends State<PointageScreen> {
     ThemeService themeService, {
     required bool margeFlexible,
   }) {
-    return Column(
+    return ListenableBuilder(
+      listenable: Listenable.merge(
+          [ChecklistService.motifChoisi, ChecklistService.premierPointage]),
+      builder: (context, _) {
+        // 🧭 Checklist visible tant qu'elle n'est pas terminée.
+        // Le hero rétrécit d'autant : le « zéro scroll » à 780 px est préservé.
+        final checklistVisible = !ChecklistService.complete;
+        return Column(
       mainAxisSize: margeFlexible ? MainAxisSize.max : MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _buildScenePointage(estEnLigne, themeService),
+        _buildScenePointage(estEnLigne, themeService,
+            hauteur: checklistVisible ? 162 : 250),
         ValueListenableBuilder<MotifCulturel>(
           valueListenable: MotifService.actif,
           builder: (context, motif, _) => FriseMotif(motif: motif, hauteur: 10),
@@ -2037,6 +2064,12 @@ class _PointageScreenState extends State<PointageScreen> {
               const SizedBox(height: 18),
               _buildSalutation(),
               const SizedBox(height: 18),
+              // 🧭 Checklist « 3 étapes pour démarrer » — disparaît une fois
+              // terminée (motif choisi + premier pointage).
+              if (checklistVisible) ...[
+                const ChecklistDemarrage(),
+                const SizedBox(height: 12),
+              ],
               // Le rappel d'activation disparait des que la borne est
               // deja autorisee (bail valide).
               if ((_moduleRecoFacialeActif || _kioskMode) && !_bornePrete) ...[
@@ -2071,6 +2104,8 @@ class _PointageScreenState extends State<PointageScreen> {
           ),
         ),
       ],
+    );
+      },
     );
   }
   // ═══════════════════════════════════════════════════════════
@@ -3114,10 +3149,11 @@ class _PointageScreenState extends State<PointageScreen> {
 
   /// SCENE DU HAUT : la photo de la jeune femme en train de pointer
   /// (l'image actuelle de l'app), l'identite et l'heure par-dessus.
-  Widget _buildScenePointage(bool estEnLigne, ThemeService themeService) {
+  Widget _buildScenePointage(bool estEnLigne, ThemeService themeService,
+      {double hauteur = 250}) {
     final nomEntreprise = entrepriseSelectionnee?['name']?.toString() ?? '';
     return SizedBox(
-      height: 250,
+      height: hauteur,
       child: Stack(
         fit: StackFit.expand,
         children: [
@@ -3374,7 +3410,8 @@ class _PointageScreenState extends State<PointageScreen> {
       if (nom.isNotEmpty) chips.add(_pastilleNom(nom, EnCheckColors.succes));
     }
 
-    String statut = 'Aucun pointage ni pause en cours';
+    String statut =
+        'Votre journée apparaîtra ici après votre premier pointage';
     Color statutCouleur = EnCheckColors.gris;
     if (_pausesOuvertes.isNotEmpty) {
       final p = _pausesOuvertes.first;
@@ -4876,6 +4913,8 @@ class _PointageScreenState extends State<PointageScreen> {
         /// sur le serveur, il attend dans la file d'attente locale).
         String? attendanceId,
       }) {
+    // 🧭 Checklist : le premier pointage est fait.
+    ChecklistService.marquerPremierPointage();
     final estEntree = type == 'in';
     final horaires = _getEmployeeScheduleInfo();
 

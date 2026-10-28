@@ -14,6 +14,8 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'checklist_service.dart';
+
 class MotifCulturel {
   final String id;
   final String nom;
@@ -125,6 +127,8 @@ class MotifService {
   /// Enregistre le motif choisi par l'entreprise.
   static Future<void> enregistrer(MotifCulturel motif) async {
     actif.value = motif;
+    // 🧭 Checklist de démarrage : le motif culturel est choisi.
+    ChecklistService.marquerMotifChoisi();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_cle, motif.id);
   }
