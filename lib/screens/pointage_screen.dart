@@ -2034,6 +2034,11 @@ class _PointageScreenState extends State<PointageScreen> {
     );
   }
 
+  /// [child] etendu sur la hauteur restante si [etendre] : un Expanded dans un
+  /// layout non borne (mode scroll) planterait, on le rend alors tel quel.
+  Widget _etenduSi(bool etendre, Widget child) =>
+      etendre ? Expanded(child: child) : child;
+
   Widget _colonnePrincipale(
     bool estEnLigne,
     ThemeService themeService, {
@@ -2056,7 +2061,14 @@ class _PointageScreenState extends State<PointageScreen> {
           valueListenable: MotifService.actif,
           builder: (context, motif, _) => FriseMotif(motif: motif, hauteur: 10),
         ),
-        Padding(
+        // La zone centrale occupe la hauteur restante quand le cadre est fixe :
+        // le Spacer interne fonctionne alors VRAIMENT (sinon il s'écrase et le
+        // contenu flotte au centre : la photo descend et laisse un vide en haut
+        // dès qu'il reste de la place, typiquement avec un seul mode de
+        // pointage donc moins de cartes).
+        _etenduSi(
+          margeFlexible,
+          Padding(
           padding: const EdgeInsets.symmetric(horizontal: 22),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2102,6 +2114,7 @@ class _PointageScreenState extends State<PointageScreen> {
               const SizedBox(height: 6),
             ],
           ),
+        ),
         ),
       ],
     );
