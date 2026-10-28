@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show KeyDownEvent, LogicalKeyboardKey;
 import '../theme/app_theme.dart';
 import '../services/motif_service.dart';
+import '../screens/tutoriel_screen.dart';
 
 Future<void> ouvrirPanneauMotif(BuildContext context) async {
   MotifCulturel choix = MotifService.actif.value;
@@ -112,6 +113,26 @@ Future<void> ouvrirPanneauMotif(BuildContext context) async {
                           fontWeight: FontWeight.w700,
                           letterSpacing: 0.6,
                         ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  TextButton(
+                    onPressed: () {
+                      Navigator.pop(sheetContext);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const TutorielScreen(relecture: true),
+                        ),
+                      );
+                    },
+                    child: const Text(
+                      'Revoir le guide',
+                      style: TextStyle(
+                        fontSize: 13.5,
+                        color: EnCheckColors.gris,
+                        decoration: TextDecoration.underline,
                       ),
                     ),
                   ),
