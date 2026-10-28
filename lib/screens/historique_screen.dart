@@ -9,6 +9,7 @@ import '../services/connectivity_service.dart';
 import '../services/heure_pointage.dart'; // ⭐ LIVRAISON 19 — conversion d'heure
 import '../services/pause_service.dart'; // ⏸ LOT D — les pauses
 import '../services/geofencing_service.dart'; // ⏸ LOT D — mention « Hors site »
+import '../services/motif_service.dart';
 
 class HistoriqueScreen extends StatefulWidget {
   final Map<String, dynamic> employee;
@@ -631,18 +632,31 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
           // ═══════════════════════════════════════════
           // 👤 EN-TÊTE EMPLOYÉ AVEC PHOTO
           // ═══════════════════════════════════════════
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(20),
-            decoration: const BoxDecoration(
-              color: EnCheckColors.brunProfond,
-              borderRadius: BorderRadius.only(
-                bottomLeft: Radius.circular(30),
-                bottomRight: Radius.circular(30),
+          ListenableBuilder(
+            listenable: MotifService.actif,
+            builder: (context, _) => Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(20),
+              // 🧵 Décor : le motif culturel choisi, derrière la section
+              // profil (photo, nom, matricule, métier/département).
+              decoration: BoxDecoration(
+                color: EnCheckColors.brunProfond,
+                borderRadius: const BorderRadius.only(
+                  bottomLeft: Radius.circular(30),
+                  bottomRight: Radius.circular(30),
+                ),
+                image: DecorationImage(
+                  image: AssetImage(MotifService.actif.value.asset),
+                  fit: BoxFit.fitWidth,
+                  repeat: ImageRepeat.repeatY,
+                  colorFilter: const ColorFilter.mode(
+                    Color(0x8C2A1B12),
+                    BlendMode.srcATop,
+                  ),
+                ),
               ),
-            ),
-            child: Column(
-              children: [
+              child: Column(
+                children: [
                 _construireAvatar(),
                 const SizedBox(height: 12),
 
@@ -729,6 +743,7 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
                     ),
                   ),
               ],
+            ),
             ),
           ),
 
