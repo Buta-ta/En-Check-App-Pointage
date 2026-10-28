@@ -13,7 +13,9 @@
 #  QUAND IL SE DÉCLENCHE
 #  ---------------------
 #  • À la main : onglet « Actions » → « Compiler l'application Android » →
-#    « Run workflow » (utile après une mise à jour du code).
+#    « Run workflow ».
+#  • Automatiquement à chaque fusion sur la branche principale « main »,
+#    pour que l'APK suive toujours la dernière mise à jour du code.
 #  • Sur une Pull Request portant l'étiquette « apk » — pratique pour livrer
 #    un APK de recette sans rien fusionner.
 #
@@ -34,6 +36,11 @@ on:
   # Déclenchement à la main depuis l'onglet « Actions ».
   workflow_dispatch:
 
+  # Déclenchement automatique à chaque mise à jour de la branche principale
+  # (après chaque fusion de Pull Request) : l'APK reste ainsi toujours à jour.
+  push:
+    branches: [main]
+
   # Déclenchement automatique sur les Pull Requests étiquetées « apk ».
   pull_request:
     types: [opened, synchronize, reopened, labeled]
@@ -48,8 +55,9 @@ jobs:
 
     # Une PR ne compile l'APK QUE si elle porte l'étiquette « apk » :
     # les autres PR gardent uniquement le contrôle de compilation web,
-    # sans dépenser le temps de compilation Android.
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'apk')
+    # sans dépenser le temps de compilation Android. En revanche, chaque
+    # fusion sur « main » et chaque lancement manuel compilent toujours.
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'apk')
 
     steps:
       # ── 1. Récupérer le code ─────────────────────────────────────────────
