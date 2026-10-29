@@ -124,7 +124,22 @@ jobs:
       - name: Compiler l'application web
         run: |
           rm -rf build/web
-          flutter build web --release
+          set +e
+          flutter build web --release 2>&1 | tee /tmp/build-web.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            echo "::error::Compilation web échouée (code $status) — diagnostic :"
+            sed 's/\x1b\[[0-9;]*[mK]//g' /tmp/build-web.log | sed 's/^\[[^]]*\] //' > /tmp/build-web-propre.log
+            {
+              grep -ni "error" /tmp/build-web-propre.log | head -n 16
+              grep -n "lib/" /tmp/build-web-propre.log | head -n 16
+              tail -n 25 /tmp/build-web-propre.log
+            } | sed 's/%/%25/g' | while IFS= read -r line; do
+              if [ -n "$line" ]; then echo "::error::$line"; fi
+            done
+            exit "$status"
+          fi
 
       # ── 5. Enregistrer le résultat ──────────────────────────────────────
       # Deux lettres à comprendre sur la ligne « git add » :
