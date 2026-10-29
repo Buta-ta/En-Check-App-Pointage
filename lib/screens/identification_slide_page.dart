@@ -25,6 +25,7 @@ import '../services/theme_service.dart';
 import '../widgets/frise_motif.dart';
 import '../widgets/logo_empreinte.dart';
 import '../widgets/slide_valider.dart';
+import '../widgets/sans_etirement.dart';
 
 class IdentificationSlidePage extends StatefulWidget {
   final String titre;
@@ -131,6 +132,11 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
     final themeService = Provider.of<ThemeService>(context);
     final couleurTexte = Theme.of(context).textTheme.bodyLarge?.color ??
         EnCheckColors.brunProfond;
+    // 📱 TÉLÉPHONE (fiche « Affichage mobile ») : petit appareil = largeur
+    // étroite OU fenêtre très courte (paysage).
+    final tailleFenetre = MediaQuery.sizeOf(context);
+    final bool estTelephone =
+        tailleFenetre.width < 620 || tailleFenetre.height < 520;
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -145,8 +151,19 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
           return KeyEventResult.ignored;
         },
         child: SafeArea(
+          // En téléphone, la photo passe derrière la barre d'état (le texte
+          // reste sous l'encoche : zones réservées respectées).
+          top: !estTelephone,
           child: LayoutBuilder(
             builder: (context, constraints) {
+              // 📱 TÉLÉPHONE : photo pleine largeur, champs toujours
+              // utilisables avec le clavier.
+              if (estTelephone) {
+                return SansEtirement(
+                  child: _corpsTelephone(context, themeService, couleurTexte,
+                      constraints, MediaQuery.of(context)),
+                );
+              }
               final scrollDeSecours = constraints.maxHeight < 700 ||
                   constraints.maxWidth < 620;
               final contenu = Center(
@@ -210,9 +227,121 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
     );
   }
 
-  Widget _buildScene(BuildContext context, ThemeService themeService) {
+  // ═══════════════════════════════════════════════════════════
+  // 📱 CORPS EN TÉLÉPHONE — fiche « Affichage mobile »
+  // ═══════════════════════════════════════════════════════════
+  //
+  //  Photo pleine largeur (derrière la barre d'état), tout tient sans
+  //  défilement, et les champs + « Glisser pour valider » restent
+  //  utilisables quand le clavier apparaît : la photo et les éléments
+  //  secondaires se retirent le temps de la frappe.
+  // ═══════════════════════════════════════════════════════════
+
+  Widget _corpsTelephone(
+    BuildContext context,
+    ThemeService themeService,
+    Color couleurTexte,
+    BoxConstraints constraints,
+    MediaQueryData media,
+  ) {
+    final clavierOuvert = media.viewInsets.bottom > 0;
+    final double echelleTexte = media.textScaler.scale(1.0);
+    final double hauteurTotale = constraints.maxHeight;
+    final double hauteurScene = clavierOuvert
+        ? 0.0
+        : (hauteurTotale * (echelleTexte > 1.3 ? 0.15 : 0.21))
+            .clamp(0.0, 150.0)
+            .toDouble();
+    final bool tropPetit = hauteurTotale < 560 || echelleTexte > 1.45;
+
+    final carte = Padding(
+      padding: EdgeInsets.symmetric(
+          horizontal: 16, vertical: clavierOuvert ? 6 : 12),
+      child: _buildCarteIdentification(context, couleurTexte,
+          paddingV: clavierOuvert ? 12 : 20),
+    );
+    final pied = Text(
+      'v1.0.0 • Chiffrement AES-256 • Serveur UE',
+      textAlign: TextAlign.center,
+      style: TextStyle(
+        fontFamily: 'JetBrainsMono',
+        fontSize: 9,
+        color: EnCheckColors.gris.withOpacity(0.9),
+      ),
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (!clavierOuvert && hauteurScene > 0)
+          _buildScene(context, themeService,
+              hauteur: hauteurScene, margeHaut: media.viewPadding.top),
+        if (!clavierOuvert)
+          ValueListenableBuilder<MotifCulturel>(
+            valueListenable: MotifService.actif,
+            builder: (context, motif, _) =>
+                FriseMotif(motif: motif, hauteur: 8),
+          ),
+        // Ne défile QUE si la configuration ne permet pas tout d'afficher
+        // d'un coup (jamais en silence : la bande « faites défiler » le dit).
+        Expanded(
+          child: SingleChildScrollView(
+            physics: const ClampingScrollPhysics(),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [carte],
+            ),
+          ),
+        ),
+        if (tropPetit && !clavierOuvert) _bandeDefilementIdent(),
+        if (!clavierOuvert) ...[
+          Center(
+            child: TextButton.icon(
+              onPressed: () => Navigator.pop(context),
+              icon: const Icon(Icons.arrow_back,
+                  size: 16, color: EnCheckColors.gris),
+              label: const Text(
+                'Retour',
+                style: TextStyle(fontSize: 13, color: EnCheckColors.gris),
+              ),
+            ),
+          ),
+          pied,
+          const SizedBox(height: 10),
+        ],
+      ],
+    );
+  }
+
+  Widget _bandeDefilementIdent() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: EnCheckColors.terreChaude.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: const Row(
+        children: [
+          Icon(Icons.unfold_more, size: 14, color: EnCheckColors.terreChaude),
+          SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              "Contenu plus grand que l'écran : faites défiler.",
+              style:
+                  TextStyle(fontSize: 11.5, color: EnCheckColors.brunProfond),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildScene(BuildContext context, ThemeService themeService,
+      {double hauteur = 195, double margeHaut = 0}) {
     return SizedBox(
-      height: 195,
+      height: hauteur,
       child: Stack(
         fit: StackFit.expand,
         children: [
@@ -237,7 +366,7 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
             ),
           ),
           Positioned(
-            top: 12,
+            top: 12 + margeHaut,
             left: 14,
             right: 14,
             child: Row(
@@ -297,9 +426,10 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
     );
   }
 
-  Widget _buildCarteIdentification(BuildContext context, Color couleurTexte) {
+  Widget _buildCarteIdentification(BuildContext context, Color couleurTexte,
+      {double paddingV = 20}) {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: EdgeInsets.symmetric(horizontal: 20, vertical: paddingV),
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(20),

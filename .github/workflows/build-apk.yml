@@ -5,8 +5,16 @@
 #  CE QUE FAIT CE FICHIER
 #  ----------------------
 #  Compile l'application en APK Android (pour l'installer sur une tablette)
-#  et le publie en téléchargement direct sur une Release GitHub nommée
-#  « apk-latest » :
+#  et le publie en téléchargement direct sur une Release GitHub :
+#
+#  • Compilation de TEST (Pull Request étiquetée « apk ») → Release
+#    « apk-test », fichier en-check-pointage-test.apk. L'APK officiel
+#    n'est JAMAIS remplacé par une compilation de test.
+#
+#      https://github.com/Buta-ta/En-Check-App-Pointage/releases/download/apk-test/en-check-pointage-test.apk
+#
+#  • Compilation officielle (fusion sur « main » ou lancement manuel) →
+#    Release « apk-latest », fichier en-check-pointage.apk :
 #
 #      https://github.com/Buta-ta/En-Check-App-Pointage/releases/download/apk-latest/en-check-pointage.apk
 #
@@ -111,8 +119,9 @@ jobs:
             sed 's/\x1b\[[0-9;]*[mK]//g' /tmp/build-apk.log | sed 's/^\[[^]]*\] //' > /tmp/build-apk-propre.log
             {
               grep -n "What went wrong" -A 12 /tmp/build-apk-propre.log | head -n 16
-              grep -n "Error:" /tmp/build-apk-propre.log | head -n 12
-              tail -n 15 /tmp/build-apk-propre.log
+              grep -ni "error" /tmp/build-apk-propre.log | head -n 16
+              grep -n "lib/" /tmp/build-apk-propre.log | head -n 16
+              tail -n 25 /tmp/build-apk-propre.log
             } | sed 's/%/%25/g' | while IFS= read -r line; do
               if [ -n "$line" ]; then echo "::error::$line"; fi
             done
@@ -120,27 +129,42 @@ jobs:
           fi
 
       # ── 6. Renommer le fichier pour un lien de téléchargement stable ────
+      # Le nom identifie clairement un APK de TEST (issue d'une Pull Request).
       - name: Renommer l'APK
-        run: cp build/app/outputs/flutter-apk/app-release.apk en-check-pointage.apk
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            cp build/app/outputs/flutter-apk/app-release.apk en-check-pointage-test.apk
+          else
+            cp build/app/outputs/flutter-apk/app-release.apk en-check-pointage.apk
+          fi
 
       # ── 7. Publier en téléchargement direct ─────────────────────────────
       # La Release « apk-latest » sert de comptoir permanent : le lien ne
       # change jamais, chaque nouvelle compilation remplace l'ancien fichier.
       # En cas d'échec, le message réel est remonté dans les annotations.
-      - name: Publier l'APK (Release apk-latest)
+      - name: Publier l'APK (Release apk-test ou apk-latest)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set +e
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            RELEASE_TAG=apk-test
+            ASSET=en-check-pointage-test.apk
+            NOTES="APK de TEST de l'application En-Check Pointage (issue d'une Pull Request, pour la recette). Téléchargez en-check-pointage-test.apk, puis installez-le sur l'appareil Android (autorisez les sources inconnues). Cet APK de test ne remplace jamais l'APK officiel. Signé avec la clé de débogage."
+          else
+            RELEASE_TAG=apk-latest
+            ASSET=en-check-pointage.apk
+            NOTES="APK de l'application En-Check Pointage (compilation automatique). Téléchargez en-check-pointage.apk, puis installez-le sur la tablette Android (autorisez les sources inconnues). Signé avec la clé de débogage : suffisant pour la recette, pas pour la production."
+          fi
           out=$({
-            if ! gh release view apk-latest >/dev/null 2>&1; then
-              gh release create apk-latest \
+            if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+              gh release create "$RELEASE_TAG" \
                 --target "${PR_HEAD_SHA:-$GITHUB_SHA}" \
                 --title "APK Android — En-Check Pointage" \
-                --notes "APK de l'application En-Check Pointage (compilation automatique). Téléchargez en-check-pointage.apk, puis installez-le sur la tablette Android (autorisez les sources inconnues). Signé avec la clé de débogage : suffisant pour la recette, pas pour la production."
+                --notes "$NOTES"
             fi
-            gh release upload apk-latest en-check-pointage.apk --clobber
+            gh release upload "$RELEASE_TAG" "$ASSET" --clobber
           } 2>&1)
           status=$?
           set -e
@@ -159,7 +183,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: en-check-pointage-apk
-          path: en-check-pointage.apk
+          path: |
+            en-check-pointage.apk
+            en-check-pointage-test.apk
 
       # ── 8. Compte rendu ─────────────────────────────────────────────────
       - name: Compte rendu
@@ -168,6 +194,6 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| Fichier | Poids |" >> "$GITHUB_STEP_SUMMARY"
           echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| \`en-check-pointage.apk\` | $(du -h en-check-pointage.apk | cut -f1) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| \`$(ls en-check-pointage*.apk)\` | $(du -h en-check-pointage*.apk | cut -f1) |" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "**Téléchargement :** https://github.com/${{ github.repository }}/releases/download/apk-latest/en-check-pointage.apk" >> "$GITHUB_STEP_SUMMARY"
