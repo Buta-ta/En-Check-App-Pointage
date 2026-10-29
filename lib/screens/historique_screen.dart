@@ -584,15 +584,15 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
             );
           },
           errorBuilder: (context, error, stackTrace) {
-            return _construireInitiales(initiales);
+            return _construireInitiales(initiales, taille: taille);
           },
         )
-            : _construireInitiales(initiales),
+            : _construireInitiales(initiales, taille: taille),
       ),
     );
   }
 
-  Widget _construireInitiales(String initiales) {
+  Widget _construireInitiales(String initiales, {double taille = 80}) {
     return Container(
       color: EnCheckColors.sableDore,
       child: Center(
