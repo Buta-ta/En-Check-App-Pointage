@@ -38,6 +38,7 @@ import 'historique_screen.dart';
 import 'tutoriel_screen.dart';
 import '../services/checklist_service.dart';
 import '../widgets/checklist_demarrage.dart';
+import '../widgets/sans_etirement.dart';
 import 'face_enrollment_screen.dart';
 import 'face_pointage_screen.dart';
 import '../services/face_recognition_service_provider.dart';
@@ -1985,6 +1986,12 @@ class _PointageScreenState extends State<PointageScreen> {
 
     final bool estEnLigne = ConnectivityService.isOnline;
     final themeService = Provider.of<ThemeService>(context);
+    // 📱 TÉLÉPHONE (fiche « Affichage mobile ») : petit appareil = largeur
+    // étroite OU fenêtre très courte (paysage). La tablette, l'ordinateur et
+    // le navigateur en taille normale gardent l'affichage existant.
+    final tailleFenetre = MediaQuery.sizeOf(context);
+    final bool estTelephone =
+        tailleFenetre.width < 620 || tailleFenetre.height < 520;
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -1994,12 +2001,24 @@ class _PointageScreenState extends State<PointageScreen> {
         autofocus: true,
         onKeyEvent: _gererClavierPhysique,
         child: SafeArea(
+          // En téléphone, la photo d'en-tête passe derrière la barre d'état
+          // (le texte reste sous l'encoche : zones réservées respectées).
+          top: !estTelephone,
           child: chargementEntreprises
               ? const Center(
                   child: CircularProgressIndicator(
                       color: EnCheckColors.terreChaude))
               : LayoutBuilder(
                   builder: (context, constraints) {
+                    // 📱 TÉLÉPHONE : mise en page dédiée, SANS DÉFILEMENT —
+                    // photo pleine largeur, marges réduites, informations
+                    // secondaires derrière des boutons nommés.
+                    if (estTelephone) {
+                      return SansEtirement(
+                        child: _colonneTelephone(
+                            estEnLigne, themeService, constraints),
+                      );
+                    }
                     // ZERO SCROLL en usage normal : la page s'affiche en
                     // entier, a TAILLE NORMALE (jamais reduite). Le scroll
                     // n'apparait qu'en secours si la fenetre est vraiment
@@ -2122,6 +2141,431 @@ class _PointageScreenState extends State<PointageScreen> {
     );
   }
   // ═══════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════
+  // 📱 PAGE PRINCIPALE EN TÉLÉPHONE — fiche « Affichage mobile »
+  // ═══════════════════════════════════════════════════════════
+  //
+  //  Sur téléphone : la photo est pleine largeur (derrière la barre
+  //  d'état), les marges sont réduites, et tout tient SANS DÉFILEMENT.
+  //  Les informations secondaires sont derrière des boutons nommés
+  //  (« Voir ma journée », « Autres modes »). Si une configuration ne
+  //  permet pas d'afficher tout lisiblement (paysage très court, textes
+  //  très agrandis), rien n'est caché : le contenu reste lisible et
+  //  devient défilant AVEC une indication visible.
+  // ═══════════════════════════════════════════════════════════
+
+  Widget _colonneTelephone(
+    bool estEnLigne,
+    ThemeService themeService,
+    BoxConstraints constraints,
+  ) {
+    final media = MediaQuery.of(context);
+    final checklistVisible = !ChecklistService.complete;
+    final double hauteurTotale = constraints.maxHeight;
+    final double echelleTexte = media.textScaler.scale(1.0);
+    // La photo garde un cadrage correct sans manger la place des actions.
+    final double hauteurScene =
+        (hauteurTotale * (echelleTexte > 1.3 ? 0.14 : 0.20)).clamp(84.0, 168.0);
+    final bool tropPetit = hauteurTotale < 560 || echelleTexte > 1.45;
+
+    final entete = _buildScenePointage(estEnLigne, themeService,
+        hauteur: hauteurScene, margeHaut: media.viewPadding.top);
+    final frise = ValueListenableBuilder<MotifCulturel>(
+      valueListenable: MotifService.actif,
+      builder: (context, motif, _) => FriseMotif(motif: motif, hauteur: 8),
+    );
+    final pied = Text(
+      'v1.0.0 • Chiffrement AES-256 • Serveur UE',
+      textAlign: TextAlign.center,
+      style: TextStyle(
+        fontFamily: 'JetBrainsMono',
+        fontSize: 9,
+        color: EnCheckColors.gris.withOpacity(0.9),
+      ),
+    );
+
+    final List<Widget> blocs = [
+      _buildSalutation(taille: 27),
+      // 🧭 Même liste de démarrage, mêmes étapes, même fonctionnement :
+      // sur téléphone elle se résume à une ligne nommée qui les ouvre.
+      if (checklistVisible) ...[
+        const SizedBox(height: 10),
+        _ligneChecklist(),
+      ],
+      // Le rappel d'activation reste une alerte VISIBLE sur l'accueil.
+      if ((_moduleRecoFacialeActif || _kioskMode) && !_bornePrete) ...[
+        const SizedBox(height: 10),
+        _buildBandeauBorne(),
+      ],
+      const SizedBox(height: 12),
+      ValueListenableBuilder<MotifCulturel>(
+        valueListenable: MotifService.actif,
+        builder: (context, motif, _) => _buildCartesAction(),
+      ),
+      const SizedBox(height: 10),
+      _buildBarreAujourdhui(),
+      if (_moduleQRActif || _moduleRecoFacialeActif || _kioskMode) ...[
+        const SizedBox(height: 8),
+        _boutonAutresModes(),
+      ],
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        entete,
+        frise,
+        // Zone centrale : ne défile QUE si la configuration ne permet pas
+        // tout d'afficher d'un coup (jamais en silence : la bande
+        // « faites défiler » apparaît alors). Quand tout tient — le cas
+        // normal — la page est fixe : aucun geste ne la déforme.
+        Expanded(
+          child: SingleChildScrollView(
+            physics: const ClampingScrollPhysics(),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(height: 12),
+                  ...blocs,
+                  const SizedBox(height: 12),
+                ],
+              ),
+            ),
+          ),
+        ),
+        if (tropPetit)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: _bandeDefilement(),
+          ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: _buildBarreNavigation(),
+        ),
+        const SizedBox(height: 6),
+        pied,
+        const SizedBox(height: 4),
+      ],
+    );
+  }
+
+  /// Bande d'information affichée quand la configuration impose le
+  /// défilement (jamais en silence — fiche « Affichage mobile »).
+  Widget _bandeDefilement() {
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: EnCheckColors.terreChaude.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: const Row(
+        children: [
+          Icon(Icons.unfold_more, size: 14, color: EnCheckColors.terreChaude),
+          SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              "Contenu plus grand que l'écran : faites défiler.",
+              style:
+                  TextStyle(fontSize: 11.5, color: EnCheckColors.brunProfond),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 🧭 Liste de démarrage en téléphone : une ligne nommée qui ouvre les
+  /// MÊMES étapes (la liste, ses étapes et son fonctionnement sont
+  /// conservés ; seul l'espace occupé change sur petit écran).
+  Widget _ligneChecklist() {
+    final faites = 1 +
+        (ChecklistService.motifChoisi.value ? 1 : 0) +
+        (ChecklistService.premierPointage.value ? 1 : 0);
+    return GestureDetector(
+      onTap: () {
+        showDialog<void>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: Theme.of(context).cardColor,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20)),
+            title: const Text(
+              '3 étapes pour démarrer',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+            ),
+            content: const ChecklistDemarrage(),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Fermer'),
+              ),
+            ],
+          ),
+        );
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: Theme.of(context).cardColor,
+          borderRadius: BorderRadius.circular(14),
+          border:
+              Border.all(color: EnCheckColors.terreChaude.withOpacity(0.35)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.explore_outlined,
+                size: 16, color: EnCheckColors.gris),
+            const SizedBox(width: 8),
+            const Expanded(
+              child: Text('3 étapes pour démarrer',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+            ),
+            Text('$faites/3',
+                style: const TextStyle(
+                    fontFamily: 'JetBrainsMono',
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: EnCheckColors.terreChaude)),
+            const SizedBox(width: 4),
+            const Icon(Icons.chevron_right,
+                size: 18, color: EnCheckColors.gris),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Texte d'état de la journée — carte « Aujourd'hui » ET bandeau téléphone.
+  /// Mêmes données réelles des deux côtés : aucune donnée inventée.
+  String _texteStatutJour() {
+    if (_pausesOuvertes.isNotEmpty) {
+      final p = _pausesOuvertes.first;
+      final nom = (p['nom'] ?? 'Employe').toString();
+      final depuis = p['debut'] == null
+          ? ''
+          : PauseService.heureCourteDe(p['debut'] as String);
+      return '$nom - en pause depuis $depuis';
+    }
+    if (_dernierEmployePointe != null) {
+      final nom =
+          '${_dernierEmployePointe!['first_name'] ?? ''} ${_dernierEmployePointe!['last_name'] ?? ''}'
+              .trim();
+      if (nom.isNotEmpty) return '$nom - dernier pointage';
+    }
+    return 'Votre journée apparaîtra ici après votre premier pointage';
+  }
+
+  Color _couleurStatutJour() {
+    if (_pausesOuvertes.isNotEmpty) return EnCheckColors.alerte;
+    if (_dernierEmployePointe != null) {
+      final nom =
+          '${_dernierEmployePointe!['first_name'] ?? ''} ${_dernierEmployePointe!['last_name'] ?? ''}'
+              .trim();
+      if (nom.isNotEmpty) return EnCheckColors.succes;
+    }
+    return EnCheckColors.gris;
+  }
+
+  /// Bandeau compact « Aujourd'hui » : le détail complet s'ouvre derrière
+  /// le bouton nommé « Voir ma journée » (mêmes données réelles).
+  Widget _buildBarreAujourdhui() {
+    final statut = _texteStatutJour();
+    final statutCouleur = _couleurStatutJour();
+    return GestureDetector(
+      onTap: _ouvrirFeuilleJournee,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+        decoration: BoxDecoration(
+          color: Theme.of(context).cardColor,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+              color: Theme.of(context).dividerColor.withOpacity(0.35)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.today_outlined,
+                    size: 16, color: EnCheckColors.terreChaude),
+                const SizedBox(width: 8),
+                const Text("AUJOURD'HUI",
+                    style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1.4,
+                        color: EnCheckColors.gris)),
+                const Spacer(),
+                _pillSync(),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Icon(Icons.circle, size: 7, color: statutCouleur),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(statut,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 13, fontWeight: FontWeight.w600)),
+                ),
+                const SizedBox(width: 6),
+                const Text('Voir ma journée',
+                    style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: EnCheckColors.terreChaude)),
+                const Icon(Icons.chevron_right,
+                    size: 17, color: EnCheckColors.terreChaude),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// « Voir ma journée » : la carte complète (statut, noms, pause,
+  /// synchronisation) — les mêmes informations qu'avant, en entier.
+  Future<void> _ouvrirFeuilleJournee() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        return Container(
+          decoration: BoxDecoration(
+            color: Theme.of(context).cardColor,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+          ),
+          padding: const EdgeInsets.fromLTRB(22, 12, 22, 28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text('Ma journée',
+                        style: TextStyle(
+                            fontSize: 21,
+                            fontWeight: FontWeight.w800,
+                            color: EnCheckColors.brunProfond)),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.pop(sheetContext),
+                    icon: const Icon(Icons.close, color: EnCheckColors.gris),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              _buildCarteStatutJour(),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// Bouton nommé « Autres modes » — QR, visage, enrôlement derrière lui.
+  Widget _boutonAutresModes() {
+    return SizedBox(
+      height: 48,
+      child: OutlinedButton.icon(
+        onPressed: _ouvrirFeuilleModes,
+        icon: const Icon(Icons.apps_rounded, size: 18),
+        label: const Text('Autres modes',
+            style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700)),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: EnCheckColors.terreChaude,
+          side: BorderSide(
+              color: EnCheckColors.terreChaude.withOpacity(0.55), width: 1.3),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        ),
+      ),
+    );
+  }
+
+  /// « Autres modes » : les mêmes actions que la carte AUTRES MODES de la
+  /// tablette, regroupées derrière un bouton nommé (fiche affichage mobile).
+  Future<void> _ouvrirFeuilleModes() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        return Container(
+          decoration: BoxDecoration(
+            color: Theme.of(context).cardColor,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+          ),
+          padding: const EdgeInsets.fromLTRB(22, 12, 22, 28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text('Autres modes',
+                        style: TextStyle(
+                            fontSize: 21,
+                            fontWeight: FontWeight.w800,
+                            color: EnCheckColors.brunProfond)),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.pop(sheetContext),
+                    icon: const Icon(Icons.close, color: EnCheckColors.gris),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              if (_moduleQRActif) ...[
+                _boutonScene(
+                  label: 'Scanner QR',
+                  icon: Icons.qr_code_scanner,
+                  rempli: false,
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    setState(() {
+                      if (_modulePhotoActif) {
+                        _showPhotoScanner = true;
+                      } else {
+                        _showScanner = true;
+                      }
+                    });
+                  },
+                ),
+                const SizedBox(height: 8),
+              ],
+              if (_moduleRecoFacialeActif) ...[
+                _boutonScene(
+                  label: 'Reconnaissance faciale',
+                  icon: Icons.face,
+                  rempli: false,
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _onBoutonFaceClique();
+                  },
+                ),
+                const SizedBox(height: 8),
+              ],
+              if (_kioskMode) _buildBoutonEnrolerNouvelEmploye(),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   // 📱 ÉCRAN ENRÔLEMENT TABLETTE
   // ═══════════════════════════════════════════════════════════
 
@@ -3163,7 +3607,7 @@ class _PointageScreenState extends State<PointageScreen> {
   /// SCENE DU HAUT : la photo de la jeune femme en train de pointer
   /// (l'image actuelle de l'app), l'identite et l'heure par-dessus.
   Widget _buildScenePointage(bool estEnLigne, ThemeService themeService,
-      {double hauteur = 250}) {
+      {double hauteur = 250, double margeHaut = 0}) {
     final nomEntreprise = entrepriseSelectionnee?['name']?.toString() ?? '';
     return SizedBox(
       height: hauteur,
@@ -3191,7 +3635,7 @@ class _PointageScreenState extends State<PointageScreen> {
             ),
           ),
           Positioned(
-            top: 12,
+            top: 12 + margeHaut,
             left: 16,
             right: 16,
             child: Row(
@@ -3278,7 +3722,7 @@ class _PointageScreenState extends State<PointageScreen> {
   }
 
   /// Le souhait de bienvenue, dans la langue du pays de l'entreprise.
-  Widget _buildSalutation() {
+  Widget _buildSalutation({double taille = 32}) {
     final nomEntreprise = entrepriseSelectionnee?['name']?.toString() ?? '';
     final pays = entrepriseSelectionnee?['country_code']?.toString();
     final souhait = SouhaitsService.souhait(pays);
@@ -3291,7 +3735,7 @@ class _PointageScreenState extends State<PointageScreen> {
         Text(
           souhait,
           style: TextStyle(
-            fontSize: 32,
+            fontSize: taille,
             fontWeight: FontWeight.w800,
             height: 1.1,
             color: couleurTexte,
@@ -3423,26 +3867,8 @@ class _PointageScreenState extends State<PointageScreen> {
       if (nom.isNotEmpty) chips.add(_pastilleNom(nom, EnCheckColors.succes));
     }
 
-    String statut =
-        'Votre journée apparaîtra ici après votre premier pointage';
-    Color statutCouleur = EnCheckColors.gris;
-    if (_pausesOuvertes.isNotEmpty) {
-      final p = _pausesOuvertes.first;
-      final nom = (p['nom'] ?? 'Employe').toString();
-      final depuis = p['debut'] == null
-          ? ''
-          : PauseService.heureCourteDe(p['debut'] as String);
-      statut = '$nom - en pause depuis $depuis';
-      statutCouleur = EnCheckColors.alerte;
-    } else if (_dernierEmployePointe != null) {
-      final nom =
-          '${_dernierEmployePointe!['first_name'] ?? ''} ${_dernierEmployePointe!['last_name'] ?? ''}'
-              .trim();
-      if (nom.isNotEmpty) {
-        statut = '$nom - dernier pointage';
-        statutCouleur = EnCheckColors.succes;
-      }
-    }
+    final statut = _texteStatutJour();
+    final statutCouleur = _couleurStatutJour();
 
     return Container(
       width: double.infinity,

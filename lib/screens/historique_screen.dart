@@ -10,6 +10,8 @@ import '../services/heure_pointage.dart'; // ⭐ LIVRAISON 19 — conversion d'h
 import '../services/pause_service.dart'; // ⏸ LOT D — les pauses
 import '../services/geofencing_service.dart'; // ⏸ LOT D — mention « Hors site »
 import '../services/motif_service.dart';
+import '../widgets/sans_etirement.dart';
+import 'pointages_liste_screen.dart';
 
 class HistoriqueScreen extends StatefulWidget {
   final Map<String, dynamic> employee;
@@ -538,15 +540,15 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
   // ═══════════════════════════════════════════════════════════
   // 📸 CONSTRUIRE L'AVATAR (PHOTO OU INITIALES)
   // ═══════════════════════════════════════════════════════════
-  Widget _construireAvatar() {
+  Widget _construireAvatar({double taille = 80}) {
     final photoUrl = _fiche['photo_url'];
     final prenom = _fiche['first_name'] ?? '';
     final nom = _fiche['last_name'] ?? '';
     final initiales = '${prenom.isNotEmpty ? prenom[0] : ''}${nom.isNotEmpty ? nom[0] : ''}';
 
     return Container(
-      width: 80,
-      height: 80,
+      width: taille,
+      height: taille,
       decoration: BoxDecoration(
         color: EnCheckColors.sableDore,
         shape: BoxShape.circle,
@@ -565,8 +567,8 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
             ? Image.network(
           photoUrl,
           fit: BoxFit.cover,
-          width: 80,
-          height: 80,
+          width: taille,
+          height: taille,
           loadingBuilder: (context, child, loadingProgress) {
             if (loadingProgress == null) return child;
             return Center(
@@ -596,9 +598,9 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
       child: Center(
         child: Text(
           initiales.toUpperCase(),
-          style: const TextStyle(
+          style: TextStyle(
             color: EnCheckColors.brunProfond,
-            fontSize: 28,
+            fontSize: taille * 0.35,
             fontWeight: FontWeight.bold,
           ),
         ),
@@ -608,6 +610,12 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // 📱 TÉLÉPHONE (fiche « Affichage mobile ») : petit appareil = largeur
+    // étroite OU fenêtre très courte (paysage).
+    final tailleFenetre = MediaQuery.sizeOf(context);
+    final bool estTelephone =
+        tailleFenetre.width < 620 || tailleFenetre.height < 520;
+
     return Scaffold(
       backgroundColor: EnCheckColors.sableClair,
       appBar: AppBar(
@@ -622,7 +630,7 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
       ),
       body: LayoutBuilder(
         builder: (context, constraints) {
-          return SingleChildScrollView(
+          final page = SingleChildScrollView(
             physics: const ClampingScrollPhysics(),
             child: ConstrainedBox(
               constraints: BoxConstraints(minHeight: constraints.maxHeight),
@@ -657,14 +665,14 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
               ),
               child: Column(
                 children: [
-                _construireAvatar(),
-                const SizedBox(height: 12),
+                _construireAvatar(taille: estTelephone ? 64 : 80),
+                SizedBox(height: estTelephone ? 10 : 12),
 
                 Text(
                   '${_fiche['first_name']} ${_fiche['last_name']}',
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: EnCheckColors.blanc,
-                    fontSize: 22,
+                    fontSize: estTelephone ? 20 : 22,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
@@ -680,7 +688,7 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
                   ),
                 ),
 
-                const SizedBox(height: 12),
+                SizedBox(height: estTelephone ? 10 : 12),
 
                 if (_fiche['position'] != null || _fiche['department'] != null)
                   Container(
@@ -786,11 +794,15 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
               ? _construireErreur()
               : pointages.isEmpty
               ? _construireVide()
+              : estTelephone
+              ? _zoneListeTelephone(constraints)
               : _construireListe(),
                 ],
               ),
             ),
           );
+          // 📱 TÉLÉPHONE : la page ne s'étire jamais pendant les gestes.
+          return estTelephone ? SansEtirement(child: page) : page;
         },
         ),
       );
@@ -979,33 +991,116 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
   }
 
   Widget _construireListe() {
-    Map<String, List<Map<String, dynamic>>> parJour = {};
-
-    for (var pointage in pointages) {
-      // ⭐ LIVRAISON 19 — la journée se découpe sur minuit LOCAL. Avant, elle se
-      //    découpait sur minuit UTC : un pointage de 00:30 à Cotonou était rangé
-      //    dans la veille, et le total d'heures de la journée avec lui.
-      final jour = HeurePointage.jourDePointage(pointage);
-
-      if (!parJour.containsKey(jour)) {
-        parJour[jour] = [];
-      }
-      parJour[jour]!.add(pointage);
-    }
-
-    final jours = parJour.keys.toList();
+    final entrees = _groupesParJour();
 
     return ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 20),
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      itemCount: jours.length,
+      itemCount: entrees.length,
       itemBuilder: (context, index) {
-        final jour = jours[index];
-        final pointagesJour = parJour[jour]!;
+        final entree = entrees[index];
 
-        return _construireJour(jour, pointagesJour);
+        return _construireJour(entree.key, entree.value);
       },
+    );
+  }
+
+  /// ⭐ LIVRAISON 19 — la journée se découpe sur minuit LOCAL. Avant, elle se
+  ///    découpait sur minuit UTC : un pointage de 00:30 à Cotonou était rangé
+  ///    dans la veille, et le total d'heures de la journée avec lui.
+  List<MapEntry<String, List<Map<String, dynamic>>>> _groupesParJour() {
+    final parJour = <String, List<Map<String, dynamic>>>{};
+
+    for (var pointage in pointages) {
+      final jour = HeurePointage.jourDePointage(pointage);
+      parJour.putIfAbsent(jour, () => []).add(pointage);
+    }
+
+    return parJour.entries.toList();
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // 📱 TÉLÉPHONE — fiche « Affichage mobile » (§3.4-3.5)
+  // ═══════════════════════════════════════════════════════════
+  //
+  //  L'historique garde son style ; sur téléphone, la liste complète est
+  //  derrière un bouton clairement nommé et se consulte par pages
+  //  « Précédent » / « Suivant » (aucun pointage supprimé, ordre et
+  //  cartes-jours conservés) — sans défilement.
+  // ═══════════════════════════════════════════════════════════
+
+  Widget _zoneListeTelephone(BoxConstraints constraints) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (constraints.maxHeight < 600)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: _bandeDefilementHist(),
+          ),
+        const SizedBox(height: 8),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: SizedBox(
+            height: 52,
+            child: OutlinedButton.icon(
+              onPressed: _ouvrirTousPointages,
+              icon: const Icon(Icons.list_alt, size: 18),
+              label: Text(
+                'Voir tous les pointages (${pointages.length})',
+                style: const TextStyle(
+                    fontSize: 13.5, fontWeight: FontWeight.w700),
+              ),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: EnCheckColors.terreChaude,
+                side: BorderSide(
+                    color: EnCheckColors.terreChaude.withOpacity(0.55),
+                    width: 1.3),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14)),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _ouvrirTousPointages() {
+    final groupes = _groupesParJour();
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PointagesListeScreen(
+          cartes: [
+            for (final g in groupes) _construireJour(g.key, g.value),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _bandeDefilementHist() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: EnCheckColors.terreChaude.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: const Row(
+        children: [
+          Icon(Icons.unfold_more, size: 14, color: EnCheckColors.terreChaude),
+          SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              "Contenu plus grand que l'écran : faites défiler.",
+              style:
+                  TextStyle(fontSize: 11.5, color: EnCheckColors.brunProfond),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
