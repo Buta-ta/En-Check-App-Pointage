@@ -248,8 +248,10 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
     final double echelleTexte = media.textScaler.scale(1.0);
     final double hauteurTotale = constraints.maxHeight;
     final double hauteurScene = clavierOuvert
-        ? 0
-        : (hauteurTotale * (echelleTexte > 1.3 ? 0.15 : 0.21)).clamp(0.0, 150.0);
+        ? 0.0
+        : (hauteurTotale * (echelleTexte > 1.3 ? 0.15 : 0.21))
+            .clamp(0.0, 150.0)
+            .toDouble();
     final bool tropPetit = hauteurTotale < 560 || echelleTexte > 1.45;
 
     final carte = Padding(

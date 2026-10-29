@@ -2165,7 +2165,7 @@ class _PointageScreenState extends State<PointageScreen> {
     final double echelleTexte = media.textScaler.scale(1.0);
     // La photo garde un cadrage correct sans manger la place des actions.
     final double hauteurScene =
-        (hauteurTotale * (echelleTexte > 1.3 ? 0.14 : 0.20)).clamp(84.0, 168.0);
+        (hauteurTotale * (echelleTexte > 1.3 ? 0.14 : 0.20)).clamp(84.0, 168.0).toDouble();
     final bool tropPetit = hauteurTotale < 560 || echelleTexte > 1.45;
 
     final entete = _buildScenePointage(estEnLigne, themeService,
