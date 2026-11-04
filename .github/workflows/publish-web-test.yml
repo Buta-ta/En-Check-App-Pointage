@@ -1,0 +1,85 @@
+# ═══════════════════════════════════════════════════════════
+#  PUBLIER LA PWA DE TEST (GitHub Pages)
+# ═══════════════════════════════════════════════════════════
+#
+#  CE QUE FAIT CE FICHIER
+#  ----------------------
+#  Compile la PWA (site web) d'une Pull Request et la publie sur un
+#  SITE DE TEST GitHub Pages, SÉPARÉ du site officiel hébergé sur
+#  Vercel. Le site officiel n'est jamais touché par ce workflow.
+#
+#  Site de test : https://buta-ta.github.io/En-Check-App-Pointage/
+#  (il montre toujours la dernière compilation de test publiée).
+#
+#  QUAND IL SE DÉCLENCHE
+#  ---------------------
+#  • À la main : onglet « Actions » → « Publier la PWA de test » →
+#    « Run workflow ».
+#  • Sur une Pull Request portant l'étiquette « web-test ».
+#
+#  POURQUOI ?
+#  ----------
+#  Une compilation verte ne prouve pas que la PWA fonctionne : le
+#  fondateur doit pouvoir ouvrir et installer la version de la PR
+#  sur ordinateur avant validation.
+# ═══════════════════════════════════════════════════════════
+
+name: Publier la PWA de test
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: web-test
+  cancel-in-progress: false
+
+jobs:
+  web-test:
+    # Une PR ne publie QUE si elle porte l'étiquette « web-test » ;
+    # un lancement manuel publie toujours.
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'web-test')
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+
+      - name: Installer Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.44.9'
+          cache: true
+
+      - name: Télécharger les bibliothèques
+        run: flutter pub get
+
+      # Le base-href correspond au chemin du site GitHub Pages du projet
+      # (buta-ta.github.io/En-Check-App-Pointage/).
+      - name: Compiler la PWA de test
+        run: flutter build web --release --base-href /En-Check-App-Pointage/
+
+      - name: Préparer la publication
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web
+
+      - name: Publier sur le site de test
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Compte rendu
+        run: |
+          echo "### PWA de test publiée" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Site de test : https://buta-ta.github.io/En-Check-App-Pointage/" >> "$GITHUB_STEP_SUMMARY"
+          echo "(la version officielle sur Vercel n'est pas touchée)" >> "$GITHUB_STEP_SUMMARY"

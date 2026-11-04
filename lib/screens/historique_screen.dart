@@ -11,7 +11,6 @@ import '../services/pause_service.dart'; // ⏸ LOT D — les pauses
 import '../services/geofencing_service.dart'; // ⏸ LOT D — mention « Hors site »
 import '../services/motif_service.dart';
 import '../widgets/sans_etirement.dart';
-import 'pointages_liste_screen.dart';
 
 class HistoriqueScreen extends StatefulWidget {
   final Map<String, dynamic> employee;
@@ -25,6 +24,11 @@ class HistoriqueScreen extends StatefulWidget {
 class _HistoriqueScreenState extends State<HistoriqueScreen> {
   List<Map<String, dynamic>> pointages = [];
   bool chargement = true;
+
+  /// ⭐ PTG-01.4 : pagination des 7 derniers jours + signal honnête quand
+  /// la limite du contrat d'accès (500) est atteinte.
+  int _pageSeptJours = 0;
+  bool _limiteAtteinte = false;
 
   /// 🔄 CONTRAT ÉTAPE 2 (25/10/2026) — fiche rafraîchie via le jeton de la
   /// session (le serveur en résout le titulaire) : poste, département et
@@ -478,6 +482,8 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
     setState(() {
       chargement = true;
       erreur = null;
+      _pageSeptJours = 0;
+      _limiteAtteinte = false;
     });
 
     try {
@@ -486,8 +492,14 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
       // 1. Charger depuis Supabase si en ligne
       if (ConnectivityService.isOnline) {
         try {
-          final supabaseData = await SupabaseService.getHistoriquePointages(_fiche['id']);
+          // ⭐ PTG-01.4 : le contrat d'accès (RPC) autorise jusqu'à 500
+          // événements par appel — on demande 500 pour ne masquer aucun
+          // pointage des 7 jours, sans jamais contourner la sécurité.
+          final supabaseData = await SupabaseService.getHistoriquePointages(
+              _fiche['id'],
+              limite: 500);
           tousLesPointages.addAll(supabaseData);
+          if (supabaseData.length >= 500) _limiteAtteinte = true;
         } catch (e) {
           print('Erreur chargement Supabase: $e');
         }
@@ -571,17 +583,10 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
           height: taille,
           loadingBuilder: (context, child, loadingProgress) {
             if (loadingProgress == null) return child;
-            return Center(
-              child: CircularProgressIndicator(
-                color: EnCheckColors.brunProfond,
-                strokeWidth: 2,
-                value:
-                loadingProgress.expectedTotalBytes != null
-                    ? loadingProgress.cumulativeBytesLoaded /
-                    loadingProgress.expectedTotalBytes!
-                    : null,
-              ),
-            );
+            // Une seule animation de chargement par page (PTG-01) : pendant
+            // le chargement de la photo, on montre les initiales — pas un
+            // second « spinner ».
+            return _construireInitiales(initiales, taille: taille);
           },
           errorBuilder: (context, error, stackTrace) {
             return _construireInitiales(initiales, taille: taille);
@@ -630,13 +635,9 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
       ),
       body: LayoutBuilder(
         builder: (context, constraints) {
-          final page = SingleChildScrollView(
-            physics: const ClampingScrollPhysics(),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(minHeight: constraints.maxHeight),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
+          final page = Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
           // ═══════════════════════════════════════════
           // 👤 EN-TÊTE EMPLOYÉ AVEC PHOTO
           // ═══════════════════════════════════════════
@@ -783,26 +784,23 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
             const SizedBox(height: 12),
           ],
 
-          chargement
-              ? const SizedBox(
-                  height: 220,
-                  child: Center(
-                    child: CircularProgressIndicator(color: EnCheckColors.terreChaude),
-                  ),
-                )
-              : (pointages.isEmpty && erreur != null)
-              ? _construireErreur()
-              : pointages.isEmpty
-              ? _construireVide()
-              : estTelephone
-              ? _zoneListeTelephone(constraints)
-              : _construireListe(),
+          Expanded(
+            child: chargement
+                ? const Center(
+                    child: CircularProgressIndicator(
+                        color: EnCheckColors.terreChaude),
+                  )
+                : (pointages.isEmpty && erreur != null)
+                    ? _construireErreur()
+                    : pointages.isEmpty
+                        ? _construireVide()
+                        : _zoneSeptJours(),
+          ),
                 ],
-              ),
-            ),
           );
-          // 📱 TÉLÉPHONE : la page ne s'étire jamais pendant les gestes.
-          return estTelephone ? SansEtirement(child: page) : page;
+          // La page ne s'étire jamais pendant les gestes (téléphone ET
+          // ordinateur — fiche « Accueil et historique »).
+          return SansEtirement(child: page);
         },
         ),
       );
@@ -990,119 +988,174 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
     );
   }
 
-  Widget _construireListe() {
-    final entrees = _groupesParJour();
-
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: entrees.length,
-      itemBuilder: (context, index) {
-        final entree = entrees[index];
-
-        return _construireJour(entree.key, entree.value);
-      },
-    );
-  }
-
-  /// ⭐ LIVRAISON 19 — la journée se découpe sur minuit LOCAL. Avant, elle se
-  ///    découpait sur minuit UTC : un pointage de 00:30 à Cotonou était rangé
-  ///    dans la veille, et le total d'heures de la journée avec lui.
-  List<MapEntry<String, List<Map<String, dynamic>>>> _groupesParJour() {
-    final parJour = <String, List<Map<String, dynamic>>>{};
-
-    for (var pointage in pointages) {
-      final jour = HeurePointage.jourDePointage(pointage);
-      parJour.putIfAbsent(jour, () => []).add(pointage);
-    }
-
-    return parJour.entries.toList();
-  }
-
   // ═══════════════════════════════════════════════════════════
-  // 📱 TÉLÉPHONE — fiche « Affichage mobile » (§3.4-3.5)
+  // 📅 7 DERNIERS JOURS, PAGINÉS — PTG-01.4
   // ═══════════════════════════════════════════════════════════
   //
-  //  L'historique garde son style ; sur téléphone, la liste complète est
-  //  derrière un bouton clairement nommé et se consulte par pages
-  //  « Précédent » / « Suivant » (aucun pointage supprimé, ordre et
-  //  cartes-jours conservés) — sans défilement.
+  //  Dans l'app Pointage, on consulte les 7 derniers jours (aujourd'hui
+  //  et les six jours précédents, selon l'heure de l'entreprise déjà
+  //  utilisée). Rien n'est supprimé : les pointages plus anciens restent
+  //  conservés et consultables côté Admin. Le contenu se répartit en
+  //  pages remplies — une journée trop longue continue sur la page
+  //  suivante avec sa date et la mention « suite » — et deux flèches
+  //  discrètes ‹ › n'apparaissent que lorsqu'une page existe dans leur
+  //  direction. Aucun défilement, aucune page vide.
   // ═══════════════════════════════════════════════════════════
 
-  Widget _zoneListeTelephone(BoxConstraints constraints) {
+  /// Les pointages des 7 derniers jours seulement (AFFICHAGE uniquement :
+  /// aucune donnée n'est supprimée, aucune règle de paie/pause/sync n'est
+  /// touchée).
+  List<Map<String, dynamic>> _pointagesSeptJours() {
+    final depart =
+        HeurePointage.maintenant().subtract(const Duration(days: 6));
+    final jourDepart =
+        HeurePointage.jourDePointage({'check_time': depart.toIso8601String()});
+    return pointages
+        .where(
+            (p) => HeurePointage.jourDePointage(p).compareTo(jourDepart) >= 0)
+        .toList();
+  }
+
+  Widget _zoneSeptJours() {
+    return LayoutBuilder(builder: (context, constraints) {
+    final echan =
+        MediaQuery.of(context).textScaler.scale(1.0).clamp(1.0, 1.4).toDouble();
+    // Hauteurs de référence LARGES : la pagination reste déterministe et
+    // rien ne déborde jamais — le contenu tient sans défilement.
+    final hSession = 100.0 * echan;
+    final hEntete = 70.0 * echan;
+    final hMargeCarte = 16.0 * echan;
+    final hBarre = 56.0 * echan;
+
+    final sept = _pointagesSeptJours();
+    final parJour = <String, List<Map<String, dynamic>>>{};
+    // ⭐ LIVRAISON 19 : la journée se découpe sur minuit LOCAL (heure de
+    // l'entreprise), jamais sur minuit UTC.
+    for (final p in sept) {
+      parJour.putIfAbsent(HeurePointage.jourDePointage(p), () => []).add(p);
+    }
+    final jours = parJour.entries.toList();
+
+    final double hauteurDispo = constraints.maxHeight - hBarre;
+    final pages = <List<Widget>>[];
+    var pageEnCours = <Widget>[];
+    var hauteurPage = 0.0;
+
+    for (final jour in jours) {
+      final calcul = _calculerHeures(List.from(jour.value));
+      final sessions = calcul['sessions'] as List<Map<String, dynamic>>;
+      var debut = 0;
+      var suite = false;
+      while (debut < sessions.length) {
+        final reste = sessions.length - debut;
+        var place =
+            ((hauteurDispo - hauteurPage - hMargeCarte - hEntete) / hSession)
+                .floor();
+        if (place < 1 && pageEnCours.isNotEmpty) {
+          pages.add(pageEnCours);
+          pageEnCours = [];
+          hauteurPage = 0.0;
+          place =
+              ((hauteurDispo - hMargeCarte - hEntete) / hSession).floor();
+        }
+        final pris = place < 1 ? 1 : (place > reste ? reste : place);
+        pageEnCours.add(_construireJour(
+          jour.key,
+          jour.value,
+          sessionsDebut: debut,
+          sessionsFin: debut + pris,
+          suite: suite,
+        ));
+        hauteurPage += hMargeCarte + hEntete + pris * hSession;
+        debut += pris;
+        suite = true;
+      }
+    }
+    if (pageEnCours.isNotEmpty) pages.add(pageEnCours);
+
+    if (pages.isEmpty) {
+      return const Center(
+        child: Text('Aucun pointage sur les 7 derniers jours.',
+            style: TextStyle(color: EnCheckColors.gris, fontSize: 16)),
+      );
+    }
+    if (_pageSeptJours >= pages.length) _pageSeptJours = pages.length - 1;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (constraints.maxHeight < 600)
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: pages[_pageSeptJours],
+            ),
+          ),
+        ),
+        if (_limiteAtteinte)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: _bandeDefilementHist(),
-          ),
-        const SizedBox(height: 8),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          child: SizedBox(
-            height: 52,
-            child: OutlinedButton.icon(
-              onPressed: _ouvrirTousPointages,
-              icon: const Icon(Icons.list_alt, size: 18),
-              label: Text(
-                'Voir tous les pointages (${pointages.length})',
-                style: const TextStyle(
-                    fontSize: 13.5, fontWeight: FontWeight.w700),
-              ),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: EnCheckColors.terreChaude,
-                side: BorderSide(
-                    color: EnCheckColors.terreChaude.withOpacity(0.55),
-                    width: 1.3),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14)),
-              ),
+            child: Text(
+              'Liste limitée aux 500 derniers événements : '
+              'certains pointages des 7 jours peuvent manquer.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                  fontSize: 11,
+                  color: EnCheckColors.erreur.withOpacity(0.9)),
             ),
           ),
-        ),
+        if (pages.length > 1) _barreFlechesSeptJours(pages.length),
+        if (pages.length <= 1) const SizedBox(height: 4),
       ],
     );
+    });
   }
 
-  void _ouvrirTousPointages() {
-    final groupes = _groupesParJour();
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => PointagesListeScreen(
-          cartes: [
-            for (final g in groupes) _construireJour(g.key, g.value),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _bandeDefilementHist() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: EnCheckColors.terreChaude.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: const Row(
+  /// ⭐ PTG-01.4 : deux flèches discrètes, SANS texte visible, seulement
+  /// lorsqu'une page existe dans leur direction. Sémantique pour la
+  /// lecture vocale, zones de clic larges (48 px minimum).
+  Widget _barreFlechesSeptJours(int total) {
+    final couleur = Theme.of(context).iconTheme.color ?? EnCheckColors.brunProfond;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Icon(Icons.unfold_more, size: 14, color: EnCheckColors.terreChaude),
-          SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              "Contenu plus grand que l'écran : faites défiler.",
-              style:
-                  TextStyle(fontSize: 11.5, color: EnCheckColors.brunProfond),
-            ),
-          ),
+          if (_pageSeptJours > 0)
+            Semantics(
+              button: true,
+              label: 'Page précédente',
+              child: IconButton(
+                onPressed: () => setState(() => _pageSeptJours -= 1),
+                icon: Icon(Icons.chevron_left, size: 30, color: couleur),
+                padding: const EdgeInsets.all(12),
+                constraints:
+                    const BoxConstraints(minWidth: 48, minHeight: 48),
+              ),
+            )
+          else
+            const SizedBox(width: 48, height: 48),
+          if (_pageSeptJours < total - 1)
+            Semantics(
+              button: true,
+              label: 'Page suivante',
+              child: IconButton(
+                onPressed: () => setState(() => _pageSeptJours += 1),
+                icon: Icon(Icons.chevron_right, size: 30, color: couleur),
+                padding: const EdgeInsets.all(12),
+                constraints:
+                    const BoxConstraints(minWidth: 48, minHeight: 48),
+              ),
+            )
+          else
+            const SizedBox(width: 48, height: 48),
         ],
       ),
     );
   }
+
+
 
   // ═══════════════════════════════════════════════════════════
   // ⏰ CALCULER LES HEURES TRAVAILLÉES (CORRECTION FINALE - PRÉCISION SECONDES)
@@ -1199,7 +1252,8 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
   //    un seul fichier (services/heure_pointage.dart). L'ancienne version
   //    affichait l'heure telle quelle, donc « 07:30 » pour un pointage de 08:30
   //    à Cotonou (UTC+1) — et l'inverse à Montréal (UTC-4).
-  Widget _construireJour(String jour, List<Map<String, dynamic>> pointagesJour) {
+  Widget _construireJour(String jour, List<Map<String, dynamic>> pointagesJour,
+      {int sessionsDebut = 0, int? sessionsFin, bool suite = false}) {
     final date = DateTime.tryParse(jour);
     final maintenant = DateTime.now();
     final hier = DateTime(maintenant.year, maintenant.month, maintenant.day - 1);
@@ -1269,7 +1323,7 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  titreJour,
+                  suite ? '$titreJour — suite' : titreJour,
                   style: const TextStyle(
                     color: EnCheckColors.brunProfond,
                     fontSize: 16,
@@ -1314,7 +1368,10 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
               ],
             ),
           ),
-          ...sessions.map((session) => _construireSession(session)),
+          ...sessions
+              .skip(sessionsDebut)
+              .take((sessionsFin ?? sessions.length) - sessionsDebut)
+              .map((session) => _construireSession(session)),
         ],
       ),
     );
