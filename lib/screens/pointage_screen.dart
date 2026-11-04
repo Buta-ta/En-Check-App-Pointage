@@ -62,6 +62,18 @@ class _PointageScreenState extends State<PointageScreen> {
   //                 changer les habitudes de l'entreprise.
   String _intention = 'pointage';
   List<Map<String, dynamic>> _pausesOuvertes = [];
+
+  /// ⭐ PTG-01.6 : dernier pointage RÉELLEMENT enregistré sur cette borne —
+  /// un événement confirmé, jamais une simple identification. Non nominatif.
+  String? _dernierPointageHeure;
+  String? _dernierPointageType;
+  bool _dernierPointageEnAttente = false;
+  String? _dernierPointageJour;
+
+  /// ⭐ État d'autorisation de la borne (PTG-01.5 analyse 4 nov) :
+  /// 'aActiver' | 'ok' | 'refusee' | 'inconnu' — on n'affirme un refus
+  /// que s'il est prouvé ; sinon on dit que l'état est non vérifié.
+  String _etatBorne = 'inconnu';
   Timer? _timerPauses;
 
   // 🔢 PIN
@@ -297,9 +309,9 @@ class _PointageScreenState extends State<PointageScreen> {
     // intégral, expiration cache_expire_le). Aucun repli sur la v1 ni sur
     // des lectures directes en cas d'erreur.
     if (!await BorneService.aUnBailValide() && !await BorneService.aUnSecret()) {
-      // Jamais provisionnée : le bandeau « Borne non autorisée » suffit,
-      // pas de popup à chaque ouverture.
-      if (mounted) setState(() => _bornePrete = false);
+      // Jamais provisionnée : bandeau « Borne à activer », pas de popup à
+      // chaque ouverture.
+      if (mounted) setState(() { _bornePrete = false; _etatBorne = 'aActiver'; });
       return;
     }
     final resultat = await BorneService.synchroniserPersonnel();
@@ -307,12 +319,21 @@ class _PointageScreenState extends State<PointageScreen> {
       if (mounted) {
         setState(() {
           _bornePrete = true;
+          _etatBorne = 'ok';
         });
       }
     } else {
+      // ⭐ PTG-01.5 : un refus ne s'affirme que s'il est prouvé ; une erreur
+      // réseau ou inconnue reste « non vérifié ».
+      final err = (resultat['erreur'] ?? '').toLowerCase();
+      final refuse = err.contains('autoris') ||
+          err.contains('refus') ||
+          err.contains('interdit') ||
+          err.contains('reconnu');
       if (mounted) {
         setState(() {
           _bornePrete = false;
+          _etatBorne = refuse ? 'refusee' : 'inconnu';
         });
         _afficherErreur(resultat['erreur'] ??
             'Synchronisation du personnel impossible.');
@@ -1387,6 +1408,8 @@ class _PointageScreenState extends State<PointageScreen> {
   void _afficherSuccesFacial(Map<String, dynamic> result) {
     // 🧭 Checklist : le premier pointage est fait.
     ChecklistService.marquerPremierPointage();
+    _memoriserEtatPointage(
+        result['check_type']?.toString() ?? 'in', false);
     final estEntree = result['check_type'] == 'in';
     final emp = result['employee'] as Map<String, dynamic>?;
     final nomAffiche = emp != null
@@ -2010,40 +2033,29 @@ class _PointageScreenState extends State<PointageScreen> {
                       color: EnCheckColors.terreChaude))
               : LayoutBuilder(
                   builder: (context, constraints) {
-                    // 📱 TÉLÉPHONE : mise en page dédiée, SANS DÉFILEMENT —
-                    // photo pleine largeur, marges réduites, informations
-                    // secondaires derrière des boutons nommés.
-                    if (estTelephone) {
+                    // ⭐ ZÉRO DÉFILEMENT GARANTI (validé le 4 nov) : petit
+                    // écran OU fenêtre basse → mise en page compacte qui se
+                    // répartit sur DEUX pages si besoin (jamais de défilement).
+                    // Sinon, la colonne fixe habituelle — non plus jamais
+                    // défilante.
+                    if (estTelephone || constraints.maxHeight < 780) {
                       return SansEtirement(
                         child: _colonneTelephone(
                             estEnLigne, themeService, constraints),
                       );
                     }
-                    // ZERO SCROLL en usage normal : la page s'affiche en
-                    // entier, a TAILLE NORMALE (jamais reduite). Le scroll
-                    // n'apparait qu'en secours si la fenetre est vraiment
-                    // trop courte — OU trop etroite : sous 620 px de large,
-                    // le contenu se replie et devient plus haut, il doit
-                    // alors pouvoir defiler.
-                    final scrollDeSecours = constraints.maxHeight < 780 ||
-                        constraints.maxWidth < 620;
                     final contenu = Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 24),
                       child: _colonnePrincipale(
                         estEnLigne,
                         themeService,
-                        margeFlexible: !scrollDeSecours,
+                        margeFlexible: true,
                       ),
                     );
                     return Center(
                       child: ConstrainedBox(
                         constraints: const BoxConstraints(maxWidth: 620),
-                        child: scrollDeSecours
-                            ? SingleChildScrollView(
-                                physics: const ClampingScrollPhysics(),
-                                child: contenu,
-                              )
-                            : contenu,
+                        child: contenu,
                       ),
                     );
                   },
@@ -2119,6 +2131,8 @@ class _PointageScreenState extends State<PointageScreen> {
               _buildCarteStatutJour(),
               if (margeFlexible) const Spacer(),
               const SizedBox(height: 12),
+              _bandeTextileBasse(),
+              const SizedBox(height: 8),
               _buildBarreNavigation(),
               const SizedBox(height: 8),
               Text(
@@ -2154,6 +2168,10 @@ class _PointageScreenState extends State<PointageScreen> {
   //  devient défilant AVEC une indication visible.
   // ═══════════════════════════════════════════════════════════
 
+  /// Page courante de l'accueil compact (0 = actions, 1 = informations)
+  /// quand le contenu se répartit sur deux écrans.
+  int _pageAccueil = 0;
+
   Widget _colonneTelephone(
     bool estEnLigne,
     ThemeService themeService,
@@ -2166,7 +2184,6 @@ class _PointageScreenState extends State<PointageScreen> {
     // La photo garde un cadrage correct sans manger la place des actions.
     final double hauteurScene =
         (hauteurTotale * (echelleTexte > 1.3 ? 0.14 : 0.20)).clamp(84.0, 168.0).toDouble();
-    final bool tropPetit = hauteurTotale < 560 || echelleTexte > 1.45;
 
     final entete = _buildScenePointage(estEnLigne, themeService,
         hauteur: hauteurScene, margeHaut: media.viewPadding.top);
@@ -2184,15 +2201,13 @@ class _PointageScreenState extends State<PointageScreen> {
       ),
     );
 
-    final List<Widget> blocs = [
-      _buildSalutation(taille: 27),
-      // 🧭 Même liste de démarrage, mêmes étapes, même fonctionnement :
-      // sur téléphone elle se résume à une ligne nommée qui les ouvre.
-      if (checklistVisible) ...[
-        const SizedBox(height: 10),
-        _ligneChecklist(),
-      ],
-      // Le rappel d'activation reste une alerte VISIBLE sur l'accueil.
+    // ⭐ ZÉRO DÉFILEMENT GARANTI (validé le 4 nov) : quand tout ne tient pas
+    // lisiblement, le contenu se répartit sur DEUX pages — actions et
+    // alertes d'un côté (prioritaires), informations de l'autre — avec les
+    // flèches discrètes ‹ ›. Jamais de défilement, jamais de contenu caché.
+    final List<Widget> blocsEssentiels = [
+      _buildSalutation(taille: echelleTexte > 1.3 ? 22 : 27),
+      // Le rappel d'activation reste une alerte VISIBLE.
       if ((_moduleRecoFacialeActif || _kioskMode) && !_bornePrete) ...[
         const SizedBox(height: 10),
         _buildBandeauBorne(),
@@ -2202,7 +2217,14 @@ class _PointageScreenState extends State<PointageScreen> {
         valueListenable: MotifService.actif,
         builder: (context, motif, _) => _buildCartesAction(),
       ),
-      const SizedBox(height: 10),
+    ];
+    final List<Widget> blocsSecondaires = [
+      // 🧭 Même liste de démarrage, mêmes étapes, même fonctionnement :
+      // sur petit écran elle se résume à une ligne nommée qui les ouvre.
+      if (checklistVisible) ...[
+        _ligneChecklist(),
+        const SizedBox(height: 10),
+      ],
       _buildBarreAujourdhui(),
       if (_moduleQRActif || _moduleRecoFacialeActif || _kioskMode) ...[
         const SizedBox(height: 8),
@@ -2210,37 +2232,45 @@ class _PointageScreenState extends State<PointageScreen> {
       ],
     ];
 
+    // Estimations LARGES (toujours surestimées) : la répartition reste
+    // déterministe et rien ne déborde jamais.
+    const double hEssentiels = 300;
+    const double hSecondaires = 230;
+    final double hFixe = hauteurScene + 8 + 12 + 70 + 26; // scène+frise+nav+pied
+    final double dispo = hauteurTotale - hFixe;
+    final bool deuxPages = (hEssentiels + hSecondaires) > dispo;
+    if (_pageAccueil > (deuxPages ? 1 : 0)) _pageAccueil = 0;
+
+    final contenuPage = deuxPages && _pageAccueil == 1
+        ? blocsSecondaires
+        : [
+            ...blocsEssentiels,
+            if (!deuxPages) ...[const SizedBox(height: 10), ...blocsSecondaires],
+          ];
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         entete,
         frise,
-        // Zone centrale : ne défile QUE si la configuration ne permet pas
-        // tout d'afficher d'un coup (jamais en silence : la bande
-        // « faites défiler » apparaît alors). Quand tout tient — le cas
-        // normal — la page est fixe : aucun geste ne la déforme.
         Expanded(
-          child: SingleChildScrollView(
-            physics: const ClampingScrollPhysics(),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const SizedBox(height: 12),
-                  ...blocs,
-                  const SizedBox(height: 12),
-                ],
-              ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const SizedBox(height: 12),
+                ...contenuPage,
+                const Spacer(),
+              ],
             ),
           ),
         ),
-        if (tropPetit)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: _bandeDefilement(),
-          ),
+        if (deuxPages) _barreFlechesAccueil(),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: _bandeTextileBasse(),
+        ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: _buildBarreNavigation(),
@@ -2249,6 +2279,47 @@ class _PointageScreenState extends State<PointageScreen> {
         pied,
         const SizedBox(height: 4),
       ],
+    );
+  }
+
+  /// ⭐ Flèches discrètes (‹ ›) de l'accueil compact, sans texte visible,
+  /// sémantique lecteur d'écran — mêmes flèches que l'historique.
+  Widget _barreFlechesAccueil() {
+    final couleur =
+        Theme.of(context).iconTheme.color ?? EnCheckColors.brunProfond;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          if (_pageAccueil > 0)
+            Semantics(
+              button: true,
+              label: 'Page précédente',
+              child: IconButton(
+                onPressed: () => setState(() => _pageAccueil -= 1),
+                icon: Icon(Icons.chevron_left, size: 28, color: couleur),
+                padding: const EdgeInsets.all(10),
+                constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+              ),
+            )
+          else
+            const SizedBox(width: 48, height: 48),
+          if (_pageAccueil < 1)
+            Semantics(
+              button: true,
+              label: 'Page suivante',
+              child: IconButton(
+                onPressed: () => setState(() => _pageAccueil += 1),
+                icon: Icon(Icons.chevron_right, size: 28, color: couleur),
+                padding: const EdgeInsets.all(10),
+                constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+              ),
+            )
+          else
+            const SizedBox(width: 48, height: 48),
+        ],
+      ),
     );
   }
 
@@ -2339,8 +2410,23 @@ class _PointageScreenState extends State<PointageScreen> {
     );
   }
 
+  /// ⭐ PTG-01.6 : mémorise l'ÉVÉNEMENT réellement enregistré (heure, type,
+  /// en attente d'envoi si hors-ligne) — jamais un nom sur la borne partagée.
+  void _memoriserEtatPointage(String type, bool enAttente) {
+    final jour = HeurePointage.jourDePointage(
+        {'check_time': DateTime.now().toIso8601String()});
+    if (!mounted) return;
+    setState(() {
+      _dernierPointageHeure = heureActuelle;
+      _dernierPointageType = type;
+      _dernierPointageEnAttente = enAttente;
+      _dernierPointageJour = jour;
+    });
+  }
+
   /// Texte d'état de la journée — carte « Aujourd'hui » ET bandeau téléphone.
-  /// Mêmes données réelles des deux côtés : aucune donnée inventée.
+  /// Mêmes données réelles des deux côtés : aucune donnée inventée, jamais
+  /// « aucun pointage » quand la vérité est « on ne sait pas ».
   String _texteStatutJour() {
     if (_pausesOuvertes.isNotEmpty) {
       final p = _pausesOuvertes.first;
@@ -2350,24 +2436,24 @@ class _PointageScreenState extends State<PointageScreen> {
           : PauseService.heureCourteDe(p['debut'] as String);
       return '$nom - en pause depuis $depuis';
     }
-    if (_dernierEmployePointe != null) {
-      final nom =
-          '${_dernierEmployePointe!['first_name'] ?? ''} ${_dernierEmployePointe!['last_name'] ?? ''}'
-              .trim();
-      if (nom.isNotEmpty) return '$nom - dernier pointage';
+    final jourNow = HeurePointage.jourDePointage(
+        {'check_time': DateTime.now().toIso8601String()});
+    if (_dernierPointageHeure != null && _dernierPointageJour == jourNow) {
+      if (_dernierPointageEnAttente) return 'Pointage en attente d\'envoi';
+      final mot = _dernierPointageType == 'in' ? 'Arrivée' : 'Départ';
+      return 'Dernier pointage : $_dernierPointageHeure — $mot';
     }
-    return 'En attente du premier pointage sur cette borne';
+    return 'Prêt pour les pointages';
   }
 
   Color _couleurStatutJour() {
     if (_pausesOuvertes.isNotEmpty) return EnCheckColors.alerte;
-    if (_dernierEmployePointe != null) {
-      final nom =
-          '${_dernierEmployePointe!['first_name'] ?? ''} ${_dernierEmployePointe!['last_name'] ?? ''}'
-              .trim();
-      if (nom.isNotEmpty) return EnCheckColors.succes;
+    if (_dernierPointageHeure != null && _dernierPointageEnAttente) {
+      return EnCheckColors.terreChaude;
     }
-    return EnCheckColors.gris;
+    // « Prêt pour les pointages » et le dernier pointage : point vert
+    // (maquette validée).
+    return EnCheckColors.succes;
   }
 
   /// Bandeau compact « Aujourd'hui » : le détail complet s'ouvre derrière
@@ -2846,21 +2932,47 @@ class _PointageScreenState extends State<PointageScreen> {
 
   /// 🖥️ CONTRAT ÉTAPE 3 — bandeau de la borne autorisée.
   Widget _buildBandeauBorne() {
-    // ⭐ PTG-01.3 : lisibilité garantie en mode clair ET en mode sombre
-    // (le bandeau « Borne non autorisée » était presque invisible en sombre).
+    // ⭐ PTG-01.3 (lisibilité clair/sombre) + PTG-01.5 (4 états honnêtes) :
+    // on n'affirme un refus QUE s'il est prouvé ; sinon on dit que l'état
+    // est non vérifié. Les droits et la logique d'autorisation ne changent
+    // pas — seul l'affichage dit la vérité sur ce qui est connu.
     final sombre = Theme.of(context).brightness == Brightness.dark;
-    final couleurFond = _bornePrete
-        ? Colors.green.withOpacity(sombre ? 0.18 : 0.08)
-        : Colors.indigo.withOpacity(sombre ? 0.25 : 0.08);
-    final couleurBord = _bornePrete
-        ? Colors.green.withOpacity(0.35)
-        : Colors.indigo.withOpacity(0.35);
-    final couleurIcone = _bornePrete
-        ? (sombre ? Colors.green.shade300 : Colors.green.shade700)
-        : (sombre ? Colors.indigo.shade200 : Colors.indigo.shade400);
-    final couleurTexte = _bornePrete
-        ? (sombre ? Colors.green.shade200 : Colors.green.shade800)
-        : (sombre ? Colors.indigo.shade100 : Colors.indigo.shade700);
+    final etat = _bornePrete ? 'ok' : _etatBorne;
+    Color couleurFond;
+    Color couleurBord;
+    Color couleurIcone;
+    Color couleurTexte;
+    String texte;
+    if (etat == 'ok') {
+      couleurFond = Colors.green.withOpacity(sombre ? 0.18 : 0.08);
+      couleurBord = Colors.green.withOpacity(0.35);
+      couleurIcone = sombre ? Colors.green.shade300 : Colors.green.shade700;
+      couleurTexte = sombre ? Colors.green.shade200 : Colors.green.shade800;
+      texte =
+          "Borne autorisée — personnel synchronisé. Touchez pour gérer.";
+    } else if (etat == 'refusee') {
+      couleurFond = EnCheckColors.erreur.withOpacity(sombre ? 0.22 : 0.08);
+      couleurBord = EnCheckColors.erreur.withOpacity(0.4);
+      couleurIcone = sombre ? const Color(0xFFE57373) : EnCheckColors.erreur;
+      couleurTexte = sombre ? const Color(0xFFFFCDD2) : EnCheckColors.erreur;
+      texte =
+          "Borne non autorisée (le serveur a refusé l'accès) — touchez pour gérer.";
+    } else if (etat == 'aActiver') {
+      couleurFond = Colors.indigo.withOpacity(sombre ? 0.25 : 0.08);
+      couleurBord = Colors.indigo.withOpacity(0.35);
+      couleurIcone = sombre ? Colors.indigo.shade200 : Colors.indigo.shade400;
+      couleurTexte = sombre ? Colors.indigo.shade100 : Colors.indigo.shade700;
+      texte = "Borne à activer — touchez pour saisir l'identifiant "
+          "et le secret fournis par le superadmin.";
+    } else {
+      couleurFond = EnCheckColors.terreChaude.withOpacity(sombre ? 0.22 : 0.1);
+      couleurBord = EnCheckColors.terreChaude.withOpacity(0.4);
+      couleurIcone = EnCheckColors.terreChaude;
+      couleurTexte =
+          sombre ? EnCheckColors.sableDore : EnCheckColors.brunProfond;
+      texte = "État de la borne non vérifié (vérification impossible "
+          "pour l'instant) — touchez pour gérer.";
+    }
     return GestureDetector(
       onTap: _afficherDialogBorne,
       child: Container(
@@ -2873,24 +2985,16 @@ class _PointageScreenState extends State<PointageScreen> {
         ),
         child: Row(
           children: [
-            Icon(
-              _bornePrete ? Icons.laptop_mac : Icons.laptop,
-              size: 20,
-              color: couleurIcone,
-            ),
+            Icon(etat == 'ok' ? Icons.laptop_mac : Icons.laptop,
+                size: 20, color: couleurIcone),
             const SizedBox(width: 10),
             Expanded(
-              child: Text(
-                _bornePrete
-                    ? "Borne autorisée — personnel synchronisé. Touchez pour gérer."
-                    : "Borne non autorisée — touchez pour saisir l'identifiant "
-                        "et le secret fournis par le superadmin.",
-                style: TextStyle(
-                  fontSize: 12.5,
-                  height: 1.35,
-                  color: couleurTexte,
-                ),
-              ),
+              child: Text(texte,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    height: 1.35,
+                    color: couleurTexte,
+                  )),
             ),
           ],
         ),
@@ -3666,10 +3770,10 @@ class _PointageScreenState extends State<PointageScreen> {
                 // ⭐ PTG-01.2 : logo En-Check officiel + logo client (repli : nom).
                 Image.asset(
                   'assets/logo_encheck.png',
-                  height: 34,
-                  width: 34,
+                  height: 32,
+                  width: 32,
                   fit: BoxFit.contain,
-                  errorBuilder: (_, __, ___) => const LogoEmpreinte(taille: 34),
+                  errorBuilder: (_, __, ___) => const LogoEmpreinte(taille: 32),
                 ),
                 const SizedBox(width: 8),
                 _logoClientOuNom(),
@@ -3711,16 +3815,21 @@ class _PointageScreenState extends State<PointageScreen> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                _rondScene(
-                  icon: Icons.light_mode,
-                  actif: !themeService.isDarkMode,
-                  onTap: () => themeService.setDarkMode(false),
-                ),
-                const SizedBox(width: 6),
-                _rondScene(
-                  icon: Icons.dark_mode,
-                  actif: themeService.isDarkMode,
-                  onTap: () => themeService.setDarkMode(true),
+                // ⭐ UN SEUL bouton clair/sombre (demande du 4 nov) : un
+                // clic bascule le mode ; le choix reste mémorisé.
+                Semantics(
+                  button: true,
+                  label: themeService.isDarkMode
+                      ? 'Activer le mode clair'
+                      : 'Activer le mode sombre',
+                  child: _rondScene(
+                    icon: themeService.isDarkMode
+                        ? Icons.dark_mode
+                        : Icons.light_mode,
+                    actif: true,
+                    onTap: () =>
+                        themeService.setDarkMode(!themeService.isDarkMode),
+                  ),
                 ),
               ],
             ),
@@ -3753,14 +3862,14 @@ class _PointageScreenState extends State<PointageScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            padding: const EdgeInsets.all(3),
+            padding: const EdgeInsets.all(2),
             decoration: BoxDecoration(
               color: Colors.white.withOpacity(0.92),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Image.network(
               logo,
-              height: 26,
+              height: 28,
               fit: BoxFit.contain,
               errorBuilder: (_, __, ___) => Text(nom,
                   maxLines: 1,
@@ -3800,7 +3909,17 @@ class _PointageScreenState extends State<PointageScreen> {
     final sombre = Theme.of(context).brightness == Brightness.dark;
     final couleurTexte =
         sombre ? const Color(0xFFF5F1EA) : const Color(0xFF2A2118);
-    return Column(
+    // ⭐ DÉCOR « ENVELOPPANT » (validé le 4 nov) : la zone de bienvenue
+    // baigne dans les couleurs douces du motif choisi (motif d'origine,
+    // jamais redessiné).
+    final motif = MotifService.actif.value;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: motif.couleurTint.withOpacity(sombre ? 0.35 : 0.6),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
@@ -3823,6 +3942,25 @@ class _PointageScreenState extends State<PointageScreen> {
               color: sombre ? const Color(0xFFB7AFA4) : const Color(0xFF7A6E60)),
         ),
       ],
+      ),
+    );
+  }
+
+  /// ⭐ Bande textile décorative « enveloppante » (motif d'origine, jamais
+  /// redessiné) — placée au-dessus de la navigation, dans les zones libres.
+  Widget _bandeTextileBasse() {
+    return Opacity(
+      opacity: 0.45,
+      child: Container(
+        height: 16,
+        decoration: BoxDecoration(
+          image: DecorationImage(
+            image: AssetImage(MotifService.actif.value.asset),
+            fit: BoxFit.cover,
+            repeat: ImageRepeat.repeatX,
+          ),
+        ),
+      ),
     );
   }
 
@@ -3931,12 +4069,8 @@ class _PointageScreenState extends State<PointageScreen> {
       chips.add(
           _pastilleNom((pause['nom'] ?? 'Employe').toString(), EnCheckColors.alerte));
     }
-    if (_dernierEmployePointe != null) {
-      final nom =
-          '${_dernierEmployePointe!['first_name'] ?? ''} ${_dernierEmployePointe!['last_name'] ?? ''}'
-              .trim();
-      if (nom.isNotEmpty) chips.add(_pastilleNom(nom, EnCheckColors.succes));
-    }
+    // ⭐ PTG-01.6 : pas de nom de salarié pour un pointage (borne partagée) ;
+    // seules les pauses conservent leur visibilité existante.
 
     final statut = _texteStatutJour();
     final statutCouleur = _couleurStatutJour();
@@ -5425,6 +5559,7 @@ class _PointageScreenState extends State<PointageScreen> {
       }) {
     // 🧭 Checklist : le premier pointage est fait.
     ChecklistService.marquerPremierPointage();
+    _memoriserEtatPointage(type, horsLigne);
     final estEntree = type == 'in';
     final horaires = _getEmployeeScheduleInfo();
 

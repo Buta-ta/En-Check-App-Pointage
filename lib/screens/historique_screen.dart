@@ -187,9 +187,49 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
     }
   }
 
-  /// « ⏸ Je pars en pause » — marche aussi hors-ligne (file d'attente locale).
+  /// true = service en cours, false = absence certaine, null = invérifiable.
+  bool? _etatServiceDuJour() {
+    if (erreur != null || chargement) return null;
+    if (!ConnectivityService.isOnline && pointages.isEmpty) return null;
+    final duJour = _pointagesDuJour;
+    if (duJour.isEmpty) return false;
+    return duJour.last['check_type'] == 'in';
+  }
+
+  /// « Je pars en pause » — marche aussi hors-ligne (file d'attente locale).
   Future<void> _partirEnPause() async {
     if (_pauseActionEnCours) return; // verrou anti-double-tap (fiche LOT D)
+    // ⭐ CHOIX VALIDÉ DU FONDATEUR (4 nov 2026, option 2) : sans service
+    // confirmé, on AVERTIT puis la personne confirme ou annule. Si l'état
+    // est invérifiable, on le dit au lieu d'affirmer une absence.
+    final etatService = _etatServiceDuJour();
+    if (etatService != true) {
+      final continuer = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: Theme.of(context).cardColor,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Text(etatService == false
+              ? 'Pas de service en cours'
+              : 'Service non vérifié'),
+          content: Text(etatService == false
+              ? "Vous n'avez pas de service en cours. "
+                  "Voulez-vous quand même partir en pause ?"
+              : "Impossible de vérifier votre service en cours. "
+                  "Voulez-vous partir en pause ?"),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Annuler')),
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Continuer')),
+          ],
+        ),
+      );
+      if (continuer != true || !mounted) return;
+    }
     setState(() => _pauseActionEnCours = true);
     try {
       final etat = await PauseService.partirEnPause(
@@ -279,7 +319,7 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
       setState(() => _rappelAffiche = true);
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text(
-            'Toujours en pause ? Touche ▶ Je reprends si tu es de retour.'),
+            'Toujours en pause ? Touche « Je reprends » si tu es de retour.'),
         backgroundColor: EnCheckColors.terreChaude,
       ));
     }
@@ -389,7 +429,7 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
                     SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Toujours en pause ? Touche ▶ Je reprends si tu es de retour.',
+                        'Toujours en pause ? Touche « Je reprends » si tu es de retour.',
                         style: TextStyle(
                             fontSize: 12, color: EnCheckColors.terreChaude),
                       ),
@@ -422,7 +462,7 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
               child: ElevatedButton.icon(
                 onPressed: _pauseActionEnCours ? null : _reprendrePause,
                 icon: const Icon(Icons.play_arrow),
-                label: const Text('▶ Je reprends'),
+                label: const Text('Je reprends'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: EnCheckColors.succes,
                   foregroundColor: EnCheckColors.blanc,
@@ -462,7 +502,7 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
               child: ElevatedButton.icon(
                 onPressed: _pauseActionEnCours ? null : _partirEnPause,
                 icon: const Icon(Icons.pause),
-                label: const Text('⏸ Je pars en pause'),
+                label: const Text('Je pars en pause'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: EnCheckColors.terreChaude,
                   foregroundColor: EnCheckColors.blanc,
@@ -1006,15 +1046,26 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
   /// aucune donnée n'est supprimée, aucune règle de paie/pause/sync n'est
   /// touchée).
   List<Map<String, dynamic>> _pointagesSeptJours() {
-    final depart =
-        HeurePointage.maintenant().subtract(const Duration(days: 6));
-    final jourDepart =
-        HeurePointage.jourDePointage({'check_time': depart.toIso8601String()});
-    return pointages
-        .where(
-            (p) => HeurePointage.jourDePointage(p).compareTo(jourDepart) >= 0)
-        .toList();
+    // ⭐ CORRECTIF VÉRIFIÉ (analyse du 4 nov) : les bornes se calculent dans
+    // le domaine de l'heure MURALE de l'entreprise (déjà convertie), SANS
+    // reconvertir — sinon le décalage s'appliquait deux fois et le 7e jour
+    // disparaissait dans la dernière heure du jour. Limite haute explicite :
+    // aujourd'hui (aucune date future affichée comme récente).
+    final m = HeurePointage.maintenant();
+    final jourFin = _cleJourLocal(m);
+    final jourDepart = _cleJourLocal(DateTime(m.year, m.month, m.day - 6));
+    return pointages.where((p) {
+      final j = HeurePointage.jourDePointage(p);
+      // Un horodatage illisible reste consultable (« Journée inconnue ») :
+      // aucun pointage n'est jamais masqué.
+      if (j == HeurePointage.jourInconnu) return true;
+      return j.compareTo(jourDepart) >= 0 && j.compareTo(jourFin) <= 0;
+    }).toList();
   }
+
+  /// Clé « AAAA-MM-JJ » depuis les CHAMPS d'une date murale.
+  String _cleJourLocal(DateTime d) =>
+      '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
   Widget _zoneSeptJours() {
     return LayoutBuilder(builder: (context, constraints) {
