@@ -2129,10 +2129,10 @@ class _PointageScreenState extends State<PointageScreen> {
                 const SizedBox(height: 12),
               ],
               _buildCarteStatutJour(),
+              const SizedBox(height: 12),
+              _cartePublicite(),
               if (margeFlexible) const Spacer(),
               const SizedBox(height: 12),
-              _bandeTextileBasse(),
-              const SizedBox(height: 8),
               _buildBarreNavigation(),
               const SizedBox(height: 8),
               Text(
@@ -2230,6 +2230,9 @@ class _PointageScreenState extends State<PointageScreen> {
         const SizedBox(height: 8),
         _boutonAutresModes(),
       ],
+      // ⭐ MAQUETTE : encart « PUBLICITÉ » au-dessus de la navigation.
+      const SizedBox(height: 8),
+      _cartePublicite(),
     ];
 
     // Estimations LARGES (toujours surestimées) : la répartition reste
@@ -2267,10 +2270,6 @@ class _PointageScreenState extends State<PointageScreen> {
           ),
         ),
         if (deuxPages) _barreFlechesAccueil(),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: _bandeTextileBasse(),
-        ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: _buildBarreNavigation(),
@@ -2477,8 +2476,8 @@ class _PointageScreenState extends State<PointageScreen> {
           children: [
             Row(
               children: [
-                const Icon(Icons.today_outlined,
-                    size: 16, color: EnCheckColors.terreChaude),
+                Icon(Icons.calendar_today_outlined,
+                    size: 15, color: EnCheckColors.terreChaude),
                 const SizedBox(width: 8),
                 const Text("AUJOURD'HUI",
                     style: TextStyle(
@@ -2500,12 +2499,12 @@ class _PointageScreenState extends State<PointageScreen> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                          fontSize: 13, fontWeight: FontWeight.w600)),
+                          fontSize: 14, fontWeight: FontWeight.w700)),
                 ),
                 const SizedBox(width: 6),
                 const Text('Voir ma journée',
                     style: TextStyle(
-                        fontSize: 12,
+                        fontSize: 12.5,
                         fontWeight: FontWeight.w700,
                         color: EnCheckColors.terreChaude)),
                 const Icon(Icons.chevron_right,
@@ -2577,17 +2576,18 @@ class _PointageScreenState extends State<PointageScreen> {
 
   /// Bouton nommé « Autres modes » — QR, visage, enrôlement derrière lui.
   Widget _boutonAutresModes() {
+    final accent = MotifService.actif.value.couleurAccent;
     return SizedBox(
-      height: 48,
+      height: 50,
       child: OutlinedButton.icon(
         onPressed: _ouvrirFeuilleModes,
-        icon: const Icon(Icons.apps_rounded, size: 18),
-        label: const Text('Autres modes',
-            style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700)),
+        icon: Icon(Icons.grid_view_rounded, size: 18, color: accent),
+        label: Text('Autres modes',
+            style: TextStyle(
+                fontSize: 14, fontWeight: FontWeight.w700, color: accent)),
         style: OutlinedButton.styleFrom(
-          foregroundColor: EnCheckColors.terreChaude,
-          side: BorderSide(
-              color: EnCheckColors.terreChaude.withOpacity(0.55), width: 1.3),
+          backgroundColor: Theme.of(context).cardColor,
+          side: BorderSide(color: accent.withOpacity(0.75), width: 1.4),
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         ),
@@ -3761,34 +3761,60 @@ class _PointageScreenState extends State<PointageScreen> {
               ),
             ),
           ),
+          // ⭐ MAQUETTE VALIDÉE DU FONDATEUR (5 nov) : en haut deux pastilles
+          // blanches (En-Check | logo client), en bas la plaque sombre
+          // heure/date et le bouton rond soleil|lune.
           Positioned(
             top: 12 + margeHaut,
-            left: 16,
-            right: 16,
+            left: 14,
+            right: 14,
             child: Row(
               children: [
-                // ⭐ PTG-01.2 : logo En-Check officiel + logo client (repli : nom).
-                Image.asset(
-                  'assets/logo_encheck.png',
-                  height: 32,
-                  width: 32,
-                  fit: BoxFit.contain,
-                  errorBuilder: (_, __, ___) => const LogoEmpreinte(taille: 32),
-                ),
-                const SizedBox(width: 8),
-                _logoClientOuNom(),
-                const Spacer(),
-                // ⭐ PTG-01.2 : heure et date RÉELLES sur plaque contrastée
-                // (lisibles en clair et en sombre, plus de date fondue
-                // dans la photo).
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.45),
-                    borderRadius: BorderRadius.circular(12),
-                    border:
-                        Border.all(color: Colors.white.withOpacity(0.18)),
+                    color: Colors.white.withOpacity(0.94),
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Image.asset(
+                        'assets/logo_encheck.png',
+                        height: 24,
+                        width: 24,
+                        fit: BoxFit.contain,
+                        errorBuilder: (_, __, ___) =>
+                            const LogoEmpreinte(taille: 24),
+                      ),
+                      const SizedBox(width: 8),
+                      const Text('En-Check',
+                          style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF2A2118))),
+                    ],
+                  ),
+                ),
+                const Spacer(),
+                _pastilleLogoClient(),
+              ],
+            ),
+          ),
+          Positioned(
+            bottom: 12,
+            left: 14,
+            right: 14,
+            child: Row(
+              children: [
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 14, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF3D2B1F).withOpacity(0.92),
+                    borderRadius: BorderRadius.circular(16),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
@@ -3798,9 +3824,9 @@ class _PointageScreenState extends State<PointageScreen> {
                         heureActuelle,
                         style: const TextStyle(
                           fontFamily: 'JetBrainsMono',
-                          fontSize: 16,
+                          fontSize: 20,
                           fontWeight: FontWeight.w700,
-                          color: EnCheckColors.blanc,
+                          color: Colors.white,
                         ),
                       ),
                       const SizedBox(height: 1),
@@ -3808,29 +3834,14 @@ class _PointageScreenState extends State<PointageScreen> {
                         dateActuelle,
                         style: TextStyle(
                           fontSize: 10.5,
-                          color: EnCheckColors.blanc.withOpacity(0.95),
+                          color: Colors.white.withOpacity(0.92),
                         ),
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(width: 8),
-                // ⭐ UN SEUL bouton clair/sombre (demande du 4 nov) : un
-                // clic bascule le mode ; le choix reste mémorisé.
-                Semantics(
-                  button: true,
-                  label: themeService.isDarkMode
-                      ? 'Activer le mode clair'
-                      : 'Activer le mode sombre',
-                  child: _rondScene(
-                    icon: themeService.isDarkMode
-                        ? Icons.dark_mode
-                        : Icons.light_mode,
-                    actif: true,
-                    onTap: () =>
-                        themeService.setDarkMode(!themeService.isDarkMode),
-                  ),
-                ),
+                const SizedBox(width: 12),
+                _boutonSoleilLune(themeService),
               ],
             ),
           ),
@@ -3839,42 +3850,140 @@ class _PointageScreenState extends State<PointageScreen> {
     );
   }
 
-  /// ⭐ PTG-01.2 : logo de l'entreprise cliente (vrai logo configuré), ou
-  /// son NOM à la place s'il manque ou ne se charge pas. Jamais le logo
+  /// ⭐ MAQUETTE : pastille blanche « logo client » (vrai logo configuré),
+  /// ou son NOM à la place s'il manque ou ne se charge pas. Jamais le logo
   /// d'une autre entreprise, jamais de logo inventé.
-  Widget _logoClientOuNom() {
+  Widget _pastilleLogoClient() {
     final logo = entrepriseSelectionnee?['logo_url']?.toString();
     final nom = entrepriseSelectionnee?['name']?.toString() ?? '';
-    final styleNom = TextStyle(
-      fontSize: 13.5,
-      fontWeight: FontWeight.w700,
-      color: EnCheckColors.blanc,
-      shadows: const [Shadow(color: Colors.black54, blurRadius: 6)],
-    );
-    if (logo == null || logo.isEmpty) {
-      return Flexible(
-        child: Text(nom,
-            maxLines: 1, overflow: TextOverflow.ellipsis, style: styleNom),
-      );
-    }
     return Flexible(
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(2),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.92),
-              borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.94),
+          borderRadius: BorderRadius.circular(24),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (logo != null && logo.isNotEmpty)
+              ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: Image.network(
+                  logo,
+                  height: 22,
+                  width: 22,
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, __, ___) => const Icon(Icons.business,
+                      size: 18, color: Color(0xFF2A2118)),
+                ),
+              )
+            else
+              const Icon(Icons.business, size: 18, color: Color(0xFF2A2118)),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(nom,
+                  maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF2A2118))),
             ),
-            child: Image.network(
-              logo,
-              height: 28,
-              fit: BoxFit.contain,
-              errorBuilder: (_, __, ___) => Text(nom,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: styleNom),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// ⭐ MAQUETTE : bouton rond unique « moitié soleil | moitié lune » — un
+  /// clic bascule clair/sombre, le choix reste mémorisé.
+  Widget _boutonSoleilLune(ThemeService themeService) {
+    return Semantics(
+      button: true,
+      label: themeService.isDarkMode
+          ? 'Activer le mode clair'
+          : 'Activer le mode sombre',
+      child: GestureDetector(
+        onTap: () => themeService.setDarkMode(!themeService.isDarkMode),
+        child: Container(
+          width: 52,
+          height: 52,
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.95),
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                  color: Colors.black.withOpacity(0.12),
+                  blurRadius: 8,
+                  offset: const Offset(0, 3)),
+            ],
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.wb_sunny,
+                  size: 18,
+                  color: themeService.isDarkMode
+                      ? const Color(0xFF9A938A)
+                      : const Color(0xFFB8941F)),
+              Container(width: 1, height: 18, color: Colors.black26),
+              Icon(Icons.nightlight_round,
+                  size: 18,
+                  color: themeService.isDarkMode
+                      ? const Color(0xFF2A2118)
+                      : const Color(0xFF9A938A)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// ⭐ MAQUETTE : encart « PUBLICITÉ » de l'accueil. L'emplacement est
+  /// affiché en attendant le pilotage depuis En-Check Admin (chantier
+  /// séparé) ; aucun contenu ni chiffre n'est inventé.
+  Widget _cartePublicite() {
+    final motif = MotifService.actif.value;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(16),
+        border:
+            Border.all(color: Theme.of(context).dividerColor.withOpacity(0.35)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: const [
+                Text('PUBLICITÉ',
+                    style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1.6,
+                        color: EnCheckColors.gris)),
+                SizedBox(height: 4),
+                Text('Votre publicité ici',
+                    style:
+                        TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Container(
+            width: 110,
+            height: 56,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              image: DecorationImage(
+                image: AssetImage(motif.asset),
+                fit: BoxFit.cover,
+                colorFilter: ColorFilter.mode(
+                    Colors.white.withOpacity(0.5), BlendMode.lighten),
+              ),
             ),
           ),
         ],
@@ -3909,17 +4018,7 @@ class _PointageScreenState extends State<PointageScreen> {
     final sombre = Theme.of(context).brightness == Brightness.dark;
     final couleurTexte =
         sombre ? const Color(0xFFF5F1EA) : const Color(0xFF2A2118);
-    // ⭐ DÉCOR « ENVELOPPANT » (validé le 4 nov) : la zone de bienvenue
-    // baigne dans les couleurs douces du motif choisi (motif d'origine,
-    // jamais redessiné).
-    final motif = MotifService.actif.value;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: motif.couleurTint.withOpacity(sombre ? 0.35 : 0.6),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
@@ -3942,25 +4041,6 @@ class _PointageScreenState extends State<PointageScreen> {
               color: sombre ? const Color(0xFFB7AFA4) : const Color(0xFF7A6E60)),
         ),
       ],
-      ),
-    );
-  }
-
-  /// ⭐ Bande textile décorative « enveloppante » (motif d'origine, jamais
-  /// redessiné) — placée au-dessus de la navigation, dans les zones libres.
-  Widget _bandeTextileBasse() {
-    return Opacity(
-      opacity: 0.45,
-      child: Container(
-        height: 16,
-        decoration: BoxDecoration(
-          image: DecorationImage(
-            image: AssetImage(MotifService.actif.value.asset),
-            fit: BoxFit.cover,
-            repeat: ImageRepeat.repeatX,
-          ),
-        ),
-      ),
     );
   }
 
