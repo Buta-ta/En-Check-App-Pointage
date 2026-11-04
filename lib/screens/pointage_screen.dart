@@ -1406,7 +1406,7 @@ class _PointageScreenState extends State<PointageScreen> {
                 color: EnCheckColors.succes, size: 30),
             const SizedBox(width: 10),
             Text(
-              estEntree ? 'ENTRÉE' : 'SORTIE',
+              estEntree ? 'Arrivée' : 'Départ',
               style: const TextStyle(
                   color: EnCheckColors.succes,
                   fontWeight: FontWeight.w300,
@@ -2356,7 +2356,7 @@ class _PointageScreenState extends State<PointageScreen> {
               .trim();
       if (nom.isNotEmpty) return '$nom - dernier pointage';
     }
-    return 'Votre journée apparaîtra ici après votre premier pointage';
+    return 'En attente du premier pointage sur cette borne';
   }
 
   Color _couleurStatutJour() {
@@ -2452,12 +2452,16 @@ class _PointageScreenState extends State<PointageScreen> {
             children: [
               Row(
                 children: [
-                  const Expanded(
+                  Expanded(
                     child: Text('Ma journée',
                         style: TextStyle(
                             fontSize: 21,
                             fontWeight: FontWeight.w800,
-                            color: EnCheckColors.brunProfond)),
+                            color: Theme.of(context)
+                                    .textTheme
+                                    .titleLarge
+                                    ?.color ??
+                                EnCheckColors.brunProfond)),
                   ),
                   IconButton(
                     onPressed: () => Navigator.pop(sheetContext),
@@ -2467,6 +2471,17 @@ class _PointageScreenState extends State<PointageScreen> {
               ),
               const SizedBox(height: 6),
               _buildCarteStatutJour(),
+              const SizedBox(height: 10),
+              // ⭐ PTG-01.6 : on n'affirme jamais « aucun pointage » à la
+              // place d'une vérité : la journée personnelle se consulte
+              // dans l'Historique, après identification.
+              Text(
+                'Votre journée personnelle se consulte dans l\'Historique, '
+                'après identification.',
+                style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(context).textTheme.bodyMedium?.color),
+              ),
             ],
           ),
         );
@@ -2514,12 +2529,16 @@ class _PointageScreenState extends State<PointageScreen> {
             children: [
               Row(
                 children: [
-                  const Expanded(
+                  Expanded(
                     child: Text('Autres modes',
                         style: TextStyle(
                             fontSize: 21,
                             fontWeight: FontWeight.w800,
-                            color: EnCheckColors.brunProfond)),
+                            color: Theme.of(context)
+                                    .textTheme
+                                    .titleLarge
+                                    ?.color ??
+                                EnCheckColors.brunProfond)),
                   ),
                   IconButton(
                     onPressed: () => Navigator.pop(sheetContext),
@@ -2827,30 +2846,37 @@ class _PointageScreenState extends State<PointageScreen> {
 
   /// 🖥️ CONTRAT ÉTAPE 3 — bandeau de la borne autorisée.
   Widget _buildBandeauBorne() {
+    // ⭐ PTG-01.3 : lisibilité garantie en mode clair ET en mode sombre
+    // (le bandeau « Borne non autorisée » était presque invisible en sombre).
+    final sombre = Theme.of(context).brightness == Brightness.dark;
+    final couleurFond = _bornePrete
+        ? Colors.green.withOpacity(sombre ? 0.18 : 0.08)
+        : Colors.indigo.withOpacity(sombre ? 0.25 : 0.08);
+    final couleurBord = _bornePrete
+        ? Colors.green.withOpacity(0.35)
+        : Colors.indigo.withOpacity(0.35);
+    final couleurIcone = _bornePrete
+        ? (sombre ? Colors.green.shade300 : Colors.green.shade700)
+        : (sombre ? Colors.indigo.shade200 : Colors.indigo.shade400);
+    final couleurTexte = _bornePrete
+        ? (sombre ? Colors.green.shade200 : Colors.green.shade800)
+        : (sombre ? Colors.indigo.shade100 : Colors.indigo.shade700);
     return GestureDetector(
       onTap: _afficherDialogBorne,
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
         decoration: BoxDecoration(
-          color: _bornePrete
-              ? Colors.green.withOpacity(0.08)
-              : Colors.indigo.withOpacity(0.08),
+          color: couleurFond,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: _bornePrete
-                ? Colors.green.withOpacity(0.35)
-                : Colors.indigo.withOpacity(0.35),
-          ),
+          border: Border.all(color: couleurBord),
         ),
         child: Row(
           children: [
             Icon(
               _bornePrete ? Icons.laptop_mac : Icons.laptop,
               size: 20,
-              color: _bornePrete
-                  ? Colors.green.shade700
-                  : Colors.indigo.shade400,
+              color: couleurIcone,
             ),
             const SizedBox(width: 10),
             Expanded(
@@ -2862,9 +2888,7 @@ class _PointageScreenState extends State<PointageScreen> {
                 style: TextStyle(
                   fontSize: 12.5,
                   height: 1.35,
-                  color: _bornePrete
-                      ? Colors.green.shade800
-                      : Colors.indigo.shade700,
+                  color: couleurTexte,
                 ),
               ),
             ),
@@ -3608,7 +3632,6 @@ class _PointageScreenState extends State<PointageScreen> {
   /// (l'image actuelle de l'app), l'identite et l'heure par-dessus.
   Widget _buildScenePointage(bool estEnLigne, ThemeService themeService,
       {double hauteur = 250, double margeHaut = 0}) {
-    final nomEntreprise = entrepriseSelectionnee?['name']?.toString() ?? '';
     return SizedBox(
       height: hauteur,
       child: Stack(
@@ -3640,49 +3663,54 @@ class _PointageScreenState extends State<PointageScreen> {
             right: 16,
             child: Row(
               children: [
-                const LogoEmpreinte(taille: 36),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    nomEntreprise,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 15.5,
-                      fontWeight: FontWeight.w700,
-                      color: EnCheckColors.blanc,
-                      shadows: [
-                        Shadow(color: Colors.black54, blurRadius: 6),
-                      ],
-                    ),
+                // ⭐ PTG-01.2 : logo En-Check officiel + logo client (repli : nom).
+                Image.asset(
+                  'assets/logo_encheck.png',
+                  height: 34,
+                  width: 34,
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, __, ___) => const LogoEmpreinte(taille: 34),
+                ),
+                const SizedBox(width: 8),
+                _logoClientOuNom(),
+                const Spacer(),
+                // ⭐ PTG-01.2 : heure et date RÉELLES sur plaque contrastée
+                // (lisibles en clair et en sombre, plus de date fondue
+                // dans la photo).
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.45),
+                    borderRadius: BorderRadius.circular(12),
+                    border:
+                        Border.all(color: Colors.white.withOpacity(0.18)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        heureActuelle,
+                        style: const TextStyle(
+                          fontFamily: 'JetBrainsMono',
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          color: EnCheckColors.blanc,
+                        ),
+                      ),
+                      const SizedBox(height: 1),
+                      Text(
+                        dateActuelle,
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          color: EnCheckColors.blanc.withOpacity(0.95),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      heureActuelle,
-                      style: const TextStyle(
-                        fontFamily: 'JetBrainsMono',
-                        fontSize: 17,
-                        fontWeight: FontWeight.w700,
-                        color: EnCheckColors.blanc,
-                        shadows: [
-                          Shadow(color: Colors.black54, blurRadius: 6),
-                        ],
-                      ),
-                    ),
-                    Text(
-                      dateActuelle,
-                      style: TextStyle(
-                        fontSize: 10.5,
-                        color: EnCheckColors.blanc.withOpacity(0.9),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(width: 10),
+                const SizedBox(width: 8),
                 _rondScene(
                   icon: Icons.light_mode,
                   actif: !themeService.isDarkMode,
@@ -3695,6 +3723,49 @@ class _PointageScreenState extends State<PointageScreen> {
                   onTap: () => themeService.setDarkMode(true),
                 ),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// ⭐ PTG-01.2 : logo de l'entreprise cliente (vrai logo configuré), ou
+  /// son NOM à la place s'il manque ou ne se charge pas. Jamais le logo
+  /// d'une autre entreprise, jamais de logo inventé.
+  Widget _logoClientOuNom() {
+    final logo = entrepriseSelectionnee?['logo_url']?.toString();
+    final nom = entrepriseSelectionnee?['name']?.toString() ?? '';
+    final styleNom = TextStyle(
+      fontSize: 13.5,
+      fontWeight: FontWeight.w700,
+      color: EnCheckColors.blanc,
+      shadows: const [Shadow(color: Colors.black54, blurRadius: 6)],
+    );
+    if (logo == null || logo.isEmpty) {
+      return Flexible(
+        child: Text(nom,
+            maxLines: 1, overflow: TextOverflow.ellipsis, style: styleNom),
+      );
+    }
+    return Flexible(
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(3),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.92),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Image.network(
+              logo,
+              height: 26,
+              fit: BoxFit.contain,
+              errorBuilder: (_, __, ___) => Text(nom,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: styleNom),
             ),
           ),
         ],
@@ -4220,16 +4291,16 @@ class _PointageScreenState extends State<PointageScreen> {
       final gpsOk = await _verifierPositionGPS();
       if (!gpsOk) return;
     }
-    final estArrivee = sens == 'arrivee';
     final employe = await Navigator.push<Map<String, dynamic>?>(
       context,
       MaterialPageRoute(
         builder: (context) => IdentificationSlidePage(
-          titre: estArrivee ? 'Arrivée' : 'Départ',
+          // ⭐ PTG-01.5 : texte neutre validé — le type réel (Arrivée ou
+          // Départ) s'affiche APRÈS la validation, selon ce qui est
+          // enregistré. La logique de décision ne change pas.
+          titre: 'POINTAGE',
           sceneAsset: 'assets/scenes/scene_pointage.jpg',
-          aide: estArrivee
-              ? 'Validez votre arrivée avec le curseur'
-              : 'Validez votre départ avec le curseur',
+          aide: 'Identifiez-vous pour pointer.',
           entrepriseId: entrepriseId,
           matriculePrefix:
               entrepriseSelectionnee?['matricule_prefix']?.toString() ?? '',
@@ -5315,7 +5386,7 @@ class _PointageScreenState extends State<PointageScreen> {
             ),
             const SizedBox(height: 10),
             Text(
-              'Votre ${estEntree ? 'ENTRÉE' : 'SORTIE'} de $heure a bien été '
+              'Votre ${estEntree ? 'arrivée' : 'départ'} de $heure a bien été '
               'enregistrée, il y a $secondes.',
               style: TextStyle(
                   color: Theme.of(context).textTheme.bodyMedium?.color),
@@ -5370,7 +5441,7 @@ class _PointageScreenState extends State<PointageScreen> {
                 color: EnCheckColors.succes, size: 30),
             const SizedBox(width: 10),
             Text(
-              estEntree ? 'ENTRÉE' : 'SORTIE',
+              estEntree ? 'Arrivée' : 'Départ',
               style: const TextStyle(
                   color: EnCheckColors.succes,
                   fontWeight: FontWeight.w300,

@@ -52,6 +52,7 @@ flutter:
 
   assets:
     - assets/icon/icon.png
+    - assets/logo_encheck.png   # ⭐ Vrai logo En-Check (en-tête)
     - assets/models/          # ← Dossier pour le modèle IA
     - assets/motifs/          # 🧵 Étoffes culturelles (Raphia par défaut)
     - assets/scenes/          # 📸 Scènes photo (visuels de l'Admin)
