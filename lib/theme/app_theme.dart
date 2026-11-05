@@ -49,6 +49,16 @@ class EnCheckColors {
   static const Color alerte = Color(0xFFF59E0B);
   static const Color erreur = Color(0xFFEF4444);
   static const Color info = Color(0xFF6366F1);
+
+  // 🌿 Palette de la maquette finale du 5 nov (barre 3D) : vert profond
+  //    bleuté, ivoire et neutres MATS — aucun or, métal ni gloss.
+  static const Color vertProfond = Color(0xFF1F5E62);
+  static const Color vertProfondFonce = Color(0xFF123F44);
+  static const Color vertPale = Color(0xFFD8E7E5);
+  static const Color vertPaleCercle = Color(0xFFDCE6E4);
+  static const Color ivoireBarre = Color(0xFFF7F4EE);
+  static const Color ivoireFond = Color(0xFFF4F1EA);
+  static const Color ardoise = Color(0xFF2B2B2B);
 }
 
 class EnCheckTextStyles {
