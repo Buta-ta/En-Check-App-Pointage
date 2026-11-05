@@ -4,7 +4,7 @@
 // ═══════════════════════════════════════════════════════════
 //
 //  Le bouton ⚙️ Paramètres de l'accueil ouvre le panneau « Motif culturel ».
-//  Le RAPHIA (tissu Kuba) est le motif PAR DÉFAUT. Le choix est enregistré
+//  L'ADINKRA (Ghana) est le motif PAR DÉFAUT (maquette finale du 5/11). Le choix est enregistré
 //  sur l'appareil (shared_preferences) et appliqué immédiatement.
 //
 //  Les images sont les vraies étoffes de l'app En-Check Admin
@@ -92,14 +92,14 @@ class MotifCulturel {
   );
 
   static const List<MotifCulturel> tous = [raphia, adinkra, bogolan, zoulou];
-  static const String idDefaut = 'raphia';
+  static const String idDefaut = 'adinkra';
 
   /// Retombe toujours sur le Raphia si l'id enregistré est inconnu.
   static MotifCulturel parId(String? id) {
     for (final motif in tous) {
       if (motif.id == id) return motif;
     }
-    return raphia;
+    return adinkra;
   }
 }
 
@@ -116,7 +116,7 @@ class MotifService {
   /// Motif actuellement affiché — les widgets écoutent ce notificateur
   /// pour se repeindre dès que l'entreprise change de motif.
   static final ValueNotifier<MotifCulturel> actif =
-      ValueNotifier<MotifCulturel>(MotifCulturel.raphia);
+      ValueNotifier<MotifCulturel>(MotifCulturel.adinkra);
 
   /// Charge le motif enregistré sur l'appareil (Raphia par défaut).
   static Future<void> charger() async {

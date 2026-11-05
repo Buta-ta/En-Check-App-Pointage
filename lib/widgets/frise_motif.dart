@@ -3,7 +3,7 @@
 // 🧵 FRISE MOTIF — le textile culturel en haut de l'accueil
 // ═══════════════════════════════════════════════════════════
 //
-//  Affiche l'étoffe choisie par l'entreprise (Raphia par défaut) en
+//  Affiche l'étoffe choisie par l'entreprise (Adinkra par défaut) en
 //  plein cadre, comme les bandes illustrées de l'app En-Check Admin.
 // ═══════════════════════════════════════════════════════════
 
@@ -29,20 +29,6 @@ class FriseMotif extends StatelessWidget {
             motif.asset,
             fit: BoxFit.cover,
             errorBuilder: (_, __, ___) => Container(color: motif.couleurBouton),
-          ),
-          // Léger assombrissement en haut : le bouton ⚙️ reste lisible
-          // sur toutes les étoffes, claires comme foncées.
-          DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.center,
-                colors: [
-                  Colors.black.withOpacity(0.28),
-                  Colors.transparent,
-                ],
-              ),
-            ),
           ),
         ],
       ),

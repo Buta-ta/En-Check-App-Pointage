@@ -53,6 +53,19 @@ class EnCheckColors {
   // 🎨 Neutres MATS de l'accueil (complément 5 nov) — les couleurs
   //    d'accent viennent du motif sélectionné (voir MotifCulturel).
   static const Color ivoireBarre = Color(0xFFF7F4EE);
+
+  // 🎨 Accueil — maquette finale 5/11 : couleurs FIXES échantillonnées
+  //    pixel par pixel sur la maquette choisie par le fondateur.
+  static const Color fondPage = Color(0xFFF5F2EA); // fond crème chaud
+  static const Color carteClaire = Color(0xFFF8F7F2); // cartes jour/annonces
+  static const Color bordureClaire = Color(0xFFE9E6E0); // filets des cartes
+  static const Color textePrincipal = Color(0xFF2D2B2B);
+  static const Color texteSecondaire = Color(0xFF787570);
+  static const Color vertBouton = Color(0xFF203F44); // cercle plein Départ
+  static const Color vertAccent = Color(0xFF22474D); // bordures/liens/nav
+  static const Color vertTint = Color(0xFFCFDBD8); // cercle Arrivée, aplats
+  static const Color navFond = Color(0xFFF7F5EE);
+  static const Color navBordure = Color(0xFFEBE7E1);
 }
 
 class EnCheckTextStyles {
