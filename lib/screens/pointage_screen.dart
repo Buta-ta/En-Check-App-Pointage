@@ -105,50 +105,53 @@ class _PlaqueLogoClientState extends State<_PlaqueLogoClient>
 
   @override
   Widget build(BuildContext context) {
-    final sombre = Theme.of(context).brightness == Brightness.dark;
-    final logo = widget.logoUrl;
+    // ⭐ COMPLÉMENT 5 nov (revue V1) : cartouche RÉDUIT, logo NETTEMENT
+    // plus lisible, proprement aligné à côté de « Mboté ». Le vrai logo est
+    // conservé tel quel (jamais remplacé ni redessiné, jamais recoloré).
     return FadeTransition(
       opacity: _opacite,
       child: ScaleTransition(
         scale: _echelle,
-        child: Container(
-          constraints: const BoxConstraints(minWidth: 124, maxWidth: 198),
-          height: 64,
-          padding: const EdgeInsets.symmetric(horizontal: 14),
-          decoration: BoxDecoration(
-            color: sombre ? const Color(0xFF2B302E) : Colors.white,
-            borderRadius: BorderRadius.circular(18),
-            boxShadow: [
-              BoxShadow(
-                  color: Colors.black.withOpacity(0.12),
-                  blurRadius: 10,
-                  offset: const Offset(0, 5)),
-              BoxShadow(
-                  color: Colors.white.withOpacity(sombre ? 0.04 : 0.6),
-                  blurRadius: 6,
-                  offset: const Offset(0, -2)),
-            ],
-          ),
-          child: Center(
-            child: (logo != null && logo.isNotEmpty)
-                ? Image.network(
-                    logo,
-                    height: 42,
-                    fit: BoxFit.contain,
-                    errorBuilder: (_, __, ___) => _repliNom(sombre),
-                  )
-                : _repliNom(sombre),
-          ),
+        child: ValueListenableBuilder<MotifCulturel>(
+          valueListenable: MotifService.actif,
+          builder: (context, motif, _) {
+            final sombre = Theme.of(context).brightness == Brightness.dark;
+            final logo = widget.logoUrl;
+            return Container(
+              constraints: const BoxConstraints(minWidth: 88, maxWidth: 152),
+              height: 52,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                color: sombre ? const Color(0xFF2B302E) : Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                boxShadow: [
+                  BoxShadow(
+                      color: Colors.black.withOpacity(0.10),
+                      blurRadius: 8,
+                      offset: const Offset(0, 4)),
+                ],
+              ),
+              child: Center(
+                child: (logo != null && logo.isNotEmpty)
+                    ? Image.network(
+                        logo,
+                        height: 40,
+                        fit: BoxFit.contain,
+                        errorBuilder: (_, __, ___) => _repliNom(sombre, motif),
+                      )
+                    : _repliNom(sombre, motif),
+              ),
+            );
+          },
         ),
       ),
     );
   }
 
-  Widget _repliNom(bool sombre) {
+  Widget _repliNom(bool sombre, MotifCulturel motif) {
     if (widget.nom.isEmpty) {
       return Icon(Icons.business,
-          size: 26,
-          color: sombre ? const Color(0xFFCFE3E0) : EnCheckColors.vertProfond);
+          size: 24, color: sombre ? motif.couleurAccent : motif.couleurBouton);
     }
     return Text(
       widget.nom,
@@ -156,7 +159,7 @@ class _PlaqueLogoClientState extends State<_PlaqueLogoClient>
       overflow: TextOverflow.ellipsis,
       textAlign: TextAlign.center,
       style: TextStyle(
-          fontSize: 15,
+          fontSize: 14,
           fontWeight: FontWeight.w700,
           color: sombre ? const Color(0xFFF2EFE8) : const Color(0xFF2B2B2B)),
     );
@@ -2190,85 +2193,101 @@ class _PointageScreenState extends State<PointageScreen> {
           [ChecklistService.motifChoisi, ChecklistService.premierPointage]),
       builder: (context, _) {
         // 🧭 Checklist visible tant qu'elle n'est pas terminée.
-        // Le hero rétrécit d'autant : le « zéro scroll » à 780 px est préservé.
         final checklistVisible = !ChecklistService.complete;
         return Column(
       mainAxisSize: margeFlexible ? MainAxisSize.max : MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _buildScenePointage(estEnLigne, themeService,
-            hauteur: checklistVisible ? 162 : 250),
+            hauteur: checklistVisible ? 226 : 312),
         ValueListenableBuilder<MotifCulturel>(
           valueListenable: MotifService.actif,
           builder: (context, motif, _) => FriseMotif(motif: motif, hauteur: 10),
         ),
-        // La zone centrale occupe la hauteur restante quand le cadre est fixe :
-        // le Spacer interne fonctionne alors VRAIMENT (sinon il s'écrase et le
-        // contenu flotte au centre : la photo descend et laisse un vide en haut
-        // dès qu'il reste de la place, typiquement avec un seul mode de
-        // pointage donc moins de cartes).
         _etenduSi(
           margeFlexible,
-          Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 22),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const SizedBox(height: 18),
-              _buildSalutation(),
-              const SizedBox(height: 18),
-              // 🧭 Checklist « 3 étapes pour démarrer » — disparaît une fois
-              // terminée (motif choisi + premier pointage).
-              if (checklistVisible) ...[
-                const ChecklistDemarrage(),
-                const SizedBox(height: 12),
-              ],
-              // Le rappel d'activation disparait des que la borne est
-              // deja autorisee (bail valide).
-              if ((_moduleRecoFacialeActif || _kioskMode) && !_bornePrete) ...[
-                _buildBandeauBorne(),
-                const SizedBox(height: 12),
-              ],
-              ValueListenableBuilder<MotifCulturel>(
-                valueListenable: MotifService.actif,
-                builder: (context, motif, _) => _buildCartesAction(),
+          LayoutBuilder(builder: (context, inner) {
+            // ⭐ COMPLÉMENT 5 nov (revue V1) : le texte de version en bas
+            // était ROGNÉ quand la hauteur manquait. Désormais, si le
+            // contenu dépasse, défilement maîtrisé — plus jamais de coupe.
+            final bool modulesActifs =
+                _moduleQRActif || _moduleRecoFacialeActif || _kioskMode;
+            final double hEstime = 620 +
+                (checklistVisible ? 260 : 0) +
+                (modulesActifs ? 120 : 0) +
+                (_pausesOuvertes.isNotEmpty ? 60 : 0);
+            final bool defilement = margeFlexible && inner.maxHeight < hEstime;
+            final Widget contenu = Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 22),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const SizedBox(height: 18),
+                  _buildSalutation(),
+                  const SizedBox(height: 18),
+                  // 🧭 Checklist « 3 étapes pour démarrer » — disparaît une
+                  // fois terminée (motif choisi + premier pointage).
+                  if (checklistVisible) ...[
+                    const ChecklistDemarrage(),
+                    const SizedBox(height: 12),
+                  ],
+                  // Le rappel d'activation disparaît dès que la borne est
+                  // déjà autorisée (bail validé).
+                  if ((_moduleRecoFacialeActif || _kioskMode) &&
+                      !_bornePrete) ...[
+                    _buildBandeauBorne(),
+                    const SizedBox(height: 12),
+                  ],
+                  ValueListenableBuilder<MotifCulturel>(
+                    valueListenable: MotifService.actif,
+                    builder: (context, motif, _) => _buildCartesAction(),
+                  ),
+                  const SizedBox(height: 12),
+                  if (modulesActifs) ...[
+                    _buildCarteModules(),
+                    const SizedBox(height: 12),
+                  ],
+                  _buildCarteStatutJour(),
+                  const SizedBox(height: 12),
+                  _carteAnnonces(),
+                  if (margeFlexible && !defilement) const Spacer(),
+                  const SizedBox(height: 12),
+                  _buildBarreNavigation(),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'v1.0.0 • Chiffrement AES-256 • Serveur UE',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontFamily: 'JetBrainsMono',
+                      fontSize: 10,
+                      color: EnCheckColors.gris,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                ],
               ),
-              const SizedBox(height: 12),
-              if (_moduleQRActif || _moduleRecoFacialeActif || _kioskMode) ...[
-                _buildCarteModules(),
-                const SizedBox(height: 12),
-              ],
-              _buildCarteStatutJour(),
-              const SizedBox(height: 12),
-              _carteAnnonces(),
-              if (margeFlexible) const Spacer(),
-              const SizedBox(height: 12),
-              _buildBarreNavigation(),
-              const SizedBox(height: 8),
-              Text(
-                'v1.0.0 • Chiffrement AES-256 • Serveur UE',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontFamily: 'JetBrainsMono',
-                  fontSize: 10,
-                  color: EnCheckColors.gris.withOpacity(0.9),
+            );
+            if (!defilement) return contenu;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: SingleChildScrollView(
+                    physics: const ClampingScrollPhysics(),
+                    child: contenu,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 6),
-            ],
-          ),
-        ),
+                _bandeDefilement(),
+              ],
+            );
+          }),
         ),
       ],
     );
       },
     );
   }
-  // ═══════════════════════════════════════════════════════════
-  // ═══════════════════════════════════════════════════════════
-  // 📱 PAGE PRINCIPALE EN TÉLÉPHONE — fiche « Affichage mobile »
-  // ═══════════════════════════════════════════════════════════
-  //
+
   //  DIRECTIVE 5 nov 2026 : la maquette finale est UNIQUEMENT l'accueil.
   //  Tout tient SANS DÉFILEMENT dans les cas normaux ; si la hauteur réelle
   //  ne suffit pas, un défilement MAÎTRISÉ apparaît (avec indication
@@ -2287,8 +2306,13 @@ class _PointageScreenState extends State<PointageScreen> {
     final double hauteurTotale = constraints.maxHeight;
     final double echelleTexte = media.textScaler.scale(1.0);
     // La photo garde un cadrage correct sans manger la place des actions.
-    final double hauteurScene =
-        (hauteurTotale * (echelleTexte > 1.3 ? 0.14 : 0.20)).clamp(84.0, 168.0).toDouble();
+    // En-tête = barre compacte (74) + photo entièrement VISIBLE (complément
+    // 5 nov : la barre ne masque plus la photo).
+    final double hauteurScene = media.viewPadding.top +
+        74 +
+        (hauteurTotale * (echelleTexte > 1.3 ? 0.16 : 0.20))
+            .clamp(110.0, 176.0)
+            .toDouble();
     final bool borneVisible =
         (_moduleRecoFacialeActif || _kioskMode) && !_bornePrete;
     final bool modesVisibles =
@@ -2348,13 +2372,19 @@ class _PointageScreenState extends State<PointageScreen> {
       ),
     );
     if (defilement) {
+      final Widget contenuDefilable = corps;
       corps = Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Expanded(
-            child: SingleChildScrollView(
-              physics: const ClampingScrollPhysics(),
-              child: corps,
+            child: LayoutBuilder(
+              builder: (context, inner) => SingleChildScrollView(
+                physics: const ClampingScrollPhysics(),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minHeight: inner.maxHeight),
+                  child: contenuDefilable,
+                ),
+              ),
             ),
           ),
           _bandeDefilement(),
@@ -2376,27 +2406,30 @@ class _PointageScreenState extends State<PointageScreen> {
   /// Bande d'information affichée quand la configuration impose le
   /// défilement (jamais en silence — fiche « Affichage mobile »).
   Widget _bandeDefilement() {
-    return Container(
-      margin: const EdgeInsets.only(top: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: EnCheckColors.vertProfond.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: const Row(
-        children: [
-          Icon(Icons.unfold_more, size: 14, color: EnCheckColors.vertProfond),
-          SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              "Contenu plus grand que l'écran : faites défiler.",
-              style:
-                  TextStyle(fontSize: 11.5, color: EnCheckColors.brunProfond),
+    return _ecouteMotif(Builder(builder: (context) {
+      final motif = MotifService.actif.value;
+      return Container(
+        margin: const EdgeInsets.only(top: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: motif.couleurTint,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.unfold_more, size: 14, color: motif.couleurBouton),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                "Contenu plus grand que l'écran : faites défiler.",
+                style: TextStyle(
+                    fontSize: 11.5, color: motif.couleurBouton),
+              ),
             ),
-          ),
-        ],
-      ),
-    );
+          ],
+        ),
+      );
+    }));
   }
 
   /// 🧭 Liste de démarrage en téléphone : une ligne nommée qui ouvre les
@@ -2510,56 +2543,58 @@ class _PointageScreenState extends State<PointageScreen> {
   /// le bouton nommé « Voir ma journée » (mêmes données réelles).
   /// ⭐ MAQUETTE FINALE : carte « AUJOURD'HUI » — statut neutre validé,
   /// lien souligné « Voir ma journée » (feuille existante, inchangée).
+  /// Lien harmonisé au motif sélectionné (complément 5 nov).
   Widget _buildBarreAujourdhui() {
-    final statut = _texteStatutJour();
-    final sombre = Theme.of(context).brightness == Brightness.dark;
-    return GestureDetector(
-      onTap: _ouvrirFeuilleJournee,
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        decoration: BoxDecoration(
-          color: Theme.of(context).cardColor,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-                color: Colors.black.withOpacity(0.04),
-                blurRadius: 8,
-                offset: const Offset(0, 3)),
-          ],
+    return _ecouteMotif(Builder(builder: (context) {
+      final statut = _texteStatutJour();
+      final sombre = Theme.of(context).brightness == Brightness.dark;
+      final accent = _couleurTexteAccent(sombre);
+      return GestureDetector(
+        onTap: _ouvrirFeuilleJournee,
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            color: Theme.of(context).cardColor,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                  color: Colors.black.withOpacity(0.04),
+                  blurRadius: 8,
+                  offset: const Offset(0, 3)),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text("AUJOURD'HUI",
+                  style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1.3,
+                      color: EnCheckColors.gris)),
+              const SizedBox(height: 6),
+              Text(statut,
+                  style: TextStyle(
+                      fontSize: 18.5,
+                      fontWeight: FontWeight.w800,
+                      height: 1.25,
+                      color: sombre
+                          ? const Color(0xFFF5F1EA)
+                          : const Color(0xFF262626))),
+              const SizedBox(height: 8),
+              Text('Voir ma journée',
+                  style: TextStyle(
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w700,
+                      decoration: TextDecoration.underline,
+                      decorationColor: accent,
+                      color: accent)),
+            ],
+          ),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text("AUJOURD'HUI",
-                style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 1.3,
-                    color: EnCheckColors.gris)),
-            const SizedBox(height: 6),
-            Text(statut,
-                style: TextStyle(
-                    fontSize: 18.5,
-                    fontWeight: FontWeight.w800,
-                    height: 1.25,
-                    color: sombre
-                        ? const Color(0xFFF5F1EA)
-                        : const Color(0xFF262626))),
-            const SizedBox(height: 8),
-            Text('Voir ma journée',
-                style: TextStyle(
-                    fontSize: 14.5,
-                    fontWeight: FontWeight.w700,
-                    decoration: TextDecoration.underline,
-                    decorationColor: EnCheckColors.vertProfond,
-                    color: sombre
-                        ? const Color(0xFF7FB2AE)
-                        : EnCheckColors.vertProfond)),
-          ],
-        ),
-      ),
-    );
+      );
+    }));
   }
 
   /// « Voir ma journée » : la carte complète (statut, noms, pause,
@@ -3793,145 +3828,168 @@ class _PointageScreenState extends State<PointageScreen> {
 
   /// SCENE DU HAUT : la photo de la jeune femme en train de pointer
   /// (l'image actuelle de l'app), l'identite et l'heure par-dessus.
+  // ⭐ COMPLÉMENT 5 nov (revue V1) : couleurs d'accent HARMONISÉES avec le
+  //    motif sélectionné dans Paramètres — correspondance DÉTERMINISTE à
+  //    partir de la palette existante de MotifCulturel :
+  //      • surfaces profondes (barre 3D, cercles pleins) : couleurBouton
+  //      • accents décoratifs (bordures, aplats doux) : couleurAccent / tint
+  //      • texte et icônes essentielles : couleurBouton en clair (contraste
+  //        accessible), couleurAccent en sombre.
+  //    Neutres, rendu mat et clair/sombre conservés ; la photo et les logos
+  //    ne sont JAMAIS recolorés. Aucune analyse de pixels, aucune dépendance.
+  Color _couleurTexteAccent(bool sombre) => sombre
+      ? MotifService.actif.value.couleurAccent
+      : MotifService.actif.value.couleurBouton;
+
+  /// Écoute le motif : les accents se repeignent dès que l'entreprise change
+  /// de textile dans Paramètres.
+  Widget _ecouteMotif(Widget child) => ValueListenableBuilder<MotifCulturel>(
+        valueListenable: MotifService.actif,
+        builder: (context, __, ___) => child,
+      );
+
   Widget _buildScenePointage(bool estEnLigne, ThemeService themeService,
       {double hauteur = 250, double margeHaut = 0}) {
+    // ⭐ COMPLÉMENT 5 nov (revue V1) : la barre ne recouvre PLUS la photo —
+    // elle occupe le haut, la photo reste entièrement visible en dessous.
     return SizedBox(
       height: hauteur,
-      child: Stack(
-        fit: StackFit.expand,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Image.asset(
-            'assets/scenes/scene_pointage.jpg',
-            fit: BoxFit.cover,
-            alignment: const Alignment(0, -0.12),
-            errorBuilder: (_, __, ___) =>
-                Container(color: EnCheckColors.brunProfond),
-          ),
-          // ⭐ MAQUETTE FINALE (5 nov) : la barre 3D compacte coiffe la photo
-          // et ne recouvre jamais le salut ni les actions.
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: _barre3D(themeService, margeHaut),
+          _barre3D(themeService, margeHaut),
+          Expanded(
+            child: Image.asset(
+              'assets/scenes/scene_pointage.jpg',
+              fit: BoxFit.cover,
+              alignment: const Alignment(0, -0.12),
+              errorBuilder: (_, __, ___) =>
+                  Container(color: EnCheckColors.brunProfond),
+            ),
           ),
         ],
       ),
     );
   }
 
-  /// ⭐ MAQUETTE FINALE : barre supérieure 3D — surfaces en couches,
-  /// relief et ombres doux, MATS. Ivoire + vert profond bleuté, sans or,
-  /// métal, chrome ni gloss. « En-Check » et l'heure/date DYNAMIQUES à
-  /// gauche, contrôle lune/thème à droite.
+  /// ⭐ COMPLÉMENT 5 nov (revue V1) : barre 3D PLUS COMPACTE (hauteur et
+  /// profondeur réduites) pour laisser la photo respirer. Surfaces en
+  /// couches mates, tons profonds du motif sélectionné — sans or, métal ni
+  /// gloss. « En-Check » et l'heure/date DYNAMIQUES à gauche, contrôle
+  /// lune/thème à droite.
   Widget _barre3D(ThemeService themeService, double margeHaut) {
-    final sombre = Theme.of(context).brightness == Brightness.dark;
-    final ivoire = sombre ? const Color(0xFF2B302E) : EnCheckColors.ivoireBarre;
-    final texte = sombre ? const Color(0xFFF2EFE8) : const Color(0xFF23342F);
-    final vert = sombre ? const Color(0xFF2E6E72) : EnCheckColors.vertProfond;
-    final vertOmbre =
-        sombre ? const Color(0xFF1A4A4E) : EnCheckColors.vertProfondFonce;
-    return SizedBox(
-      height: 122 + margeHaut,
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          // Couche de profondeur, sous la masse verte.
-          Positioned(
-            top: margeHaut + 14,
-            left: 168,
-            right: 0,
-            bottom: 16,
-            child: Container(
-              decoration: BoxDecoration(
-                color: vertOmbre,
-                borderRadius: BorderRadius.circular(44),
-                boxShadow: [
-                  BoxShadow(
-                      color: Colors.black.withOpacity(0.18),
-                      blurRadius: 16,
-                      offset: const Offset(0, 8)),
-                ],
-              ),
-            ),
-          ),
-          // Masse vert profond, mate, relief discret vers le haut.
-          Positioned(
-            top: margeHaut + 4,
-            left: 166,
-            right: 10,
-            bottom: 26,
-            child: Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(44),
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [vert, vertOmbre],
-                  stops: const [0.0, 1.0],
+    return _ecouteMotif(Builder(builder: (context) {
+      final motif = MotifService.actif.value;
+      final sombre = Theme.of(context).brightness == Brightness.dark;
+      final ivoire =
+          sombre ? const Color(0xFF2B302E) : EnCheckColors.ivoireBarre;
+      final texte = sombre ? const Color(0xFFF2EFE8) : const Color(0xFF23342F);
+      final masse = sombre
+          ? Color.lerp(motif.couleurBouton, Colors.white, 0.12)!
+          : motif.couleurBouton;
+      final masseOmbre = Color.lerp(masse, Colors.black, 0.28)!;
+      return SizedBox(
+        height: 74 + margeHaut,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            // Couche de profondeur (sous la masse) — relief réduit.
+            Positioned(
+              top: margeHaut + 8,
+              left: 152,
+              right: 2,
+              bottom: 8,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: masseOmbre,
+                  borderRadius: BorderRadius.circular(40),
+                  boxShadow: [
+                    BoxShadow(
+                        color: Colors.black.withOpacity(0.12),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4)),
+                  ],
                 ),
-                boxShadow: [
-                  BoxShadow(
-                      color: Colors.black.withOpacity(0.10),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4)),
-                ],
               ),
             ),
-          ),
-          // Panneau ivoire en couches : En-Check, heure et date dynamiques.
-          Positioned(
-            top: margeHaut + 2,
-            left: 8,
-            width: 236,
-            bottom: 28,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              decoration: BoxDecoration(
-                color: ivoire,
-                borderRadius: BorderRadius.circular(26),
-                boxShadow: [
-                  BoxShadow(
-                      color: Colors.black.withOpacity(0.12),
-                      blurRadius: 12,
-                      offset: const Offset(0, 6)),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text('En-Check',
-                      style: TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -0.3,
-                          color: texte)),
-                  const SizedBox(height: 2),
-                  Text(heureActuelle,
-                      style: TextStyle(
-                          fontSize: 19,
-                          fontWeight: FontWeight.w800,
-                          color: texte)),
-                  Text(dateActuelle.toUpperCase(),
-                      style: TextStyle(
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: 0.6,
-                          color: texte.withOpacity(0.75))),
-                ],
+            // Masse profonde mate, relief discret vers le haut.
+            Positioned(
+              top: margeHaut + 2,
+              left: 150,
+              right: 10,
+              bottom: 14,
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(40),
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [masse, masseOmbre],
+                    stops: const [0.0, 1.0],
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                        color: Colors.black.withOpacity(0.08),
+                        blurRadius: 7,
+                        offset: const Offset(0, 3)),
+                  ],
+                ),
               ),
             ),
-          ),
-          // Contrôle lune/thème à droite, dans la masse verte.
-          Positioned(
-            top: margeHaut + 24,
-            right: 28,
-            child: _boutonSoleilLune(themeService),
-          ),
-        ],
-      ),
-    );
+            // Panneau ivoire compact : En-Check, heure et date dynamiques.
+            Positioned(
+              top: margeHaut,
+              left: 8,
+              width: 216,
+              bottom: 16,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+                decoration: BoxDecoration(
+                  color: ivoire,
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    BoxShadow(
+                        color: Colors.black.withOpacity(0.10),
+                        blurRadius: 8,
+                        offset: const Offset(0, 4)),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text('En-Check',
+                        style: TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.2,
+                            color: texte)),
+                    Text(heureActuelle,
+                        style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
+                            color: texte)),
+                    Text(dateActuelle.toUpperCase(),
+                        style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 0.5,
+                            color: texte.withOpacity(0.75))),
+                  ],
+                ),
+              ),
+            ),
+            // Contrôle lune/thème à droite, dans la masse profonde.
+            Positioned(
+              top: margeHaut + 16,
+              right: 26,
+              child: _boutonSoleilLune(themeService),
+            ),
+          ],
+        ),
+      );
+    }));
   }
 
   // ⭐ MAQUETTE FINALE : le logo client n'est plus dans la barre — il vit
@@ -4082,6 +4140,7 @@ class _PointageScreenState extends State<PointageScreen> {
   /// ⭐ MAQUETTE FINALE : les deux gestes, même importance visuelle.
   /// Les libellés affichés sont ceux de la maquette ; les comportements
   /// (décision du type, validation) restent EXACTEMENT les mêmes.
+  /// Couleurs d'accent harmonisées au motif sélectionné (complément 5 nov).
   Widget _buildCartesAction() {
     return Row(
       children: [
@@ -4115,18 +4174,21 @@ class _PointageScreenState extends State<PointageScreen> {
     required bool depart,
     required VoidCallback onTap,
   }) {
+    final motif = MotifService.actif.value;
     final sombre = Theme.of(context).brightness == Brightness.dark;
     final couleurTexte =
         sombre ? const Color(0xFFF5F1EA) : const Color(0xFF262626);
     final fond = depart
-        ? (sombre ? const Color(0xFF24403C) : EnCheckColors.vertPale)
+        ? (sombre ? Color.lerp(motif.couleurBouton, Colors.black, 0.35)! : motif.couleurTint)
         : (sombre ? const Color(0xFF242A28) : Colors.white);
     final cercleFond = depart
-        ? (sombre ? const Color(0xFF2E6E72) : EnCheckColors.vertProfond)
-        : (sombre ? const Color(0xFF2F4A46) : EnCheckColors.vertPaleCercle);
+        ? (sombre
+            ? Color.lerp(motif.couleurBouton, Colors.white, 0.10)!
+            : motif.couleurBouton)
+        : (sombre ? const Color(0xFF2F3A36) : motif.couleurTint);
     final cercleIcone = depart
         ? Colors.white
-        : (sombre ? const Color(0xFFCFE3E0) : EnCheckColors.vertProfond);
+        : (sombre ? motif.couleurAccent : motif.couleurBouton);
     return Semantics(
       button: true,
       label: semantique,
@@ -4140,7 +4202,7 @@ class _PointageScreenState extends State<PointageScreen> {
             border: depart
                 ? null
                 : Border.all(
-                    color: EnCheckColors.vertProfond.withOpacity(0.55),
+                    color: motif.couleurAccent.withOpacity(0.55),
                     width: 1.4),
             boxShadow: [
               BoxShadow(
@@ -4356,57 +4418,60 @@ class _PointageScreenState extends State<PointageScreen> {
   /// ⭐ MAQUETTE FINALE : navigation basse — entièrement visible, jamais
   /// recouverte ni rognée. [pleineLargeur] = barre blanche bord à bord sur
   /// téléphone (comme la maquette) ; la version encadrée reste pour la PWA.
+  /// Onglet actif harmonisé au motif sélectionné (complément 5 nov).
   Widget _buildBarreNavigation({bool pleineLargeur = false}) {
-    final barre = Container(
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: pleineLargeur ? null : BorderRadius.circular(18),
-        border: pleineLargeur
-            ? Border(
-                top: BorderSide(
-                    color: Theme.of(context).dividerColor.withOpacity(0.35)))
-            : Border.all(
-                color: Theme.of(context).dividerColor.withOpacity(0.35)),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: _itemNav(
-              icon: Icons.home_filled,
-              label: 'Accueil',
-              actif: true,
-              onTap: () {},
+    return _ecouteMotif(Builder(builder: (context) {
+      final barre = Container(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: Theme.of(context).cardColor,
+          borderRadius: pleineLargeur ? null : BorderRadius.circular(18),
+          border: pleineLargeur
+              ? Border(
+                  top: BorderSide(
+                      color: Theme.of(context).dividerColor.withOpacity(0.35)))
+              : Border.all(
+                  color: Theme.of(context).dividerColor.withOpacity(0.35)),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: _itemNav(
+                icon: Icons.home_filled,
+                label: 'Accueil',
+                actif: true,
+                onTap: () {},
+              ),
             ),
-          ),
-          Expanded(
-            child: _itemNav(
-              icon: Icons.restaurant,
-              label: 'Pause',
-              actif: false,
-              onTap: _ouvrirPagePause,
+            Expanded(
+              child: _itemNav(
+                icon: Icons.restaurant,
+                label: 'Pause',
+                actif: false,
+                onTap: _ouvrirPagePause,
+              ),
             ),
-          ),
-          Expanded(
-            child: _itemNav(
-              icon: Icons.history,
-              label: 'Historique',
-              actif: false,
-              onTap: _ouvrirHistoriqueJournee,
+            Expanded(
+              child: _itemNav(
+                icon: Icons.history,
+                label: 'Historique',
+                actif: false,
+                onTap: _ouvrirHistoriqueJournee,
+              ),
             ),
-          ),
-          Expanded(
-            child: _itemNav(
-              icon: Icons.settings_outlined,
-              label: 'Paramètres',
-              actif: false,
-              onTap: () => ouvrirPanneauMotif(context),
+            Expanded(
+              child: _itemNav(
+                icon: Icons.settings_outlined,
+                label: 'Paramètres',
+                actif: false,
+                onTap: () => ouvrirPanneauMotif(context),
+              ),
             ),
-          ),
-        ],
-      ),
-    );
-    return pleineLargeur ? SafeArea(top: false, child: barre) : barre;
+          ],
+        ),
+      );
+      return pleineLargeur ? SafeArea(top: false, child: barre) : barre;
+    }));
   }
 
   Widget _itemNav({
@@ -4416,9 +4481,9 @@ class _PointageScreenState extends State<PointageScreen> {
     required VoidCallback onTap,
   }) {
     final sombre = Theme.of(context).brightness == Brightness.dark;
-    // ⭐ MAQUETTE FINALE : accueil actif en vert profond (fixe) — pas de doré.
+    // Onglet actif : ton accessible du motif (jamais de doré).
     final couleur = actif
-        ? (sombre ? const Color(0xFF7FB2AE) : EnCheckColors.vertProfond)
+        ? _couleurTexteAccent(sombre)
         : (sombre ? const Color(0xFF9A938A) : const Color(0xFF8A8578));
     return GestureDetector(
       onTap: onTap,
