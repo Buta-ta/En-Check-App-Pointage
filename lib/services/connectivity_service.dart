@@ -10,6 +10,9 @@ class ConnectivityService {
   // ═══════════════════════════════════════════════════════════
   static bool get isOnline => _isOnline;
 
+  /// Permet aux tests widget de forcer le mode hors-ligne sans lancer le plugin.
+  static void setOnlineForTest(bool value) => _isOnline = value;
+
   // ═══════════════════════════════════════════════════════════
   // 🚀 INITIALISER LE SERVICE
   // ═══════════════════════════════════════════════════════════

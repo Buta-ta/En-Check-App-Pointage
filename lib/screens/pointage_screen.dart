@@ -24,6 +24,7 @@ import '../widgets/qr_scanner_widget.dart';
 import '../widgets/qr_photo_scanner_widget.dart';
 import '../widgets/pin_photo_widget.dart';
 import '../widgets/bandes_motifs.dart';
+import '../widgets/ma_journee_dialog.dart';
 import '../widgets/web_camera_widget_provider.dart';
 import '../services/supabase_service.dart';
 import '../services/appareil_service.dart';
@@ -3833,17 +3834,7 @@ class _PointageScreenState extends State<PointageScreen> {
                               ),
                             ),
                           ),
-                          Expanded(
-                            child: Center(
-                              child: MotifUiIcon(
-                                key: const Key('accueil-motif-ui-salutation'),
-                                motif: MotifService.actif.value,
-                                fond: palette.surface,
-                                bordure: palette.filet,
-                                taille: math.min(32.0, hauteurPlaque),
-                              ),
-                            ),
-                          ),
+
                         ],
                       ),
                     ),
@@ -4590,180 +4581,42 @@ class _PointageScreenState extends State<PointageScreen> {
   /// Aucun pointage n'est créé : c'est toute la différence avec
   /// _identifierEtEnroler, qui enchaîne l'identification et le pointage.
   Future<void> _ouvrirHistoriqueJournee() async {
-    if (entrepriseSelectionnee == null) {
+    final entreprise = entrepriseSelectionnee;
+    if (entreprise == null) {
       _afficherErreur('Aucune entreprise sélectionnée.');
       return;
     }
 
-    final matriculeController = TextEditingController();
-    final pinController = TextEditingController();
-    bool afficherPinLocal = false;
-    bool verificationEnCours = false;
-    String? messageErreur;
-
-    await showDialog(
+    final employee = await showDialog<Map<String, dynamic>>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModalState) => AlertDialog(
-          backgroundColor: Theme.of(context).cardColor,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: Row(
-            children: [
-              const Icon(Icons.today_outlined,
-                  color: EnCheckColors.terreChaude),
-              const SizedBox(width: 10),
-              Text(
-                'MA JOURNÉE',
-                style: TextStyle(
-                  letterSpacing: 2,
-                  fontWeight: FontWeight.w300,
-                  color: Theme.of(context).textTheme.bodyLarge?.color,
-                ),
+      builder: (_) => MaJourneeDialog(
+        prefixeEntreprise: (entreprise['matricule_prefix'] ?? '').toString(),
+        verifier: (matriculeComplet, pin) async {
+          // Même vérification d'identité et même repli hors-ligne qu'avant.
+          // La modale ne reçoit que le résultat ; le PIN n'est ni mémorisé
+          // ni affiché en clair et aucun pointage n'est créé ici.
+          final resultat = ConnectivityService.isOnline
+              ? await SupabaseService.verifierEmployee(
+                  entreprise['id'], matriculeComplet, pin)
+              : await LocalDatabase.verifierEmployeeCache(
+                  entreprise['id'], matriculeComplet, pin);
+          if (resultat == null) {
+            return ResultatVerificationJournee.echec(
+              _messageIdentifiants(
+                estHorsLigne: !ConnectivityService.isOnline,
+                type: 'pin',
               ),
-            ],
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Saisissez votre matricule et votre PIN pour consulter vos '
-                  'pointages du jour. Aucun pointage ne sera enregistré.',
-                  style: TextStyle(color: EnCheckColors.gris, fontSize: 13),
-                ),
-                const SizedBox(height: 20),
-                TextField(
-                  controller: matriculeController,
-                  keyboardType: TextInputType.number,
-                  enabled: !verificationEnCours,
-                  decoration: InputDecoration(
-                    labelText: 'Matricule',
-                    prefixText:
-                        '${entrepriseSelectionnee!['matricule_prefix'] ?? ''}-',
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12)),
-                  ),
-                ),
-                if (afficherPinLocal) ...[
-                  const SizedBox(height: 15),
-                  TextField(
-                    controller: pinController,
-                    obscureText: true,
-                    keyboardType: TextInputType.number,
-                    enabled: !verificationEnCours,
-                    decoration: InputDecoration(
-                      labelText: 'PIN',
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12)),
-                    ),
-                  ),
-                ],
-                if (messageErreur != null) ...[
-                  const SizedBox(height: 15),
-                  Text(
-                    messageErreur!,
-                    style: const TextStyle(
-                        color: EnCheckColors.erreur, fontSize: 13),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: verificationEnCours ? null : () => Navigator.pop(ctx),
-              child: Text(
-                'ANNULER',
-                style: TextStyle(
-                    color: Theme.of(context).textTheme.bodyLarge?.color),
-              ),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: EnCheckColors.terreChaude,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
-              ),
-              onPressed: verificationEnCours
-                  ? null
-                  : () async {
-                      if (!afficherPinLocal) {
-                        if (matriculeController.text.trim().isEmpty) return;
-                        setModalState(() => afficherPinLocal = true);
-                        return;
-                      }
-
-                      if (pinController.text.length < 4) {
-                        setModalState(() => messageErreur =
-                            'Le PIN doit contenir au moins 4 chiffres.');
-                        return;
-                      }
-
-                      setModalState(() {
-                        verificationEnCours = true;
-                        messageErreur = null;
-                      });
-
-                      final matriculeComplet =
-                          '${entrepriseSelectionnee!['matricule_prefix']}-'
-                          '${matriculeController.text.trim()}';
-
-                      try {
-                        // Même logique que _identifierEtEnroler : on lit le
-                        // cache local quand la connexion manque.
-                        final employee = ConnectivityService.isOnline
-                            ? await SupabaseService.verifierEmployee(
-                                entrepriseSelectionnee!['id'],
-                                matriculeComplet,
-                                pinController.text,
-                              )
-                            : await LocalDatabase.verifierEmployeeCache(
-                                entrepriseSelectionnee!['id'],
-                                matriculeComplet,
-                                pinController.text,
-                              );
-
-                        if (!mounted) return;
-
-                        if (employee == null) {
-                          setModalState(() {
-                            verificationEnCours = false;
-                            messageErreur = _messageIdentifiants(
-                                estHorsLigne: !ConnectivityService.isOnline,
-                                type: 'pin');
-                          });
-                          return;
-                        }
-
-                        Navigator.pop(ctx);
-                        await Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => HistoriqueScreen(employee: employee),
-                          ),
-                        );
-                      } catch (e) {
-                        setModalState(() {
-                          verificationEnCours = false;
-                          messageErreur = 'Vérification impossible : $e';
-                        });
-                      }
-                    },
-              child: verificationEnCours
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white),
-                    )
-                  : Text(afficherPinLocal ? 'CONSULTER' : 'SUIVANT'),
-            ),
-          ],
-        ),
+            );
+          }
+          return ResultatVerificationJournee.reussite(resultat);
+        },
       ),
+    );
+
+    if (employee == null || !mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => HistoriqueScreen(employee: employee)),
     );
   }
 
