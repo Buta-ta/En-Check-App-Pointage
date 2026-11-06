@@ -42,7 +42,10 @@ Future<void> ouvrirPanneauMotif(BuildContext context) async {
                 borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
               ),
               padding: const EdgeInsets.fromLTRB(22, 12, 22, 28),
-              child: Column(
+              // L'accueil ne défile jamais ; ce panneau secondaire peut en
+              // revanche défiler si la checklist rend son contenu trop haut.
+              child: SingleChildScrollView(
+                child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -145,6 +148,7 @@ Future<void> ouvrirPanneauMotif(BuildContext context) async {
                     ),
                   ),
                 ],
+                ),
               ),
             ),
           );

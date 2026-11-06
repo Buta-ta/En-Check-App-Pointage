@@ -33,6 +33,7 @@ const SCENARIOS = [
   { nom: 'motif-bogolan-sombre', w: 412, h: 869, dpr: 2, mobile: true, motif: 'bogolan', sombre: true },
   { nom: 'motif-zoulou-clair', w: 412, h: 869, dpr: 2, mobile: true, motif: 'zoulou' },
   { nom: 'motif-zoulou-sombre', w: 412, h: 869, dpr: 2, mobile: true, motif: 'zoulou', sombre: true },
+  { nom: 'parametres-checklist-360x640', w: 360, h: 640, dpr: 2, mobile: true, checklistIncomplete: true, ouvrirParametres: true },
 ];
 
 function typeContenu(fichier) {
@@ -95,8 +96,8 @@ async function ouvrir(browser, scenario) {
     S('enterprise_pays', 'CG');
     S('apparence_sombre_v2', !!s.sombre);
     S('tutoriel_vue_v1', true);
-    S('checklist_motif_choisi', true);
-    S('checklist_premier_pointage', true);
+    S('checklist_motif_choisi', !s.checklistIncomplete);
+    S('checklist_premier_pointage', !s.checklistIncomplete);
     S('module_qr_scanner', true); // le bouton « Autres modes » de la maquette
     S('motif_culturel_id', s.motif || 'adinkra');
     window.__firstFrame = null;
@@ -136,6 +137,10 @@ async function ouvrir(browser, scenario) {
     precedent = raf;
     calme = stable >= 4;
     if (!calme) await sleep(400);
+  }
+  if (scenario.ouvrirParametres) {
+    await page.mouse.click(scenario.w * 0.875, scenario.h - 32);
+    await sleep(1200);
   }
   const mesure = await page.evaluate(() => ({
     innerWidth: window.innerWidth,

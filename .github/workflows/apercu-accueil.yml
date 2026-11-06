@@ -139,6 +139,8 @@ jobs:
             echo "![Téléphone clair]($base/telephone-360x640-clair.png?raw=true)"
             echo "### Tablette 800 × 1280 — clair"
             echo "![Tablette clair]($base/tablette-800x1280-clair.png?raw=true)"
+            echo "### Paramètres et checklist 1/3 — 360 × 640"
+            echo "![Paramètres et checklist]($base/parametres-checklist-360x640.png?raw=true)"
           } >/tmp/apercu-commentaire.md
           gh pr comment "$pr" --body-file /tmp/apercu-commentaire.md
 
