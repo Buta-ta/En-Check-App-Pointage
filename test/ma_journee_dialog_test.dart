@@ -95,11 +95,15 @@ void main() {
 
     // Simule le clavier ouvert sur un petit téléphone : les deux actions
     // restent au-dessus de la zone occupée par le clavier.
-    tester.view.viewInsets = const FakeViewPadding(bottom: 280);
+    // viewInsets est exprimé en pixels physiques par TestFlutterView.
+    const hauteurClavierLogique = 280.0;
+    tester.view.viewInsets = FakeViewPadding(
+      bottom: hauteurClavierLogique * tester.view.devicePixelRatio,
+    );
     await tester.pumpAndSettle();
     final limiteClavier = tester.view.physicalSize.height /
             tester.view.devicePixelRatio -
-        280;
+        hauteurClavierLogique;
     expect(tester.getRect(find.text('ANNULER')).bottom, lessThanOrEqualTo(limiteClavier));
     expect(tester.getRect(find.byKey(const Key('ma-journee-consulter'))).bottom,
         lessThanOrEqualTo(limiteClavier));
