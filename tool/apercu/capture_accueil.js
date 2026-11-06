@@ -22,6 +22,7 @@ const SCENARIOS = [
   { nom: 'telephone-360x640-clair', w: 360, h: 640, dpr: 2, mobile: true },
   { nom: 'telephone-360x640-sombre', w: 360, h: 640, dpr: 2, mobile: true, sombre: true },
   { nom: 'telephone-390x844-clair', w: 390, h: 844, dpr: 3, mobile: true },
+  { nom: 'accueil-sans-autres-modes-360x640', w: 360, h: 640, dpr: 2, mobile: true, sansAutresModes: true },
   { nom: 'tablette-800x1280-clair', w: 800, h: 1280, dpr: 2, tablette: true },
   { nom: 'tablette-800x1280-sombre', w: 800, h: 1280, dpr: 2, tablette: true, sombre: true },
   { nom: 'portable-1366x768-clair', w: 1366, h: 768, dpr: 1 },
@@ -99,7 +100,7 @@ async function ouvrir(browser, scenario) {
     S('tutoriel_vue_v1', true);
     S('checklist_motif_choisi', !s.checklistIncomplete);
     S('checklist_premier_pointage', !s.checklistIncomplete);
-    S('module_qr_scanner', true); // le bouton « Autres modes » de la maquette
+    S('module_qr_scanner', !s.sansAutresModes); // variante sans « Autres modes »
     S('motif_culturel_id', s.motif || 'adinkra');
     window.__firstFrame = null;
     window.addEventListener('flutter-first-frame', () => {

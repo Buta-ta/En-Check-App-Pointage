@@ -20,6 +20,12 @@ class MotifCulturel {
   final String id;
   final String nom;
   final String asset;
+
+  /// Extrait horizontal d'UNE rangée du même textile, pour l'accueil.
+  /// Ces petits WebP sont des crops optimisés, jamais de nouveaux dessins.
+  final String friseAsset;
+  final double friseRatio;
+
   final Color couleurBouton;
   final Color couleurAccent;
 
@@ -36,6 +42,8 @@ class MotifCulturel {
     required this.id,
     required this.nom,
     required this.asset,
+    required this.friseAsset,
+    required this.friseRatio,
     required this.couleurBouton,
     required this.couleurAccent,
     required this.couleurTint,
@@ -48,6 +56,8 @@ class MotifCulturel {
     id: 'raphia',
     nom: 'Raphia',
     asset: 'assets/motifs/raphia.webp',
+    friseAsset: 'assets/motifs/frises/raphia.webp',
+    friseRatio: 4 / 3,
     couleurBouton: Color(0xFF3D2B1F),
     couleurAccent: Color(0xFFC98A2B),
     couleurTint: Color(0xFFF7EFE0),
@@ -60,6 +70,8 @@ class MotifCulturel {
     id: 'adinkra',
     nom: 'Adinkra',
     asset: 'assets/motifs/adinkra.webp',
+    friseAsset: 'assets/motifs/frises/adinkra.webp',
+    friseRatio: 400 / 95,
     couleurBouton: Color(0xFF214348),
     couleurAccent: Color(0xFFB4593A),
     couleurTint: Color(0xFFD0DEDD),
@@ -72,6 +84,8 @@ class MotifCulturel {
     id: 'bogolan',
     nom: 'Bogolan',
     asset: 'assets/motifs/bogolan.webp',
+    friseAsset: 'assets/motifs/frises/bogolan.webp',
+    friseRatio: 400 / 75,
     couleurBouton: Color(0xFF2E2118),
     couleurAccent: Color(0xFF8B5E34),
     couleurTint: Color(0xFFF2EADD),
@@ -84,6 +98,8 @@ class MotifCulturel {
     id: 'zoulou',
     nom: 'Zoulou',
     asset: 'assets/motifs/zoulou.webp',
+    friseAsset: 'assets/motifs/frises/zoulou.webp',
+    friseRatio: 2.4,
     couleurBouton: Color(0xFF1F4E4A),
     couleurAccent: Color(0xFF2E7D6B),
     couleurTint: Color(0xFFE9F1EE),

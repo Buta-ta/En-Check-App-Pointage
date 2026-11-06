@@ -2193,52 +2193,66 @@ class _PointageScreenState extends State<PointageScreen> {
               ),
             ],
           ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+          child: Row(
             children: [
-              Text(
-                "AUJOURD'HUI",
-                maxLines: 1,
-                style: TextStyle(
-                  fontSize: 12,
-                  height: 15 / 12,
-                  fontWeight: FontWeight.w400,
-                  color: palette.texteTertiaire,
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      "AUJOURD'HUI",
+                      maxLines: 1,
+                      style: TextStyle(
+                        fontSize: 12,
+                        height: 15 / 12,
+                        fontWeight: FontWeight.w400,
+                        color: palette.texteTertiaire,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        statut,
+                        maxLines: 1,
+                        style: TextStyle(
+                          fontSize: 18,
+                          height: 22 / 18,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: -0.15,
+                          color: palette.texteFort,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Voir ma journée',
+                        maxLines: 1,
+                        style: TextStyle(
+                          fontSize: 15,
+                          height: 19 / 15,
+                          fontWeight: FontWeight.w400,
+                          decoration: TextDecoration.underline,
+                          decorationColor: palette.lien,
+                          decorationThickness: 1,
+                          color: palette.lien,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 5),
-              FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  statut,
-                  maxLines: 1,
-                  style: TextStyle(
-                    fontSize: 18,
-                    height: 22 / 18,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: -0.15,
-                    color: palette.texteFort,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 4),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  'Voir ma journée',
-                  maxLines: 1,
-                  style: TextStyle(
-                    fontSize: 15,
-                    height: 19 / 15,
-                    fontWeight: FontWeight.w400,
-                    decoration: TextDecoration.underline,
-                    decorationColor: palette.lien,
-                    decorationThickness: 1,
-                    color: palette.lien,
-                  ),
-                ),
+              const SizedBox(width: 14),
+              MotifUiIcon(
+                key: const Key('accueil-motif-ui-jour'),
+                motif: MotifService.actif.value,
+                fond: palette.surface,
+                bordure: palette.filet,
+                taille: 34,
               ),
             ],
           ),
@@ -3677,20 +3691,20 @@ class _PointageScreenState extends State<PointageScreen> {
                   right: 18,
                   child: _boutonLune(themeService),
                 ),
-                // Interface séparée du média : 14 pt (2 × l'ancien filet),
-                // formes 22 % plus larges, finition mate et non dominante.
+                // Interface séparée du média : une rangée de symboles au
+                // bon ratio, répétée sans ScrollView et sans les écraser.
                 Positioned(
                   left: 0,
                   right: 0,
                   bottom: 0,
-                  height: 14,
+                  height: 20,
                   child: RepaintBoundary(
                     child: FriseMotif(
                       key: const Key('accueil-bandeau-motif'),
                       motif: MotifService.actif.value,
-                      hauteur: 14,
-                      agrandissementHorizontal: 1.22,
-                      opacite: 0.90,
+                      hauteur: 20,
+                      tuilee: true,
+                      opacite: 0.92,
                       fond: palette.carteDouce,
                     ),
                   ),
@@ -3797,23 +3811,40 @@ class _PointageScreenState extends State<PointageScreen> {
                 child: Row(
                   children: [
                     Expanded(
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: FittedBox(
-                          fit: BoxFit.scaleDown,
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            souhait,
-                            maxLines: 1,
-                            style: TextStyle(
-                              fontSize: 28,
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: -1.0,
-                              height: 1.1,
-                              color: palette.texte,
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                alignment: Alignment.centerLeft,
+                                child: Text(
+                                  souhait,
+                                  maxLines: 1,
+                                  style: TextStyle(
+                                    fontSize: 28,
+                                    fontWeight: FontWeight.w600,
+                                    letterSpacing: -1.0,
+                                    height: 1.1,
+                                    color: palette.texte,
+                                  ),
+                                ),
+                              ),
                             ),
                           ),
-                        ),
+                          Expanded(
+                            child: Center(
+                              child: MotifUiIcon(
+                                key: const Key('accueil-motif-ui-salutation'),
+                                motif: MotifService.actif.value,
+                                fond: palette.surface,
+                                bordure: palette.filet,
+                                taille: math.min(32.0, hauteurPlaque),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -3883,10 +3914,6 @@ class _PointageScreenState extends State<PointageScreen> {
                         ),
                       ),
                     ),
-                    const SizedBox(width: 12),
-                    // Un seul accent secondaire, dans l'espace libre à droite
-                    // de la ligne — jamais entre les boutons de pointage.
-                    MotifSecondaire(motif: MotifService.actif.value),
                   ],
                 ),
               ),
