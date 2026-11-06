@@ -1,0 +1,552 @@
+[
+  {
+    "nom": "reference-412x869-clair",
+    "w": 412,
+    "h": 869,
+    "dpr": 2,
+    "mobile": true,
+    "capture": "reference-412x869-clair.png",
+    "premierFrameMs": 945,
+    "attenteMs": 3758,
+    "calme": true,
+    "debordementDomPx": 0,
+    "erreursJs": [],
+    "requetesExternesBloquees": [
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_entreprises_publiques",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_pauses_en_cours",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_server_time",
+      "https://fonts.gstatic.com/s/notosanssymbols/v43/rP2up3q65FkAtHfwd-eIS2brbDN6gxP34F9jRRCe4W3gfQ8gb_VFRkzrbQ.woff2",
+      "https://fonts.gstatic.com/s/roboto/v32/KFOmCnqEu92Fr1Me4GZLCzYlKw.woff2"
+    ]
+  },
+  {
+    "nom": "reference-412x869-sombre",
+    "w": 412,
+    "h": 869,
+    "dpr": 2,
+    "mobile": true,
+    "sombre": true,
+    "capture": "reference-412x869-sombre.png",
+    "premierFrameMs": 803,
+    "attenteMs": 3453,
+    "calme": true,
+    "debordementDomPx": 0,
+    "erreursJs": [],
+    "requetesExternesBloquees": [
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_entreprises_publiques",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_pauses_en_cours",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_server_time",
+      "https://fonts.gstatic.com/s/notosanssymbols/v43/rP2up3q65FkAtHfwd-eIS2brbDN6gxP34F9jRRCe4W3gfQ8gb_VFRkzrbQ.woff2",
+      "https://fonts.gstatic.com/s/roboto/v32/KFOmCnqEu92Fr1Me4GZLCzYlKw.woff2"
+    ]
+  },
+  {
+    "nom": "telephone-360x640-clair",
+    "w": 360,
+    "h": 640,
+    "dpr": 2,
+    "mobile": true,
+    "capture": "telephone-360x640-clair.png",
+    "premierFrameMs": 543,
+    "attenteMs": 2901,
+    "calme": true,
+    "debordementDomPx": 0,
+    "erreursJs": [],
+    "requetesExternesBloquees": [
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_entreprises_publiques",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_pauses_en_cours",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_server_time",
+      "https://fonts.gstatic.com/s/notosanssymbols/v43/rP2up3q65FkAtHfwd-eIS2brbDN6gxP34F9jRRCe4W3gfQ8gb_VFRkzrbQ.woff2",
+      "https://fonts.gstatic.com/s/roboto/v32/KFOmCnqEu92Fr1Me4GZLCzYlKw.woff2"
+    ]
+  },
+  {
+    "nom": "telephone-360x640-sombre",
+    "w": 360,
+    "h": 640,
+    "dpr": 2,
+    "mobile": true,
+    "sombre": true,
+    "capture": "telephone-360x640-sombre.png",
+    "premierFrameMs": 565,
+    "attenteMs": 3272,
+    "calme": true,
+    "debordementDomPx": 0,
+    "erreursJs": [],
+    "requetesExternesBloquees": [
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_entreprises_publiques",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_pauses_en_cours",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_server_time",
+      "https://fonts.gstatic.com/s/notosanssymbols/v43/rP2up3q65FkAtHfwd-eIS2brbDN6gxP34F9jRRCe4W3gfQ8gb_VFRkzrbQ.woff2",
+      "https://fonts.gstatic.com/s/roboto/v32/KFOmCnqEu92Fr1Me4GZLCzYlKw.woff2"
+    ]
+  },
+  {
+    "nom": "telephone-390x844-clair",
+    "w": 390,
+    "h": 844,
+    "dpr": 3,
+    "mobile": true,
+    "capture": "telephone-390x844-clair.png",
+    "premierFrameMs": 485,
+    "attenteMs": 3306,
+    "calme": true,
+    "debordementDomPx": 0,
+    "erreursJs": [],
+    "requetesExternesBloquees": [
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_entreprises_publiques",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_pauses_en_cours",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_server_time",
+      "https://fonts.gstatic.com/s/notosanssymbols/v43/rP2up3q65FkAtHfwd-eIS2brbDN6gxP34F9jRRCe4W3gfQ8gb_VFRkzrbQ.woff2",
+      "https://fonts.gstatic.com/s/roboto/v32/KFOmCnqEu92Fr1Me4GZLCzYlKw.woff2"
+    ]
+  },
+  {
+    "nom": "accueil-sans-autres-modes-360x640",
+    "w": 360,
+    "h": 640,
+    "dpr": 2,
+    "mobile": true,
+    "sansAutresModes": true,
+    "capture": "accueil-sans-autres-modes-360x640.png",
+    "premierFrameMs": 489,
+    "attenteMs": 3216,
+    "calme": true,
+    "debordementDomPx": 0,
+    "erreursJs": [],
+    "requetesExternesBloquees": [
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_entreprises_publiques",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_pauses_en_cours",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_server_time",
+      "https://fonts.gstatic.com/s/notosanssymbols/v43/rP2up3q65FkAtHfwd-eIS2brbDN6gxP34F9jRRCe4W3gfQ8gb_VFRkzrbQ.woff2",
+      "https://fonts.gstatic.com/s/roboto/v32/KFOmCnqEu92Fr1Me4GZLCzYlKw.woff2"
+    ]
+  },
+  {
+    "nom": "pause-360x640-clair",
+    "w": 360,
+    "h": 640,
+    "dpr": 2,
+    "mobile": true,
+    "ouvrirPause": true,
+    "capture": "pause-360x640-clair.png",
+    "premierFrameMs": 522,
+    "attenteMs": 6285,
+    "calme": true,
+    "debordementDomPx": 0,
+    "erreursJs": [],
+    "requetesExternesBloquees": [
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_entreprises_publiques",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_pauses_en_cours",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_server_time",
+      "https://fonts.gstatic.com/s/notosanssymbols/v43/rP2up3q65FkAtHfwd-eIS2brbDN6gxP34F9jRRCe4W3gfQ8gb_VFRkzrbQ.woff2",
+      "https://fonts.gstatic.com/s/roboto/v32/KFOmCnqEu92Fr1Me4GZLCzYlKw.woff2"
+    ]
+  },
+  {
+    "nom": "pause-412x869-clair",
+    "w": 412,
+    "h": 869,
+    "dpr": 2,
+    "mobile": true,
+    "ouvrirPause": true,
+    "capture": "pause-412x869-clair.png",
+    "premierFrameMs": 499,
+    "attenteMs": 6282,
+    "calme": true,
+    "debordementDomPx": 0,
+    "erreursJs": [],
+    "requetesExternesBloquees": [
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_entreprises_publiques",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_pauses_en_cours",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_server_time",
+      "https://fonts.gstatic.com/s/notosanssymbols/v43/rP2up3q65FkAtHfwd-eIS2brbDN6gxP34F9jRRCe4W3gfQ8gb_VFRkzrbQ.woff2",
+      "https://fonts.gstatic.com/s/roboto/v32/KFOmCnqEu92Fr1Me4GZLCzYlKw.woff2"
+    ]
+  },
+  {
+    "nom": "pause-412x869-sombre",
+    "w": 412,
+    "h": 869,
+    "dpr": 2,
+    "mobile": true,
+    "sombre": true,
+    "ouvrirPause": true,
+    "capture": "pause-412x869-sombre.png",
+    "premierFrameMs": 495,
+    "attenteMs": 6324,
+    "calme": true,
+    "debordementDomPx": 0,
+    "erreursJs": [],
+    "requetesExternesBloquees": [
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_entreprises_publiques",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_pauses_en_cours",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_server_time",
+      "https://fonts.gstatic.com/s/notosanssymbols/v43/rP2up3q65FkAtHfwd-eIS2brbDN6gxP34F9jRRCe4W3gfQ8gb_VFRkzrbQ.woff2",
+      "https://fonts.gstatic.com/s/roboto/v32/KFOmCnqEu92Fr1Me4GZLCzYlKw.woff2"
+    ]
+  },
+  {
+    "nom": "ma-journee-360x640-clair",
+    "w": 360,
+    "h": 640,
+    "dpr": 2,
+    "mobile": true,
+    "ouvrirMaJournee": true,
+    "capture": "ma-journee-360x640-clair.png",
+    "premierFrameMs": 490,
+    "attenteMs": 5699,
+    "calme": true,
+    "debordementDomPx": 0,
+    "erreursJs": [],
+    "requetesExternesBloquees": [
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_entreprises_publiques",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_pauses_en_cours",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_server_time",
+      "https://fonts.gstatic.com/s/notosanssymbols/v43/rP2up3q65FkAtHfwd-eIS2brbDN6gxP34F9jRRCe4W3gfQ8gb_VFRkzrbQ.woff2",
+      "https://fonts.gstatic.com/s/roboto/v32/KFOmCnqEu92Fr1Me4GZLCzYlKw.woff2"
+    ]
+  },
+  {
+    "nom": "ma-journee-412x869-clair",
+    "w": 412,
+    "h": 869,
+    "dpr": 2,
+    "mobile": true,
+    "ouvrirMaJournee": true,
+    "capture": "ma-journee-412x869-clair.png",
+    "premierFrameMs": 479,
+    "attenteMs": 5735,
+    "calme": true,
+    "debordementDomPx": 0,
+    "erreursJs": [],
+    "requetesExternesBloquees": [
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_entreprises_publiques",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_pauses_en_cours",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_server_time",
+      "https://fonts.gstatic.com/s/notosanssymbols/v43/rP2up3q65FkAtHfwd-eIS2brbDN6gxP34F9jRRCe4W3gfQ8gb_VFRkzrbQ.woff2",
+      "https://fonts.gstatic.com/s/roboto/v32/KFOmCnqEu92Fr1Me4GZLCzYlKw.woff2"
+    ]
+  },
+  {
+    "nom": "tablette-800x1280-clair",
+    "w": 800,
+    "h": 1280,
+    "dpr": 2,
+    "tablette": true,
+    "capture": "tablette-800x1280-clair.png",
+    "premierFrameMs": 481,
+    "attenteMs": 3302,
+    "calme": true,
+    "debordementDomPx": 0,
+    "erreursJs": [],
+    "requetesExternesBloquees": [
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_entreprises_publiques",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_pauses_en_cours",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_server_time",
+      "https://fonts.gstatic.com/s/notosanssymbols/v43/rP2up3q65FkAtHfwd-eIS2brbDN6gxP34F9jRRCe4W3gfQ8gb_VFRkzrbQ.woff2",
+      "https://fonts.gstatic.com/s/roboto/v32/KFOmCnqEu92Fr1Me4GZLCzYlKw.woff2"
+    ]
+  },
+  {
+    "nom": "tablette-800x1280-sombre",
+    "w": 800,
+    "h": 1280,
+    "dpr": 2,
+    "tablette": true,
+    "sombre": true,
+    "capture": "tablette-800x1280-sombre.png",
+    "premierFrameMs": 478,
+    "attenteMs": 4098,
+    "calme": true,
+    "debordementDomPx": 0,
+    "erreursJs": [],
+    "requetesExternesBloquees": [
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_entreprises_publiques",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_pauses_en_cours",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_server_time",
+      "https://fonts.gstatic.com/s/notosanssymbols/v43/rP2up3q65FkAtHfwd-eIS2brbDN6gxP34F9jRRCe4W3gfQ8gb_VFRkzrbQ.woff2",
+      "https://fonts.gstatic.com/s/roboto/v32/KFOmCnqEu92Fr1Me4GZLCzYlKw.woff2"
+    ]
+  },
+  {
+    "nom": "portable-1366x768-clair",
+    "w": 1366,
+    "h": 768,
+    "dpr": 1,
+    "capture": "portable-1366x768-clair.png",
+    "premierFrameMs": 525,
+    "attenteMs": 3265,
+    "calme": true,
+    "debordementDomPx": 0,
+    "erreursJs": [],
+    "requetesExternesBloquees": [
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_entreprises_publiques",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_pauses_en_cours",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_server_time",
+      "https://fonts.gstatic.com/s/notosanssymbols/v43/rP2up3q65FkAtHfwd-eIS2brbDN6gxP34F9jRRCe4W3gfQ8gb_VFRkzrbQ.woff2",
+      "https://fonts.gstatic.com/s/roboto/v32/KFOmCnqEu92Fr1Me4GZLCzYlKw.woff2"
+    ]
+  },
+  {
+    "nom": "portable-1366x768-sombre",
+    "w": 1366,
+    "h": 768,
+    "dpr": 1,
+    "sombre": true,
+    "capture": "portable-1366x768-sombre.png",
+    "premierFrameMs": 541,
+    "attenteMs": 3239,
+    "calme": true,
+    "debordementDomPx": 0,
+    "erreursJs": [],
+    "requetesExternesBloquees": [
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_entreprises_publiques",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_pauses_en_cours",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_server_time",
+      "https://fonts.gstatic.com/s/notosanssymbols/v43/rP2up3q65FkAtHfwd-eIS2brbDN6gxP34F9jRRCe4W3gfQ8gb_VFRkzrbQ.woff2",
+      "https://fonts.gstatic.com/s/roboto/v32/KFOmCnqEu92Fr1Me4GZLCzYlKw.woff2"
+    ]
+  },
+  {
+    "nom": "ordinateur-1920x962-clair",
+    "w": 1920,
+    "h": 962,
+    "dpr": 1,
+    "capture": "ordinateur-1920x962-clair.png",
+    "premierFrameMs": 536,
+    "attenteMs": 3384,
+    "calme": true,
+    "debordementDomPx": 0,
+    "erreursJs": [],
+    "requetesExternesBloquees": [
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_entreprises_publiques",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_pauses_en_cours",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_server_time",
+      "https://fonts.gstatic.com/s/notosanssymbols/v43/rP2up3q65FkAtHfwd-eIS2brbDN6gxP34F9jRRCe4W3gfQ8gb_VFRkzrbQ.woff2",
+      "https://fonts.gstatic.com/s/roboto/v32/KFOmCnqEu92Fr1Me4GZLCzYlKw.woff2"
+    ]
+  },
+  {
+    "nom": "motif-raphia-clair",
+    "w": 412,
+    "h": 869,
+    "dpr": 2,
+    "mobile": true,
+    "motif": "raphia",
+    "capture": "motif-raphia-clair.png",
+    "premierFrameMs": 551,
+    "attenteMs": 3233,
+    "calme": true,
+    "debordementDomPx": 0,
+    "erreursJs": [],
+    "requetesExternesBloquees": [
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_entreprises_publiques",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_pauses_en_cours",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_server_time",
+      "https://fonts.gstatic.com/s/notosanssymbols/v43/rP2up3q65FkAtHfwd-eIS2brbDN6gxP34F9jRRCe4W3gfQ8gb_VFRkzrbQ.woff2",
+      "https://fonts.gstatic.com/s/roboto/v32/KFOmCnqEu92Fr1Me4GZLCzYlKw.woff2"
+    ]
+  },
+  {
+    "nom": "motif-raphia-sombre",
+    "w": 412,
+    "h": 869,
+    "dpr": 2,
+    "mobile": true,
+    "motif": "raphia",
+    "sombre": true,
+    "capture": "motif-raphia-sombre.png",
+    "premierFrameMs": 479,
+    "attenteMs": 2857,
+    "calme": true,
+    "debordementDomPx": 0,
+    "erreursJs": [],
+    "requetesExternesBloquees": [
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_entreprises_publiques",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_pauses_en_cours",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_server_time",
+      "https://fonts.gstatic.com/s/notosanssymbols/v43/rP2up3q65FkAtHfwd-eIS2brbDN6gxP34F9jRRCe4W3gfQ8gb_VFRkzrbQ.woff2",
+      "https://fonts.gstatic.com/s/roboto/v32/KFOmCnqEu92Fr1Me4GZLCzYlKw.woff2"
+    ]
+  },
+  {
+    "nom": "motif-bogolan-clair",
+    "w": 412,
+    "h": 869,
+    "dpr": 2,
+    "mobile": true,
+    "motif": "bogolan",
+    "capture": "motif-bogolan-clair.png",
+    "premierFrameMs": 490,
+    "attenteMs": 3252,
+    "calme": true,
+    "debordementDomPx": 0,
+    "erreursJs": [],
+    "requetesExternesBloquees": [
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_entreprises_publiques",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_pauses_en_cours",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_server_time",
+      "https://fonts.gstatic.com/s/notosanssymbols/v43/rP2up3q65FkAtHfwd-eIS2brbDN6gxP34F9jRRCe4W3gfQ8gb_VFRkzrbQ.woff2",
+      "https://fonts.gstatic.com/s/roboto/v32/KFOmCnqEu92Fr1Me4GZLCzYlKw.woff2"
+    ]
+  },
+  {
+    "nom": "motif-bogolan-sombre",
+    "w": 412,
+    "h": 869,
+    "dpr": 2,
+    "mobile": true,
+    "motif": "bogolan",
+    "sombre": true,
+    "capture": "motif-bogolan-sombre.png",
+    "premierFrameMs": 476,
+    "attenteMs": 3237,
+    "calme": true,
+    "debordementDomPx": 0,
+    "erreursJs": [],
+    "requetesExternesBloquees": [
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_entreprises_publiques",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_pauses_en_cours",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_server_time",
+      "https://fonts.gstatic.com/s/notosanssymbols/v43/rP2up3q65FkAtHfwd-eIS2brbDN6gxP34F9jRRCe4W3gfQ8gb_VFRkzrbQ.woff2",
+      "https://fonts.gstatic.com/s/roboto/v32/KFOmCnqEu92Fr1Me4GZLCzYlKw.woff2"
+    ]
+  },
+  {
+    "nom": "motif-zoulou-clair",
+    "w": 412,
+    "h": 869,
+    "dpr": 2,
+    "mobile": true,
+    "motif": "zoulou",
+    "capture": "motif-zoulou-clair.png",
+    "premierFrameMs": 492,
+    "attenteMs": 2840,
+    "calme": true,
+    "debordementDomPx": 0,
+    "erreursJs": [],
+    "requetesExternesBloquees": [
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_entreprises_publiques",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_pauses_en_cours",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_server_time",
+      "https://fonts.gstatic.com/s/notosanssymbols/v43/rP2up3q65FkAtHfwd-eIS2brbDN6gxP34F9jRRCe4W3gfQ8gb_VFRkzrbQ.woff2",
+      "https://fonts.gstatic.com/s/roboto/v32/KFOmCnqEu92Fr1Me4GZLCzYlKw.woff2"
+    ]
+  },
+  {
+    "nom": "motif-zoulou-sombre",
+    "w": 412,
+    "h": 869,
+    "dpr": 2,
+    "mobile": true,
+    "motif": "zoulou",
+    "sombre": true,
+    "capture": "motif-zoulou-sombre.png",
+    "premierFrameMs": 483,
+    "attenteMs": 2853,
+    "calme": true,
+    "debordementDomPx": 0,
+    "erreursJs": [],
+    "requetesExternesBloquees": [
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_entreprises_publiques",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_pauses_en_cours",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_server_time",
+      "https://fonts.gstatic.com/s/notosanssymbols/v43/rP2up3q65FkAtHfwd-eIS2brbDN6gxP34F9jRRCe4W3gfQ8gb_VFRkzrbQ.woff2",
+      "https://fonts.gstatic.com/s/roboto/v32/KFOmCnqEu92Fr1Me4GZLCzYlKw.woff2"
+    ]
+  },
+  {
+    "nom": "checklist-incomplete-360x640",
+    "w": 360,
+    "h": 640,
+    "dpr": 2,
+    "mobile": true,
+    "checklistIncomplete": true,
+    "capture": "checklist-incomplete-360x640.png",
+    "premierFrameMs": 480,
+    "attenteMs": 3159,
+    "calme": true,
+    "debordementDomPx": 0,
+    "erreursJs": [],
+    "requetesExternesBloquees": [
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_entreprises_publiques",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_pauses_en_cours",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_server_time",
+      "https://fonts.gstatic.com/s/notosanssymbols/v43/rP2up3q65FkAtHfwd-eIS2brbDN6gxP34F9jRRCe4W3gfQ8gb_VFRkzrbQ.woff2",
+      "https://fonts.gstatic.com/s/roboto/v32/KFOmCnqEu92Fr1Me4GZLCzYlKw.woff2"
+    ]
+  },
+  {
+    "nom": "parametres-checklist-360x640",
+    "w": 360,
+    "h": 640,
+    "dpr": 2,
+    "mobile": true,
+    "checklistIncomplete": true,
+    "ouvrirParametres": true,
+    "capture": "parametres-checklist-360x640.png",
+    "premierFrameMs": 476,
+    "attenteMs": 4366,
+    "calme": true,
+    "debordementDomPx": 0,
+    "erreursJs": [],
+    "requetesExternesBloquees": [
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_entreprises_publiques",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_pauses_en_cours",
+      "https://cxggndvhwdolbtyezjde.supabase.co/rest/v1/rpc/encheck_server_time",
+      "https://fonts.gstatic.com/s/notosanssc/v37/k3kCo84MPvpLmixcA63oeAL7Iqp5IZJF9bmaG9_FnYkldv7JjxkkgFsFSSOPMOkySAZ73y9ViAt3acb8NexQ2w.109.woff2",
+      "https://fonts.gstatic.com/s/notosanssymbols/v43/rP2up3q65FkAtHfwd-eIS2brbDN6gxP34F9jRRCe4W3gfQ8gb_VFRkzrbQ.woff2",
+      "https://fonts.gstatic.com/s/roboto/v32/KFOmCnqEu92Fr1Me4GZLCzYlKw.woff2"
+    ]
+  },
+  {
+    "nom": "historique-360x640-clair",
+    "w": 360,
+    "h": 640,
+    "dpr": 2,
+    "mobile": true,
+    "capture": "historique-360x640-clair.png",
+    "premierFrameMs": 938,
+    "attenteMs": 3313,
+    "calme": true,
+    "debordementDomPx": 0,
+    "erreursJs": [],
+    "requetesExternesBloquees": [
+      "https://fonts.gstatic.com/s/roboto/v32/KFOmCnqEu92Fr1Me4GZLCzYlKw.woff2"
+    ]
+  },
+  {
+    "nom": "historique-412x869-clair",
+    "w": 412,
+    "h": 869,
+    "dpr": 2,
+    "mobile": true,
+    "capture": "historique-412x869-clair.png",
+    "premierFrameMs": 794,
+    "attenteMs": 2987,
+    "calme": true,
+    "debordementDomPx": 0,
+    "erreursJs": [],
+    "requetesExternesBloquees": [
+      "https://fonts.gstatic.com/s/roboto/v32/KFOmCnqEu92Fr1Me4GZLCzYlKw.woff2"
+    ]
+  },
+  {
+    "nom": "historique-calendrier-360x640-clair",
+    "w": 360,
+    "h": 640,
+    "dpr": 2,
+    "mobile": true,
+    "ouvrirCalendrier": true,
+    "capture": "historique-calendrier-360x640-clair.png",
+    "premierFrameMs": 512,
+    "attenteMs": 3234,
+    "calme": true,
+    "debordementDomPx": 0,
+    "erreursJs": [],
+    "requetesExternesBloquees": [
+      "https://fonts.gstatic.com/s/roboto/v32/KFOmCnqEu92Fr1Me4GZLCzYlKw.woff2"
+    ]
+  }
+]
