@@ -27,7 +27,10 @@ class FriseMotif extends StatelessWidget {
           // L'étoffe elle-même (vraie image du textile).
           Image.asset(
             motif.asset,
-            fit: BoxFit.cover,
+            // En frise fine, toute la hauteur des symboles reste visible
+            // sur toute la largeur (maquette). Les grands visuels gardent
+            // leur cadrage cover pour ne pas être déformés.
+            fit: hauteur <= 40 ? BoxFit.fill : BoxFit.cover,
             errorBuilder: (_, __, ___) => Container(color: motif.couleurBouton),
           ),
         ],

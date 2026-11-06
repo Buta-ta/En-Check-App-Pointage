@@ -55,14 +55,14 @@ class MotifCulturel {
     peuple: 'Kuba',
   );
 
-  /// Adinkra peint (Ghana) — l'univers « temps et travail ».
+  /// Adinkra peint (Ghana), déclinaison bleu-vert de la maquette du 5/11.
   static const adinkra = MotifCulturel(
     id: 'adinkra',
     nom: 'Adinkra',
     asset: 'assets/motifs/adinkra.webp',
-    couleurBouton: Color(0xFF1B2A4A),
+    couleurBouton: Color(0xFF214348),
     couleurAccent: Color(0xFFB4593A),
-    couleurTint: Color(0xFFF4EAE3),
+    couleurTint: Color(0xFFD0DEDD),
     pays: 'Ghana',
     peuple: 'Akan',
   );
