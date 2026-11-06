@@ -152,22 +152,45 @@ async function ouvrir(browser, scenario) {
   if (!CHROME) throw new Error('Chrome introuvable (définir CHROME_PATH).');
   fs.mkdirSync(OUT, { recursive: true });
   const resultats = [];
-  const browser = await puppeteer.launch({
-    executablePath: CHROME,
-    headless: 'shell',
-    args: [
+  const ARGS_COMPLET = [
+
       '--ash-no-nudges', '--disable-domain-reliability', '--disable-print-preview',
       '--disk-cache-size=33554432', '--no-default-browser-check', '--no-pings',
       '--font-render-hinting=none',
       '--disable-features=AudioServiceOutOfProcess,IsolateOrigins,site-per-process',
-      '--enable-features=SharedArrayBuffer', '--ignore-gpu-blocklist', '--in-process-gpu',
+      '--enable-features=SharedArrayBuffer', '--ignore-gpu-blocklist',
       '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
       '--allow-running-insecure-content', '--disable-setuid-sandbox',
       '--disable-site-isolation-trials', '--disable-web-security', '--no-sandbox',
       '--disable-dev-shm-usage', '--lang=fr-FR',
-    ],
-    protocolTimeout: 180000,
-  });
+      ];
+  const ARGS_STANDARD = [
+
+      '--no-sandbox', '--disable-dev-shm-usage', '--use-gl=angle',
+      '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
+      '--ignore-gpu-blocklist', '--font-render-hinting=none',
+      '--disable-web-security', '--allow-running-insecure-content',
+      '--enable-features=SharedArrayBuffer', '--lang=fr-FR',
+      ];
+  let browser;
+  let derniereErreur;
+  const configurations = [ARGS_COMPLET, ARGS_STANDARD];
+  for (let i = 0; i < configurations.length; i += 1) {
+    try {
+      browser = await puppeteer.launch({
+        executablePath: CHROME,
+        headless: true,
+        args: configurations[i],
+        protocolTimeout: 180000,
+      });
+      if (i > 0) console.log('Chrome démarré avec le jeu d’arguments standard de repli.');
+      break;
+    } catch (e) {
+      derniereErreur = e;
+      console.error(`Jeu d'arguments Chrome ${i + 1} refusé: ${String(e).slice(0, 500)}`);
+    }
+  }
+  if (!browser) throw derniereErreur;
   try {
     for (const scenario of (LIMIT > 0 ? SCENARIOS.slice(0, LIMIT) : SCENARIOS)) {
       process.stdout.write(`Capture ${scenario.nom}… `);
@@ -215,5 +238,13 @@ async function ouvrir(browser, scenario) {
   }
 })().catch((e) => {
   console.error(e.stack || e);
+  try {
+    fs.mkdirSync(OUT, { recursive: true });
+    fs.writeFileSync(path.join(OUT, 'mesures.json'), JSON.stringify([{
+      nom: 'chrome-lancement', w: 0, h: 0, dpr: 1, mobile: false,
+      capture: null, calme: false, debordementDomPx: 0, erreursJs: [],
+      erreurCapture: String(e && e.stack ? e.stack : e).slice(0, 3000),
+    }], null, 2));
+  } catch (_) {}
   process.exit(1);
 });
