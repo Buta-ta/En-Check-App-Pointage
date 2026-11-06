@@ -297,8 +297,13 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
         : widget.maquettePause
             ? 0.26
             : 0.21;
-    final hauteurMaxScene =
-        widget.maquettePause && hauteurTotale >= 760 ? 230.0 : 150.0;
+    final hauteurMaxScene = !widget.maquettePause
+        ? 150.0
+        : hauteurTotale >= 760
+            ? 230.0
+            : hauteurTotale < 700
+                ? 130.0
+                : 150.0;
     final double hauteurScene = clavierOuvert
         ? 0.0
         : (hauteurTotale * proportionScene)
@@ -309,7 +314,11 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
     final carte = Padding(
       padding: EdgeInsets.fromLTRB(
         16,
-        clavierOuvert ? 6 : widget.maquettePause ? 30 : 12,
+        clavierOuvert
+            ? 6
+            : widget.maquettePause
+                ? (hauteurTotale < 700 ? 22 : 30)
+                : 12,
         16,
         clavierOuvert ? 6 : widget.maquettePause ? 0 : 12,
       ),
