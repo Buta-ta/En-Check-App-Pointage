@@ -127,12 +127,11 @@ class AccueilMaquette extends StatelessWidget {
   Widget _bloc(String cle, _Disposition d, String nom, Widget enfant) {
     final y = d.position(nom);
     return Positioned(
-      key: Key(cle),
       left: d.marge,
       right: d.marge,
       top: y,
       height: d.hauteurs[nom],
-      child: enfant,
+      child: SizedBox(key: Key(cle), child: enfant),
     );
   }
 }

@@ -50,7 +50,7 @@ Future<void> _verifier(
             annonces:
                 annonces ? _bloc('Annonces\nUne annonce', Colors.white) : null,
             alerteBorne: alerte ? _bloc('Borne à activer', Colors.amber) : null,
-            navigation: const KeyedSubtree(
+            navigation: const SizedBox(
               key: Key('navigation-test'),
               child: ColoredBox(
                 color: Color(0xFFF9F7F0),
