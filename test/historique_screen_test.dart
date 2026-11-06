@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:en_check/screens/historique_screen.dart';
+import 'package:en_check/services/connectivity_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -8,15 +9,22 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   late Box<dynamic> pointagesPending;
+  late Directory repertoire;
 
   setUpAll(() async {
-    final repertoire = await Directory.systemTemp.createTemp('en-check-historique-');
+    repertoire = await Directory.systemTemp.createTemp('en-check-historique-');
     Hive.init(repertoire.path);
     pointagesPending = await Hive.openBox<dynamic>('pointages_pending');
   });
 
+  tearDownAll(() async {
+    await Hive.close();
+    if (await repertoire.exists()) await repertoire.delete(recursive: true);
+  });
+
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
+    ConnectivityService.setOnlineForTest(false);
     await pointagesPending.clear();
   });
 

@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:en_check/screens/historique_screen.dart';
 import 'package:en_check/services/motif_service.dart';
+import 'package:en_check/services/connectivity_service.dart';
 
 /// Point d'entrée isolé de recette visuelle : données fictives, hors-ligne,
 /// sans accès Supabase. N'est jamais utilisé par l'application distribuée.
@@ -42,6 +43,7 @@ Future<void> main() async {
   final preferences = await SharedPreferences.getInstance();
   await preferences.setString('enterprise_name', 'Atelier de démonstration');
   await MotifService.charger();
+  ConnectivityService.setOnlineForTest(false);
 
   runApp(const _ApercuHistorique());
 }
