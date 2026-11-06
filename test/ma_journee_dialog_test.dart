@@ -81,7 +81,7 @@ void main() {
 
     await tester.tap(matricule);
     await tester.enterText(matricule, 'enn-0002');
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.testTextInput.receiveAction(TextInputAction.next);
     await tester.pump();
     expect(tester.widget<TextField>(pin).focusNode!.hasFocus, isTrue);
 
@@ -104,7 +104,7 @@ void main() {
 
     // L'action Terminé du clavier, comme Entrée sur un clavier physique,
     // consulte sans créer de pointage.
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
     expect(matriculeVerifie, 'ENN-0002');
     expect(pinVerifie, '1234');
