@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 double _luminance(Color c) {
-  double canal(double v) {
+  double canal(num v) {
     final s = v / 255;
     return s <= 0.04045
         ? s / 12.92
