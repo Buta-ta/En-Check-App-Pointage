@@ -79,7 +79,12 @@ jobs:
       - name: Capturer tous les écrans
         id: captures
         continue-on-error: true
-        run: node tool/apercu/capture_accueil.js build/web apercu-accueil
+        run: |
+          set +e
+          node tool/apercu/capture_accueil.js build/web apercu-accueil 2>&1 | tee /tmp/apercu-captures.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then python3 tool/apercu/annoter_log.py /tmp/apercu-captures.log 'Captures'; fi
+          exit "$status"
 
       - name: Mesurer débordements et contrastes
         id: mesures
@@ -87,7 +92,11 @@ jobs:
         run: |
           python3 -m venv /tmp/apercu-venv
           /tmp/apercu-venv/bin/pip install --quiet pillow numpy
-          /tmp/apercu-venv/bin/python tool/apercu/mesurer_captures.py apercu-accueil
+          set +e
+          /tmp/apercu-venv/bin/python tool/apercu/mesurer_captures.py apercu-accueil 2>&1 | tee /tmp/apercu-mesures.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then python3 tool/apercu/annoter_log.py /tmp/apercu-mesures.log 'Mesures'; fi
+          exit "$status"
 
       - name: Publier les captures sur la référence d'aperçu
         if: always() && hashFiles('apercu-accueil/mesures.json') != ''

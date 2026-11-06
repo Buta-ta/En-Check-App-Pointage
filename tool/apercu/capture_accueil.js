@@ -156,34 +156,46 @@ async function ouvrir(browser, scenario) {
   try {
     for (const scenario of SCENARIOS) {
       process.stdout.write(`Capture ${scenario.nom}… `);
-      const r = await ouvrir(browser, scenario);
-      await r.page.screenshot({ path: path.join(OUT, `${scenario.nom}.png`) });
-      const m = r.mesure;
-      const debordement = Math.max(
-        m.documentWidth - m.innerWidth,
-        m.documentHeight - m.innerHeight,
-        m.bodyWidth - m.innerWidth,
-        m.bodyHeight - m.innerHeight,
-      );
-      const resultat = {
-        ...scenario,
-        capture: `${scenario.nom}.png`,
-        premierFrameMs: r.premierFrameMs,
-        attenteMs: r.attenteMs,
-        calme: r.calme,
-        debordementDomPx: debordement,
-        erreursJs: r.erreurs,
-        requetesExternesBloquees: [...new Set(r.externes)].sort(),
-      };
-      resultats.push(resultat);
+      try {
+        const r = await ouvrir(browser, scenario);
+        await r.page.screenshot({ path: path.join(OUT, `${scenario.nom}.png`) });
+        const m = r.mesure;
+        const debordement = Math.max(
+          m.documentWidth - m.innerWidth,
+          m.documentHeight - m.innerHeight,
+          m.bodyWidth - m.innerWidth,
+          m.bodyHeight - m.innerHeight,
+        );
+        resultats.push({
+          ...scenario,
+          capture: `${scenario.nom}.png`,
+          premierFrameMs: r.premierFrameMs,
+          attenteMs: r.attenteMs,
+          calme: r.calme,
+          debordementDomPx: debordement,
+          erreursJs: r.erreurs,
+          requetesExternesBloquees: [...new Set(r.externes)].sort(),
+        });
+        console.log(`calme=${r.calme}, débordement DOM=${debordement}px, erreurs JS=${r.erreurs.length}`);
+        await r.page.close();
+      } catch (e) {
+        // Une taille en échec ne doit pas priver toutes les autres de rapport.
+        resultats.push({
+          ...scenario,
+          capture: null,
+          calme: false,
+          debordementDomPx: 0,
+          erreursJs: [],
+          erreurCapture: String(e && e.stack ? e.stack : e).slice(0, 1600),
+        });
+        console.log(`ÉCHEC: ${String(e).slice(0, 300)}`);
+      }
       fs.writeFileSync(path.join(OUT, 'mesures.json'), JSON.stringify(resultats, null, 2));
-      console.log(`calme=${r.calme}, débordement DOM=${debordement}px, erreurs JS=${r.erreurs.length}`);
-      await r.page.close();
     }
   } finally {
     await browser.close();
   }
-  if (resultats.some((r) => !r.calme || r.debordementDomPx > 1 || r.erreursJs.length)) {
+  if (resultats.some((r) => !r.calme || r.debordementDomPx > 1 || r.erreursJs.length || r.erreurCapture)) {
     process.exitCode = 2;
   }
 })().catch((e) => {

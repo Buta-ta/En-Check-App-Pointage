@@ -92,7 +92,7 @@ def contraste_zone(
 def analyser(scenario: dict) -> list[dict]:
     # La coque ordinateur déplace l'app ; les tests widget couvrent sa mise en
     # page, tandis que la mesure pixel ci-dessous vise les écrans pleine largeur.
-    if not scenario.get("mobile"):
+    if not scenario.get("mobile") or not scenario.get("capture"):
         return []
     if not scenario["nom"].startswith(("reference-", "telephone-")):
         return []
@@ -133,6 +133,8 @@ for scenario in MESURES:
         echecs.append(f"{scenario['nom']}: rendu jamais calme")
     if scenario.get("erreursJs"):
         echecs.append(f"{scenario['nom']}: erreurs JavaScript")
+    if scenario.get("erreurCapture"):
+        echecs.append(f"{scenario['nom']}: {scenario['erreurCapture']}")
 for c in contrastes:
     if not c.get("ok"):
         echecs.append(
