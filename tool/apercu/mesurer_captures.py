@@ -91,6 +91,9 @@ def contraste_zone(
     }
 
 
+HAUTS_CONNUS = {}
+
+
 def analyser(scenario: dict) -> list[dict]:
     # La coque ordinateur déplace l'app ; les tests widget couvrent sa mise en
     # page, tandis que la mesure pixel ci-dessous vise les écrans pleine largeur.
@@ -104,7 +107,14 @@ def analyser(scenario: dict) -> list[dict]:
     w = float(scenario["w"])
     x = 20.0
     largeur = w - 40.0
-    top = haut_entete(rgb, dpr) / dpr
+    cle = (scenario["w"], scenario["h"], dpr)
+    # Clairs et sombres ont exactement la même géométrie ; réutiliser le bord
+    # mesuré sur le clair évite de confondre un texte avec le bord en sombre.
+    if scenario.get("sombre") and cle in HAUTS_CONNUS:
+        top = HAUTS_CONNUS[cle]
+    else:
+        top = haut_entete(rgb, dpr) / dpr
+        HAUTS_CONNUS[cle] = top
     resultats = []
     zones = [
         ("En-Check", (x + 19, top + 23, x + largeur * 0.32 + 19, top + 51), 4.5),

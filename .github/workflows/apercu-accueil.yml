@@ -78,8 +78,6 @@ jobs:
 
       - name: Capturer tous les écrans
         id: captures
-        env:
-          APERCU_LIMIT: '2'
         continue-on-error: true
         run: |
           set +e
