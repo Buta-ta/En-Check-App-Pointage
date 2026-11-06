@@ -15,10 +15,25 @@ class SlideValider extends StatefulWidget {
   final Future<bool> Function() onGlisse;
   final String label;
 
+  /// Palette facultative : les anciens appels gardent le style doré/brun.
+  /// La maquette Pause fournit les couleurs du motif actif.
+  final Color? fond;
+  final Color? bordure;
+  final Color? texte;
+  final Color? bouton;
+  final Color? bordureBouton;
+  final Color? icone;
+
   const SlideValider({
     super.key,
     required this.onGlisse,
     this.label = 'Glisser pour valider',
+    this.fond,
+    this.bordure,
+    this.texte,
+    this.bouton,
+    this.bordureBouton,
+    this.icone,
   });
 
   @override
@@ -78,10 +93,10 @@ class _SlideValiderState extends State<SlideValider> {
           child: Container(
             height: 58,
             decoration: BoxDecoration(
-              color: EnCheckColors.brunProfond,
+              color: widget.fond ?? EnCheckColors.brunProfond,
               borderRadius: BorderRadius.circular(29),
               border: Border.all(
-                color: EnCheckColors.orDoux.withOpacity(0.55),
+                color: widget.bordure ?? EnCheckColors.orDoux.withOpacity(0.55),
                 width: 1.2,
               ),
             ),
@@ -97,15 +112,15 @@ class _SlideValiderState extends State<SlideValider> {
                       Icon(
                         _succes ? Icons.check_circle : Icons.lock_open,
                         size: 16,
-                        color: EnCheckColors.orDoux,
+                        color: widget.texte ?? EnCheckColors.orDoux,
                       ),
                       const SizedBox(width: 8),
                       Flexible(
                         child: Text(
                           _succes ? 'Enregistré' : widget.label,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: EnCheckColors.blanc,
+                          style: TextStyle(
+                            color: widget.texte ?? EnCheckColors.blanc,
                             fontSize: 14.5,
                             fontWeight: FontWeight.w600,
                             letterSpacing: 0.4,
@@ -126,8 +141,14 @@ class _SlideValiderState extends State<SlideValider> {
                     decoration: BoxDecoration(
                       color: _succes
                           ? EnCheckColors.succes
-                          : EnCheckColors.orDoux,
+                          : widget.bouton ?? EnCheckColors.orDoux,
                       shape: BoxShape.circle,
+                      border: widget.bordureBouton == null
+                          ? null
+                          : Border.all(
+                              color: widget.bordureBouton!,
+                              width: 3,
+                            ),
                       boxShadow: [
                         BoxShadow(
                           color: Colors.black.withOpacity(0.25),
@@ -137,16 +158,16 @@ class _SlideValiderState extends State<SlideValider> {
                       ],
                     ),
                     child: _enCours
-                        ? const Padding(
-                            padding: EdgeInsets.all(13),
+                        ? Padding(
+                            padding: const EdgeInsets.all(13),
                             child: CircularProgressIndicator(
                               strokeWidth: 2.4,
-                              color: EnCheckColors.brunProfond,
+                              color: widget.icone ?? EnCheckColors.brunProfond,
                             ),
                           )
                         : Icon(
                             _succes ? Icons.check : Icons.arrow_forward,
-                            color: EnCheckColors.brunProfond,
+                            color: widget.icone ?? EnCheckColors.brunProfond,
                             size: 24,
                           ),
                   ),

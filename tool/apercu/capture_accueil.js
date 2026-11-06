@@ -23,6 +23,9 @@ const SCENARIOS = [
   { nom: 'telephone-360x640-sombre', w: 360, h: 640, dpr: 2, mobile: true, sombre: true },
   { nom: 'telephone-390x844-clair', w: 390, h: 844, dpr: 3, mobile: true },
   { nom: 'accueil-sans-autres-modes-360x640', w: 360, h: 640, dpr: 2, mobile: true, sansAutresModes: true },
+  { nom: 'pause-360x640-clair', w: 360, h: 640, dpr: 2, mobile: true, ouvrirPause: true },
+  { nom: 'pause-412x869-clair', w: 412, h: 869, dpr: 2, mobile: true, ouvrirPause: true },
+  { nom: 'pause-412x869-sombre', w: 412, h: 869, dpr: 2, mobile: true, sombre: true, ouvrirPause: true },
   { nom: 'tablette-800x1280-clair', w: 800, h: 1280, dpr: 2, tablette: true },
   { nom: 'tablette-800x1280-sombre', w: 800, h: 1280, dpr: 2, tablette: true, sombre: true },
   { nom: 'portable-1366x768-clair', w: 1366, h: 768, dpr: 1 },
@@ -143,6 +146,21 @@ async function ouvrir(browser, scenario) {
   if (scenario.ouvrirParametres) {
     await page.mouse.click(scenario.w * 0.875, scenario.h - 32);
     await sleep(1200);
+  }
+  if (scenario.ouvrirPause) {
+    // Le vrai onglet « Pause » de la navigation basse (2e de 4).
+    await page.mouse.click(scenario.w * 0.375, scenario.h - 32);
+    await sleep(1400);
+    calme = false;
+    stable = 0;
+    precedent = -1;
+    for (let i = 0; i < 20 && !calme; i += 1) {
+      const raf = await page.evaluate(() => window.__raf);
+      stable = raf === precedent ? stable + 1 : 0;
+      precedent = raf;
+      calme = stable >= 4;
+      if (!calme) await sleep(400);
+    }
   }
   const mesure = await page.evaluate(() => ({
     innerWidth: window.innerWidth,
