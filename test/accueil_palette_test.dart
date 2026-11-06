@@ -4,6 +4,7 @@ import 'package:en_check/services/motif_service.dart';
 import 'package:en_check/theme/accueil_palette.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 double _luminance(Color c) {
   double canal(num v) {
@@ -27,6 +28,55 @@ double _contraste(Color a, Color b) {
 }
 
 void main() {
+  test('Les accents suivent le motif sans changer les fonds neutres', () {
+    for (final sombre in [false, true]) {
+      final reference = AccueilPalette.pour(MotifCulturel.adinkra, sombre);
+      for (final motif in MotifCulturel.tous) {
+        final p = AccueilPalette.pour(motif, sombre);
+        expect(p.fond, reference.fond);
+        expect(p.surface, reference.surface);
+        expect(p.texte, reference.texte);
+        if (motif != MotifCulturel.adinkra) {
+          expect(p.primaire, isNot(reference.primaire),
+              reason: '${motif.id}, sombre=$sombre');
+          expect(p.lien, isNot(reference.lien),
+              reason: '${motif.id}, sombre=$sombre');
+        }
+      }
+    }
+  });
+
+  testWidgets('Le motif choisi met les accents à jour immédiatement',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final initial = MotifService.actif.value;
+    addTearDown(() => MotifService.actif.value = initial);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ValueListenableBuilder<MotifCulturel>(
+          valueListenable: MotifService.actif,
+          builder: (context, motif, _) => ColoredBox(
+            key: const Key('accent-test'),
+            color: AccueilPalette.pour(motif, false).primaire,
+            child: const SizedBox.expand(),
+          ),
+        ),
+      ),
+    );
+    Color accent() => tester.widget<ColoredBox>(
+          find.byKey(const Key('accent-test')),
+        ).color;
+
+    expect(accent(), AccueilPalette.pour(initial, false).primaire);
+    final enregistrement = MotifService.enregistrer(MotifCulturel.zoulou);
+    // La notification est synchrone, avant la fin de l'écriture disque.
+    await tester.pump();
+    expect(MotifService.actif.value, MotifCulturel.zoulou);
+    expect(accent(), AccueilPalette.pour(MotifCulturel.zoulou, false).primaire);
+    await enregistrement;
+  });
+
   test('Les accents des 4 motifs gardent un contraste WCAG AA', () {
     for (final motif in MotifCulturel.tous) {
       for (final sombre in [false, true]) {

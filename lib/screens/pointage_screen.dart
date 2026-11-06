@@ -3492,9 +3492,8 @@ class _PointageScreenState extends State<PointageScreen> {
   //        accessible), couleurAccent en sombre.
   //    Neutres, rendu mat et clair/sombre conservés ; la photo et les logos
   //    ne sont JAMAIS recolorés. Aucune analyse de pixels, aucune dépendance.
-  // ⭐ MAQUETTE FINALE 5/11 : les couleurs de l'accueil sont FIXES et
-  //    échantillonnées sur la maquette choisie (teintes vert profond,
-  //    menthe et crème) — sans variation par motif, sans ombre ni gloss.
+  // ⭐ FINITION : neutres fixes et accents déterministes du motif actif.
+  //    Le média et les logos ne sont jamais recolorés ; aucun pixel n'est analysé.
 
   Widget _buildScenePointage(
     ThemeService themeService,
@@ -3585,25 +3584,45 @@ class _PointageScreenState extends State<PointageScreen> {
                 ),
                 Positioned(
                   left: 19,
-                  top: 25,
-                  width: largeur * 0.32,
-                  height: 24 * texte,
+                  top: 22,
+                  width: largeur * 0.31,
+                  height: 28 * texte,
                   child: const FittedBox(
                     fit: BoxFit.scaleDown,
                     alignment: Alignment.centerLeft,
-                    child: Text(
-                      'En-Check',
-                      maxLines: 1,
-                      style: TextStyle(
-                        fontSize: 17,
-                        height: 1.24,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -1.1,
-                        color: Colors.white,
-                        shadows: [
-                          Shadow(color: Color(0x59000000), blurRadius: 2),
-                        ],
-                      ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        // Le VRAI symbole En-Check, distinct du logo client.
+                        // Le titre et sa typographie restent inchangés.
+                        Image.asset(
+                          'assets/logo_encheck.png',
+                          key: Key('accueil-symbole-encheck'),
+                          width: 23,
+                          height: 23,
+                          fit: BoxFit.contain,
+                          cacheWidth: 96,
+                          cacheHeight: 96,
+                          filterQuality: FilterQuality.medium,
+                          semanticLabel: 'Symbole En-Check',
+                        ),
+                        SizedBox(width: 6),
+                        Text(
+                          'En-Check',
+                          maxLines: 1,
+                          style: TextStyle(
+                            fontSize: 17,
+                            height: 1.24,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: -1.1,
+                            color: Colors.white,
+                            shadows: [
+                              Shadow(color: Color(0x59000000), blurRadius: 2),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -3658,15 +3677,21 @@ class _PointageScreenState extends State<PointageScreen> {
                   right: 18,
                   child: _boutonLune(themeService),
                 ),
+                // Interface séparée du média : 14 pt (2 × l'ancien filet),
+                // formes 22 % plus larges, finition mate et non dominante.
                 Positioned(
                   left: 0,
                   right: 0,
                   bottom: 0,
-                  height: 7,
+                  height: 14,
                   child: RepaintBoundary(
                     child: FriseMotif(
+                      key: const Key('accueil-bandeau-motif'),
                       motif: MotifService.actif.value,
-                      hauteur: 7,
+                      hauteur: 14,
+                      agrandissementHorizontal: 1.22,
+                      opacite: 0.90,
+                      fond: palette.carteDouce,
                     ),
                   ),
                 ),
@@ -3730,8 +3755,8 @@ class _PointageScreenState extends State<PointageScreen> {
   }
 
   /// Le souhait de bienvenue, dans la langue du pays de l'entreprise.
-  /// ⭐ MAQUETTE FINALE 5/11 : le souhait (« Mboté »…) centré, avec
-  /// « chez l'entreprise » en dessous — exactement la maquette choisie.
+  /// Mboté reste à gauche ; CHEZ + le nom de l'entreprise sont juste
+  /// dessous, sur le même axe. Le vrai logo client garde son ratio, sans crop.
   Widget _buildSalutation(AccueilPalette palette) {
     final nomEntreprise =
         entrepriseSelectionnee?['name']?.toString().trim() ?? '';
@@ -3745,6 +3770,11 @@ class _PointageScreenState extends State<PointageScreen> {
         return Image.network(
           logo,
           fit: BoxFit.contain,
+          alignment: Alignment.center,
+          gaplessPlayback: true,
+          cacheWidth: 384,
+          filterQuality: FilterQuality.medium,
+          semanticLabel: 'Logo de $nomVisible',
           errorBuilder: (_, __, ___) => _nomPlaque(nomVisible, palette),
         );
       }
@@ -3791,17 +3821,18 @@ class _PointageScreenState extends State<PointageScreen> {
                       width: 119,
                       height: math.min(37.0, hauteurPlaque),
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 7,
+                        horizontal: 8,
+                        vertical: 5,
                       ),
                       decoration: BoxDecoration(
                         color: palette.plaque,
                         borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: palette.filet),
                         boxShadow: const [
                           BoxShadow(
-                            color: Color(0x24282214),
-                            blurRadius: 8,
-                            offset: Offset(0, 3),
+                            color: Color(0x1C282214),
+                            blurRadius: 6,
+                            offset: Offset(0, 2),
                           ),
                         ],
                       ),
@@ -3812,20 +3843,51 @@ class _PointageScreenState extends State<PointageScreen> {
               ),
               SizedBox(
                 height: hauteurChez,
-                child: Center(
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(
-                      'chez $nomVisible',
-                      maxLines: 1,
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w400,
-                        letterSpacing: -0.25,
-                        color: palette.texteSecondaire,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: Text.rich(
+                            TextSpan(
+                              children: [
+                                TextSpan(
+                                  text: 'CHEZ ',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    height: 1.3,
+                                    fontWeight: FontWeight.w500,
+                                    letterSpacing: 1.1,
+                                    color: palette.texteSecondaire,
+                                  ),
+                                ),
+                                TextSpan(
+                                  text: nomVisible.toUpperCase(),
+                                  style: TextStyle(
+                                    fontSize: 14.5,
+                                    height: 1.2,
+                                    fontWeight: FontWeight.w600,
+                                    letterSpacing: 0.2,
+                                    color: palette.lien,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            key: const Key('accueil-chez-entreprise'),
+                            maxLines: 1,
+                            softWrap: false,
+                          ),
+                        ),
                       ),
                     ),
-                  ),
+                    const SizedBox(width: 12),
+                    // Un seul accent secondaire, dans l'espace libre à droite
+                    // de la ligne — jamais entre les boutons de pointage.
+                    MotifSecondaire(motif: MotifService.actif.value),
+                  ],
                 ),
               ),
             ],
