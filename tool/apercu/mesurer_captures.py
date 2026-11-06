@@ -117,7 +117,9 @@ def analyser(scenario: dict) -> list[dict]:
         HAUTS_CONNUS[cle] = top
     resultats = []
     zones = [
-        ("En-Check", (x + 19, top + 23, x + largeur * 0.32 + 19, top + 51), 4.5),
+        # Le symbole occupe les 23 premiers points : commencer après lui
+        # évite de compter ses pixels crème comme des glyphes blancs.
+        ("En-Check", (x + 44, top + 23, x + largeur * 0.31 + 19, top + 51), 4.5),
         ("heure", (x + largeur * 0.29, top + 14, x + largeur * 0.71, top + 50), 3.0),
         ("date", (x + 70, top + 48, x + largeur - 70, top + 69), 4.5),
     ]
