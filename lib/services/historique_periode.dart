@@ -1,3 +1,5 @@
+import 'heure_pointage.dart';
+
 /// Règles de sélection d'une date dans l'historique employé.
 ///
 /// L'écran employé expose uniquement la fenêtre de sept jours déjà visible
@@ -17,6 +19,19 @@ class HistoriquePeriode {
     final aujourdHui = jour(maintenant);
     return !jourChoisi.isBefore(premierJourAutorise(aujourdHui)) &&
         !jourChoisi.isAfter(aujourdHui);
+  }
+
+  /// Filtre et trie uniquement les pointages du jour sélectionné, sans écrire
+  /// ni dédupliquer les enregistrements source.
+  static List<Map<String, dynamic>> pointagesDuJour(
+      List<Map<String, dynamic>> pointages, DateTime date) {
+    final cle = '${date.year.toString().padLeft(4, '0')}-'
+        '${date.month.toString().padLeft(2, '0')}-'
+        '${date.day.toString().padLeft(2, '0')}';
+    return pointages
+        .where((pointage) => HeurePointage.jourDePointage(pointage) == cle)
+        .toList()
+      ..sort(HeurePointage.parInstantCroissant);
   }
 
   /// Accepte le matricule complet ou son suffixe, sans utiliser la valeur

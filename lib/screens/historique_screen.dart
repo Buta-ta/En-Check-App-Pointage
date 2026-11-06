@@ -1022,13 +1022,8 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
         _dateSelectionnee = HistoriquePeriode.jour(HeurePointage.maintenant()));
   }
 
-  List<Map<String, dynamic>> _pointagesDateSelectionnee() {
-    final jour = _cleJourLocal(_dateSelectionnee);
-    return pointages
-        .where((p) => HeurePointage.jourDePointage(p) == jour)
-        .toList()
-      ..sort(HeurePointage.parInstantCroissant);
-  }
+  List<Map<String, dynamic>> _pointagesDateSelectionnee() =>
+      HistoriquePeriode.pointagesDuJour(pointages, _dateSelectionnee);
 
   List<Map<String, dynamic>> _pointagesDateInconnue() => pointages
       .where((p) => HeurePointage.jourDePointage(p) == HeurePointage.jourInconnu)

@@ -40,7 +40,7 @@ Future<void> _ouvrirDialog(
 }
 
 void main() {
-  testWidgets('placeholders non préremplis, PIN masqué et Suivant/Terminé utilisables',
+  testWidgets('placeholders vides, PIN masqué, focus clavier et actions accessibles',
       (tester) async {
     await tester.binding.setSurfaceSize(const Size(360, 640));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -81,7 +81,7 @@ void main() {
 
     await tester.tap(matricule);
     await tester.enterText(matricule, 'enn-0002');
-    await tester.testTextInput.receiveAction(TextInputAction.next);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
     expect(tester.widget<TextField>(pin).focusNode!.hasFocus, isTrue);
 
@@ -104,7 +104,7 @@ void main() {
 
     // L'action Terminé du clavier, comme Entrée sur un clavier physique,
     // consulte sans créer de pointage.
-    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
     expect(matriculeVerifie, 'ENN-0002');
     expect(pinVerifie, '1234');
