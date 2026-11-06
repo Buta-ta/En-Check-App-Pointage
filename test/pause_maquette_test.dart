@@ -107,9 +107,9 @@ void main() {
       final champs = tester.widgetList<TextField>(find.byType(TextField)).toList();
       expect(champs, hasLength(2));
       expect(champs.first.decoration?.prefixText, isNull);
-      final prefixe = champs.first.decoration?.prefix;
-      expect(prefixe, isA<Text>());
-      expect((prefixe! as Text).data, 'ENN-');
+      expect(champs.first.decoration?.prefix, isNull);
+      expect(champs.first.decoration?.prefixIcon, isNotNull);
+      expect(find.text('ENN-'), findsOneWidget);
       expect(champs.first.keyboardType, TextInputType.number);
       expect(champs.last.obscureText, isTrue);
 
@@ -186,6 +186,7 @@ void main() {
     final champPointage = tester.widget<TextField>(find.byType(TextField).first);
     expect(champPointage.decoration?.prefixText, 'ENN-');
     expect(champPointage.decoration?.prefix, isNull);
+    expect(champPointage.decoration?.prefixIcon, isNull);
     final glisseur = tester.widget<SlideValider>(find.byType(SlideValider));
     expect(glisseur.fond, isNull);
     expect(glisseur.bouton, isNull);

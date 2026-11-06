@@ -783,10 +783,17 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
           decoration: InputDecoration(
             counterText: chiffresSeuls ? '' : null,
             // Pause affiche ENN- même sans focus et sans ouvrir le clavier.
-            // L'ancien parcours conserve son prefixText d'origine.
+            // prefixIcon est peint au repos ; prefix/prefixText ne le sont
+            // pas systématiquement sur un champ vide. Le pointage est inchangé.
             prefixText: palette == null ? textePrefixe : null,
-            prefix: palette != null && textePrefixe != null
-                ? Text(textePrefixe, style: stylePrefixe)
+            prefixIcon: palette != null && textePrefixe != null
+                ? Padding(
+                    padding: const EdgeInsets.only(left: 16, right: 8),
+                    child: Text(textePrefixe, style: stylePrefixe),
+                  )
+                : null,
+            prefixIconConstraints: palette != null
+                ? const BoxConstraints(minWidth: 0, minHeight: 0)
                 : null,
             prefixStyle: stylePrefixe,
             filled: true,
