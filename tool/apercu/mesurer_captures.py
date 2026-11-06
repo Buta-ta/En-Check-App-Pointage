@@ -69,6 +69,8 @@ def contraste_zone(
     mask = (mini > 190) & ((maxi - mini) < 52)
     if int(mask.sum()) < 12:
         return {"ratio": 0, "seuil": seuil, "erreur": "glyphes non détectés"}
+    if mask.mean() > 0.65:
+        return {"ratio": 0, "seuil": seuil, "erreur": "zone presque entièrement blanche (rendu probablement absent)"}
     proche = dilater(mask, max(2, int(round(4 * dpr))))
     lointain = dilater(mask, max(4, int(round(8 * dpr))))
     anneau = lointain & ~proche & ~mask & (mini < 205)
@@ -131,8 +133,8 @@ for scenario in MESURES:
         echecs.append(f"{scenario['nom']}: débordement DOM {scenario['debordementDomPx']} px")
     if not scenario.get("calme"):
         echecs.append(f"{scenario['nom']}: rendu jamais calme")
-    if scenario.get("erreursJs"):
-        echecs.append(f"{scenario['nom']}: erreurs JavaScript")
+    for erreur in scenario.get("erreursJs", []):
+        echecs.append(f"{scenario['nom']}: {erreur}")
     if scenario.get("erreurCapture"):
         echecs.append(f"{scenario['nom']}: {scenario['erreurCapture']}")
 for c in contrastes:

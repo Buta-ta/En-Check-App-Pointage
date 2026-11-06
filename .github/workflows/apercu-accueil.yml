@@ -115,7 +115,7 @@ jobs:
           arbre=$(git write-tree)
           sha=$(git commit-tree "$arbre" -m "Aperçu accueil PR #$pr — ${GITHUB_SHA:0:12}")
           git update-ref "refs/apercu/pr-$pr" "$sha"
-          git push origin "refs/apercu/pr-$pr"
+          git push --force origin "refs/apercu/pr-$pr"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "pr=$pr" >> "$GITHUB_OUTPUT"
 
