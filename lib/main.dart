@@ -135,9 +135,9 @@ class _EnCheckAppState extends State<EnCheckApp> {
   ThemeData _buildLightTheme() {
     return ThemeData(
       brightness: Brightness.light,
-      fontFamily: 'Poppins',
+      fontFamily: 'Inter',
       primarySwatch: Colors.amber,
-      scaffoldBackgroundColor: const Color(0xFFF6EFE3),
+      scaffoldBackgroundColor: const Color(0xFFF5F2E9),
       appBarTheme: const AppBarTheme(
         backgroundColor: Color(0xFF3D2B1F),
         foregroundColor: Color(0xFFFFFBF5),
@@ -154,9 +154,9 @@ class _EnCheckAppState extends State<EnCheckApp> {
   ThemeData _buildDarkTheme() {
     return ThemeData(
       brightness: Brightness.dark,
-      fontFamily: 'Poppins',
+      fontFamily: 'Inter',
       primarySwatch: Colors.amber,
-      scaffoldBackgroundColor: const Color(0xFF1C1814),
+      scaffoldBackgroundColor: const Color(0xFF121312),
       appBarTheme: const AppBarTheme(
         backgroundColor: Color(0xFF2D2418),
         foregroundColor: Color(0xFFFFFBF5),

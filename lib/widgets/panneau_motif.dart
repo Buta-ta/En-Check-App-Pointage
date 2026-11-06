@@ -13,6 +13,8 @@ import 'package:flutter/services.dart' show KeyDownEvent, LogicalKeyboardKey;
 import '../theme/app_theme.dart';
 import '../services/motif_service.dart';
 import '../screens/tutoriel_screen.dart';
+import '../services/checklist_service.dart';
+import 'checklist_demarrage.dart';
 
 Future<void> ouvrirPanneauMotif(BuildContext context) async {
   MotifCulturel choix = MotifService.actif.value;
@@ -66,6 +68,12 @@ Future<void> ouvrirPanneauMotif(BuildContext context) async {
                     'Choisissez le motif de votre entreprise',
                     style: TextStyle(fontSize: 13.5, color: EnCheckColors.gris),
                   ),
+                  // Décision 3 : la checklist ne prend plus de place sur
+                  // l'accueil ; elle reste disponible ici jusqu'à sa fin.
+                  if (!ChecklistService.complete) ...[
+                    const SizedBox(height: 14),
+                    const ChecklistDemarrage(),
+                  ],
                   const SizedBox(height: 18),
                   GridView.count(
                     crossAxisCount: 2,

@@ -17,6 +17,8 @@
 
 import 'dart:math';
 
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../services/motif_service.dart';
@@ -31,6 +33,15 @@ class CadreMotif extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Décision du 6/11 : une vraie tablette ou un téléphone utilise tout
+    // l'écran. La coque décorative est réservée à la PWA sur ordinateur ;
+    // elle ne doit jamais rétrécir l'interface sur un appareil tactile.
+    final bureauWeb = kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.macOS ||
+            defaultTargetPlatform == TargetPlatform.windows ||
+            defaultTargetPlatform == TargetPlatform.linux);
+    if (!bureauWeb) return child;
+
     return LayoutBuilder(
       builder: (context, constraints) {
         final largeur =

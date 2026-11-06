@@ -3,6 +3,7 @@
 // 📱 PAGE POINTAGE
 // ═══════════════════════════════════════════════════════════
 
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -13,6 +14,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/app_theme.dart';
 import '../widgets/logo_empreinte.dart';
 import '../widgets/frise_motif.dart';
+import '../widgets/accueil_maquette.dart';
+import '../theme/accueil_palette.dart';
 import 'identification_slide_page.dart';
 import '../widgets/panneau_motif.dart';
 import '../services/motif_service.dart';
@@ -37,7 +40,6 @@ import '../services/trusted_punch_service.dart';   // ⭐ LIVRAISON 22
 import 'historique_screen.dart';
 import 'tutoriel_screen.dart';
 import '../services/checklist_service.dart';
-import '../widgets/checklist_demarrage.dart';
 import '../widgets/sans_etirement.dart';
 import 'face_enrollment_screen.dart';
 import 'face_pointage_screen.dart';
@@ -2075,390 +2077,48 @@ class _PointageScreenState extends State<PointageScreen> {
       );
     }
 
-    final bool estEnLigne = ConnectivityService.isOnline;
     final themeService = Provider.of<ThemeService>(context);
-    // 📱 TÉLÉPHONE (fiche « Affichage mobile ») : petit appareil = largeur
-    // étroite OU fenêtre très courte (paysage). La tablette, l'ordinateur et
-    // le navigateur en taille normale gardent l'affichage existant.
-    final tailleFenetre = MediaQuery.sizeOf(context);
-    final bool estTelephone =
-        tailleFenetre.width < 620 || tailleFenetre.height < 520;
 
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      // CLAVIER PHYSIQUE (PWA sur ordinateur) : chiffres, Retour arriere,
-      // Entree et Echap fonctionnent sans toucher l'ecran.
-      body: Focus(
-        autofocus: true,
-        onKeyEvent: _gererClavierPhysique,
-        child: SafeArea(
-          // En téléphone, la photo d'en-tête passe derrière la barre d'état
-          // (le texte reste sous l'encoche : zones réservées respectées).
-          top: !estTelephone,
-          child: chargementEntreprises
-              ? const Center(
-                  child: CircularProgressIndicator(
-                      color: EnCheckColors.terreChaude))
-              : LayoutBuilder(
-                  builder: (context, constraints) {
-                    // ⭐ DIRECTIVE 5 nov : petit écran OU fenêtre basse →
-                    // composition de la maquette finale, tout tient sans
-                    // défilement ; défilement maîtrisé (avec indication) si la
-                    // hauteur réelle manque — jamais de coupe ni de masquage.
-                    if (estTelephone || constraints.maxHeight < 780) {
-                      return SansEtirement(
-                        child: _colonneTelephone(
-                            estEnLigne, themeService, constraints),
-                      );
-                    }
-                    final contenu = Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: _colonnePrincipale(
-                        estEnLigne,
-                        themeService,
-                        margeFlexible: true,
-                      ),
-                    );
-                    return Center(
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 620),
-                        child: contenu,
-                      ),
-                    );
-                  },
-                ),
-        ),
-      ),
-    );
-  }
-
-  /// [child] etendu sur la hauteur restante si [etendre] : un Expanded dans un
-  /// layout non borne (mode scroll) planterait, on le rend alors tel quel.
-  Widget _etenduSi(bool etendre, Widget child) =>
-      etendre ? Expanded(child: child) : child;
-
-  /// ⭐ MAQUETTE FINALE 5/11 : la composition de l'accueil est la MAQUETTE
-  /// choisie (photo + bande motif + salut centré + cartes + nav), sur toutes
-  /// les tailles d'écran. Aucun comportement métier n'est modifié.
-  Widget _colonnePrincipale(
-    bool estEnLigne,
-    ThemeService themeService, {
-    required bool margeFlexible,
-  }) {
-    return ListenableBuilder(
-      listenable: Listenable.merge(
-          [ChecklistService.motifChoisi, ChecklistService.premierPointage]),
-      builder: (context, _) {
-        // 🧭 Checklist visible tant qu'elle n'est pas terminée.
-        final checklistVisible = !ChecklistService.complete;
-        return LayoutBuilder(builder: (context, outer) {
-          final double hauteurPhoto =
-              (outer.maxHeight * 0.326).clamp(170.0, 300.0).toDouble();
-          return Column(
-            mainAxisSize: margeFlexible ? MainAxisSize.max : MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _buildScenePointage(estEnLigne, themeService,
-                  hauteur: hauteurPhoto),
-              ValueListenableBuilder<MotifCulturel>(
-                valueListenable: MotifService.actif,
-                builder: (context, motif, _) =>
-                    FriseMotif(motif: motif, hauteur: 34),
-              ),
-              _etenduSi(
-                margeFlexible,
-                LayoutBuilder(builder: (context, inner) {
-                  // ⭐ COMPLÉMENT 5 nov (revue V1) : le texte de version en bas
-                  // était ROGNÉ quand la hauteur manquait. Désormais, si le
-                  // contenu dépasse, défilement maîtrisé — plus jamais de coupe.
-                  final bool modulesActifs =
-                      _moduleQRActif || _moduleRecoFacialeActif || _kioskMode;
-                  final double hEstime = 520 +
-                      (checklistVisible ? 260 : 0) +
-                      (modulesActifs ? 120 : 0) +
-                      (_pausesOuvertes.isNotEmpty ? 60 : 0);
-                  final bool defilement =
-                      margeFlexible && inner.maxHeight < hEstime;
-                  final Widget contenu = Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 22),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        const SizedBox(height: 16),
-                        _buildSalutation(),
-                        const SizedBox(height: 17),
-                        // 🧭 Checklist « 3 étapes pour démarrer » — disparaît une
-                        // fois terminée (motif choisi + premier pointage).
-                        if (checklistVisible) ...[
-                          const ChecklistDemarrage(),
-                          const SizedBox(height: 12),
-                        ],
-                        // Le rappel d'activation disparaît dès que la borne est
-                        // déjà autorisée (bail validé).
-                        if ((_moduleRecoFacialeActif || _kioskMode) &&
-                            !_bornePrete) ...[
-                          _buildBandeauBorne(),
-                          const SizedBox(height: 12),
-                        ],
-                        _buildCartesAction(),
-                        const SizedBox(height: 19),
-                        _buildBarreAujourdhui(),
-                        if (modulesActifs) ...[
-                          const SizedBox(height: 22),
-                          _boutonAutresModes(),
-                        ],
-                        const SizedBox(height: 20),
-                        _carteAnnonces(),
-                        if (margeFlexible && !defilement) const Spacer(),
-                        const SizedBox(height: 12),
-                        _buildBarreNavigation(),
-                        const SizedBox(height: 8),
-                        const Text(
-                          'v1.0.0 • Chiffrement AES-256 • Serveur UE',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontFamily: 'JetBrainsMono',
-                            fontSize: 10,
-                            color: EnCheckColors.gris,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                      ],
-                    ),
-                  );
-                  if (!defilement) return contenu;
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Expanded(
-                        child: SingleChildScrollView(
-                          physics: const ClampingScrollPhysics(),
-                          child: contenu,
-                        ),
-                      ),
-                      _bandeDefilement(),
-                    ],
-                  );
-                }),
-              ),
-            ],
-          );
-        });
-      },
-    );
-  }
-
-  //  DIRECTIVE 5 nov 2026 : la maquette finale est UNIQUEMENT l'accueil.
-  //  Tout tient SANS DÉFILEMENT dans les cas normaux ; si la hauteur réelle
-  //  ne suffit pas, un défilement MAÎTRISÉ apparaît (avec indication
-  //  visible) — jamais de texte coupé, jamais de section masquée, jamais de
-  //  textes réduits. Les comportements (gestes, pause, borne, offline)
-  //  sont strictement inchangés.
-  // ═══════════════════════════════════════════════════════════
-
-  //  DIRECTIVE 5 nov 2026 : la maquette finale est UNIQUEMENT l'accueil.
-  //  Tout tient SANS DÉFILEMENT dans les cas normaux ; si la hauteur réelle
-  //  ne suffit pas, un défilement MAÎTRISÉ apparaît (avec indication
-  //  visible) — jamais de texte coupé, jamais de section masquée, jamais de
-  //  textes réduits. Les comportements (gestes, pause, borne, offline)
-  //  sont strictement inchangés.
-  // ═══════════════════════════════════════════════════════════
-
-  Widget _colonneTelephone(
-    bool estEnLigne,
-    ThemeService themeService,
-    BoxConstraints constraints,
-  ) {
-    final media = MediaQuery.of(context);
-    final checklistVisible = !ChecklistService.complete;
-    final double hauteurTotale = constraints.maxHeight;
-    final double echelleTexte = media.textScaler.scale(1.0);
-    // ⭐ MAQUETTE FINALE 5/11 : la photo occupe ~33 % de la hauteur (comme
-    // sur la maquette), la bande motif juste dessous, puis le contenu.
-    final double hauteurPhoto =
-        (hauteurTotale * (echelleTexte > 1.3 ? 0.26 : 0.326))
-            .clamp(170.0, 300.0)
-            .toDouble();
-    final double hauteurScene = media.viewPadding.top + hauteurPhoto;
-    final bool borneVisible =
-        (_moduleRecoFacialeActif || _kioskMode) && !_bornePrete;
-    final bool modesVisibles =
-        _moduleQRActif || _moduleRecoFacialeActif || _kioskMode;
-
-    final entete = _buildScenePointage(estEnLigne, themeService,
-        hauteur: hauteurScene, margeHaut: media.viewPadding.top);
-    final frise = ValueListenableBuilder<MotifCulturel>(
+    return ValueListenableBuilder<MotifCulturel>(
       valueListenable: MotifService.actif,
-      builder: (context, motif, _) => FriseMotif(motif: motif, hauteur: 34),
-    );
+      builder: (context, motif, _) {
+        final palette = AccueilPalette.pour(motif, themeService.isDarkMode);
+        final modesVisibles =
+            _moduleQRActif || _moduleRecoFacialeActif || _kioskMode;
+        final borneVisible =
+            (_moduleRecoFacialeActif || _kioskMode) && !_bornePrete;
 
-    final List<Widget> contenu = [
-      _buildSalutation(taille: echelleTexte > 1.3 ? 22 : 26),
-      // Le rappel d'activation reste une alerte VISIBLE (fonction existante).
-      if (borneVisible) ...[
-        const SizedBox(height: 10),
-        _buildBandeauBorne(),
-      ],
-      const SizedBox(height: 17),
-      _buildCartesAction(),
-      if (checklistVisible) ...[
-        const SizedBox(height: 10),
-        _ligneChecklist(),
-      ],
-      const SizedBox(height: 19),
-      _buildBarreAujourdhui(),
-      if (modesVisibles) ...[
-        const SizedBox(height: 22),
-        _boutonAutresModes(),
-      ],
-      const SizedBox(height: 20),
-      _carteAnnonces(),
-    ];
-
-    // Estimation LARGÉE (surestimée) : le défilement maîtrisé ne s'allume
-    // que si la hauteur réelle manque vraiment.
-    final double hContenuEstime = (echelleTexte > 1.3 ? 620 : 520) +
-        (checklistVisible ? 52 : 0) +
-        (borneVisible ? 68 : 0);
-    final double hFixe = hauteurScene + 34 + 70;
-    final bool defilement = (hauteurTotale - hFixe) < hContenuEstime;
-
-    Widget corps = Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const SizedBox(height: 14),
-          ...contenu,
-          if (!defilement) const Spacer(),
-          const SizedBox(height: 10),
-        ],
-      ),
-    );
-    if (defilement) {
-      final Widget contenuDefilable = corps;
-      corps = Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(
-            child: LayoutBuilder(
-              builder: (context, inner) => SingleChildScrollView(
-                physics: const ClampingScrollPhysics(),
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(minHeight: inner.maxHeight),
-                  child: contenuDefilable,
-                ),
-              ),
+        return Scaffold(
+          backgroundColor: palette.fond,
+          // Clavier physique (PWA) : chiffres, retour, entrée et Échap.
+          body: Focus(
+            autofocus: true,
+            onKeyEvent: _gererClavierPhysique,
+            child: SafeArea(
+              top: true,
+              bottom: false,
+              child: chargementEntreprises
+                  ? Center(
+                      child: CircularProgressIndicator(color: palette.primaire),
+                    )
+                  : SansEtirement(
+                      child: AccueilMaquette(
+                        entete: _buildScenePointage(themeService, palette),
+                        salutation: _buildSalutation(palette),
+                        cartesAction: _buildCartesAction(palette),
+                        aujourdhui: _buildBarreAujourdhui(palette),
+                        autresModes:
+                            modesVisibles ? _boutonAutresModes(palette) : null,
+                        alerteBorne:
+                            borneVisible ? _buildBandeauBorne() : null,
+                        // Décision 2 : sans annonce réelle, aucune carte vide.
+                        navigation: _buildBarreNavigation(palette),
+                      ),
+                    ),
             ),
-          ),
-          _bandeDefilement(),
-        ],
-      );
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        entete,
-        frise,
-        Expanded(child: corps),
-        _buildBarreNavigation(pleineLargeur: true),
-      ],
-    );
-  }
-
-  /// Bande d'information affichée quand la configuration impose le
-  /// défilement (jamais en silence — fiche « Affichage mobile »).
-  Widget _bandeDefilement() {
-    final sombre = Theme.of(context).brightness == Brightness.dark;
-    return Container(
-      margin: const EdgeInsets.only(top: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: sombre ? const Color(0xFF2A3734) : const Color(0xFFCFDBD8),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.unfold_more,
-              size: 14,
-              color: sombre
-                  ? const Color(0xFF8FB8B2)
-                  : const Color(0xFF203F44)),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              "Contenu plus grand que l'écran : faites défiler.",
-              style: TextStyle(
-                  fontSize: 11.5,
-                  color: sombre
-                      ? const Color(0xFF8FB8B2)
-                      : const Color(0xFF203F44)),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 🧭 Liste de démarrage en téléphone : une ligne nommée qui ouvre les
-  /// MÊMES étapes (la liste, ses étapes et son fonctionnement sont
-  /// conservés ; seul l'espace occupé change sur petit écran).
-  Widget _ligneChecklist() {
-    final faites = 1 +
-        (ChecklistService.motifChoisi.value ? 1 : 0) +
-        (ChecklistService.premierPointage.value ? 1 : 0);
-    return GestureDetector(
-      onTap: () {
-        showDialog<void>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            backgroundColor: Theme.of(context).cardColor,
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20)),
-            title: const Text(
-              '3 étapes pour démarrer',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-            ),
-            content: const ChecklistDemarrage(),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Fermer'),
-              ),
-            ],
           ),
         );
       },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          color: Theme.of(context).cardColor,
-          borderRadius: BorderRadius.circular(14),
-          border:
-              Border.all(color: EnCheckColors.terreChaude.withOpacity(0.35)),
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.explore_outlined,
-                size: 16, color: EnCheckColors.gris),
-            const SizedBox(width: 8),
-            const Expanded(
-              child: Text('3 étapes pour démarrer',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
-            ),
-            Text('$faites/3',
-                style: const TextStyle(
-                    fontFamily: 'JetBrainsMono',
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: EnCheckColors.terreChaude)),
-            const SizedBox(width: 4),
-            const Icon(Icons.chevron_right,
-                size: 18, color: EnCheckColors.gris),
-          ],
-        ),
-      ),
     );
   }
 
@@ -2512,57 +2172,80 @@ class _PointageScreenState extends State<PointageScreen> {
   /// le bouton nommé « Voir ma journée » (mêmes données réelles).
   /// ⭐ MAQUETTE FINALE 5/11 : carte « AUJOURD'HUI » plate (filet fin,
   /// sans ombre), statut neutre, lien souligné « Voir ma journée ».
-  Widget _buildBarreAujourdhui() {
+  Widget _buildBarreAujourdhui(AccueilPalette palette) {
     final statut = _texteStatutJour();
-    final sombre = Theme.of(context).brightness == Brightness.dark;
-    final accent = sombre ? const Color(0xFF8FB8B2) : const Color(0xFF22474D);
-    return GestureDetector(
-      onTap: _ouvrirFeuilleJournee,
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
-        decoration: BoxDecoration(
-          color: sombre ? const Color(0xFF1E2422) : const Color(0xFFF8F7F2),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-              color: sombre
-                  ? const Color(0xFF2C3431)
-                  : const Color(0xFFE9E6E0)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text("AUJOURD'HUI",
+    return Semantics(
+      button: true,
+      label: 'Voir ma journée',
+      child: GestureDetector(
+        onTap: _ouvrirFeuilleJournee,
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 19),
+          decoration: BoxDecoration(
+            color: palette.surface,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x1A282214),
+                blurRadius: 10,
+                offset: Offset(0, 3),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                "AUJOURD'HUI",
+                maxLines: 1,
                 style: TextStyle(
-                    fontSize: 11.5,
+                  fontSize: 12,
+                  height: 15 / 12,
+                  fontWeight: FontWeight.w400,
+                  color: palette.texteTertiaire,
+                ),
+              ),
+              const SizedBox(height: 5),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  statut,
+                  maxLines: 1,
+                  style: TextStyle(
+                    fontSize: 18,
+                    height: 22 / 18,
                     fontWeight: FontWeight.w600,
-                    letterSpacing: 1,
-                    color: sombre
-                        ? const Color(0xFFA29B92)
-                        : const Color(0xFF787570))),
-            const SizedBox(height: 8),
-            Text(statut,
-                style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    height: 1.2,
-                    color: sombre
-                        ? const Color(0xFFF5F1EA)
-                        : const Color(0xFF2D2B2B))),
-            const SizedBox(height: 8),
-            Text('Voir ma journée',
-                style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
+                    letterSpacing: -0.15,
+                    color: palette.texteFort,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Voir ma journée',
+                  maxLines: 1,
+                  style: TextStyle(
+                    fontSize: 15,
+                    height: 19 / 15,
+                    fontWeight: FontWeight.w400,
                     decoration: TextDecoration.underline,
-                    decorationColor: accent,
-                    color: accent)),
-          ],
+                    decorationColor: palette.lien,
+                    decorationThickness: 1,
+                    color: palette.lien,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
-
   /// « Voir ma journée » : la carte complète (statut, noms, pause,
   /// synchronisation) — les mêmes informations qu'avant, en entier.
   Future<void> _ouvrirFeuilleJournee() async {
@@ -2622,36 +2305,38 @@ class _PointageScreenState extends State<PointageScreen> {
 
   /// ⭐ MAQUETTE FINALE 5/11 : pilule fine « Autres modes › » (mêmes
   /// actions qu'avant — comportement inchangé).
-  Widget _boutonAutresModes() {
-    final sombre = Theme.of(context).brightness == Brightness.dark;
-    final texte = sombre ? const Color(0xFFF5F1EA) : const Color(0xFF2D2B2B);
+  Widget _boutonAutresModes(AccueilPalette palette) {
     return Semantics(
       button: true,
       label: 'Autres modes',
       child: GestureDetector(
         onTap: _ouvrirFeuilleModes,
+        behavior: HitTestBehavior.opaque,
         child: Container(
-          constraints: const BoxConstraints(minHeight: 25),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 16),
           decoration: BoxDecoration(
-            color: sombre ? const Color(0xFF202725) : const Color(0xFFF6F3EC),
-            borderRadius: BorderRadius.circular(13),
-            border: Border.all(
-                color: sombre
-                    ? const Color(0xFF333B38)
-                    : const Color(0xFFC6C3BE)),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: palette.bordure),
           ),
           child: Stack(
             alignment: Alignment.center,
             children: [
-              Text('Autres modes',
-                  style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                      color: texte)),
+              Text(
+                'Autres modes',
+                maxLines: 1,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w400,
+                  color: palette.texte,
+                ),
+              ),
               Align(
                 alignment: Alignment.centerRight,
-                child: Icon(Icons.chevron_right, size: 18, color: texte),
+                child: Icon(
+                  Icons.chevron_right,
+                  size: 22,
+                  color: palette.texteSecondaire,
+                ),
               ),
             ],
           ),
@@ -2659,7 +2344,6 @@ class _PointageScreenState extends State<PointageScreen> {
       ),
     );
   }
-
   /// « Autres modes » : les mêmes actions que la carte AUTRES MODES de la
   /// tablette, regroupées derrière un bouton nommé (fiche affichage mobile).
   Future<void> _ouvrirFeuilleModes() async {
@@ -3812,77 +3496,187 @@ class _PointageScreenState extends State<PointageScreen> {
   //    échantillonnées sur la maquette choisie (teintes vert profond,
   //    menthe et crème) — sans variation par motif, sans ombre ni gloss.
 
-  Widget _buildScenePointage(bool estEnLigne, ThemeService themeService,
-      {double hauteur = 250, double margeHaut = 0}) {
-    // ⭐ MAQUETTE FINALE 5/11 : la photo occupe tout le haut ; « En-Check »,
-    // l'heure et la date (DYNAMIQUES) sont posés directement dessus à
-    // gauche, la pastille lune/soleil à droite. Aucune barre, aucun
-    // cartouche. La photo n'est jamais recolorée ; elle est décodée à la
-    // taille d'affichage (économie mémoire/processeur) et isolée
-    // graphiquement (RepaintBoundary) pour ne pas être redessinée.
-    final sombre = Theme.of(context).brightness == Brightness.dark;
-    final texte = sombre ? const Color(0xFFF5F1EA) : const Color(0xFF2D2B2B);
-    return SizedBox(
-      height: hauteur,
-      child: Stack(
-        children: [
-          Positioned.fill(
-            child: RepaintBoundary(
-              child: LayoutBuilder(builder: (context, c) {
-                final dpr = MediaQuery.of(context).devicePixelRatio;
-                final cacheW =
-                    ((c.maxWidth * dpr).round()).clamp(480, 1600).toInt();
-                return Image.asset(
-                  'assets/scenes/scene_pointage.jpg',
-                  fit: BoxFit.cover,
-                  alignment: const Alignment(0, -0.12),
-                  cacheWidth: cacheW,
-                  filterQuality: FilterQuality.medium,
-                  errorBuilder: (_, __, ___) =>
-                      Container(color: const Color(0xFF2D2B2B)),
-                );
-              }),
-            ),
+  Widget _buildScenePointage(
+    ThemeService themeService,
+    AccueilPalette palette,
+  ) {
+    return LayoutBuilder(
+      builder: (context, contraintes) {
+        final largeur = contraintes.maxWidth;
+        final hauteur = contraintes.maxHeight;
+        final texte = MediaQuery.textScalerOf(context).scale(1.0);
+        final dateTop = 16.0 + 29.8 * texte + 5.0;
+        final voileHauteur = math.min(
+          hauteur,
+          math.max(146.0, 105.0 * texte + 45.0),
+        );
+        return DecoratedBox(
+          decoration: BoxDecoration(
+            color: palette.carteDouce,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x29282214),
+                blurRadius: 10,
+                offset: Offset(0, 3),
+              ),
+            ],
           ),
-          Positioned(
-            top: margeHaut + 14,
-            left: 21,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: Stack(
               children: [
-                Text('En-Check',
-                    style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.2,
-                        color: texte)),
-                const SizedBox(height: 6),
-                Text(heureActuelle,
-                    style: TextStyle(
-                        fontSize: 31,
-                        fontWeight: FontWeight.w800,
-                        height: 1.0,
-                        color: texte)),
-                const SizedBox(height: 3),
-                Text(dateActuelle.toUpperCase(),
-                    style: TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0.8,
-                        color: texte.withOpacity(0.8))),
+                // Décision 1 : la vraie photo couvre TOUTE la carte, de haut
+                // en bas. Elle est décodée à la taille utile et isolée pour
+                // éviter de la repeindre à chaque minute de l'horloge.
+                Positioned.fill(
+                  child: RepaintBoundary(
+                    child: LayoutBuilder(
+                      builder: (context, c) {
+                        final dpr = MediaQuery.devicePixelRatioOf(context);
+                        final cacheW = (c.maxWidth * dpr)
+                            .round()
+                            .clamp(480, 1600)
+                            .toInt();
+                        return Image.asset(
+                          'assets/scenes/scene_pointage.jpg',
+                          fit: BoxFit.cover,
+                          alignment: const Alignment(0, -0.20),
+                          cacheWidth: cacheW,
+                          filterQuality: FilterQuality.medium,
+                          errorBuilder: (_, __, ___) =>
+                              Container(color: palette.primaire),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+                // Option 1 validée : voile mat + texte blanc. Le haut reste
+                // assez opaque pour la date, y compris sur la photo claire.
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  top: 0,
+                  height: voileHauteur,
+                  child: IgnorePointer(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: themeService.isDarkMode
+                              ? const [
+                                  Color(0xC7060808),
+                                  Color(0xAD060808),
+                                  Color(0x47060808),
+                                  Color(0x00060808),
+                                ]
+                              : const [
+                                  Color(0xB80A0E0E),
+                                  Color(0x9E0A0E0E),
+                                  Color(0x470A0E0E),
+                                  Color(0x000A0E0E),
+                                ],
+                          stops: const [0.0, 0.45, 0.75, 1.0],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: 19,
+                  top: 25,
+                  width: largeur * 0.32,
+                  height: 24 * texte,
+                  child: const FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'En-Check',
+                      maxLines: 1,
+                      style: TextStyle(
+                        fontSize: 17,
+                        height: 1.24,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -1.1,
+                        color: Colors.white,
+                        shadows: [
+                          Shadow(color: Color(0x59000000), blurRadius: 2),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: largeur * 0.29,
+                  right: largeur * 0.29,
+                  top: 16,
+                  height: 32 * texte,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      heureActuelle,
+                      maxLines: 1,
+                      style: const TextStyle(
+                        fontSize: 24,
+                        height: 1.24,
+                        fontWeight: FontWeight.w500,
+                        letterSpacing: 0.36,
+                        color: Colors.white,
+                        shadows: [
+                          Shadow(color: Color(0x59000000), blurRadius: 2),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: 70,
+                  right: 70,
+                  top: dateTop,
+                  height: 15 * texte,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      dateActuelle.toUpperCase(),
+                      maxLines: 1,
+                      style: const TextStyle(
+                        fontSize: 10.5,
+                        height: 1.24,
+                        fontWeight: FontWeight.w400,
+                        letterSpacing: 0.5,
+                        color: Color(0xEBFFFFFF),
+                        shadows: [
+                          Shadow(color: Color(0x59000000), blurRadius: 2),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  top: 20,
+                  right: 18,
+                  child: _boutonLune(themeService),
+                ),
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  height: 7,
+                  child: RepaintBoundary(
+                    child: FriseMotif(
+                      motif: MotifService.actif.value,
+                      hauteur: 7,
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
-          Positioned(
-            top: margeHaut + 14,
-            right: 20,
-            child: _boutonLune(themeService),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
-
   /// ⭐ MAQUETTE FINALE 5/11 : commande unique de thème — UN SEUL
   /// pictogramme (lune en clair, soleil en sombre), pastille ronde blanche
   /// sur la photo, choix mémorisé. Comportement inchangé.
@@ -3894,68 +3688,28 @@ class _PointageScreenState extends State<PointageScreen> {
       child: GestureDetector(
         onTap: () => themeService.setDarkMode(!sombre),
         child: Container(
-          width: 33,
+          width: 53,
           height: 33,
           decoration: BoxDecoration(
-            color: sombre ? const Color(0xFF2D2B2B) : Colors.white,
-            shape: BoxShape.circle,
-            boxShadow: [
+            color: sombre ? const Color(0xFF2A2A27) : Colors.white,
+            borderRadius: BorderRadius.circular(999),
+            boxShadow: const [
               BoxShadow(
-                  color: Colors.black.withOpacity(0.12),
-                  blurRadius: 6,
-                  offset: const Offset(0, 2)),
+                color: Color(0x2E000000),
+                blurRadius: 6,
+                offset: Offset(0, 2),
+              ),
             ],
           ),
           child: Icon(
-            sombre ? Icons.wb_sunny_outlined : Icons.nightlight_round,
-            size: 18,
-            color: sombre ? const Color(0xFFF5F1EA) : const Color(0xFF262526),
+            sombre ? Icons.light_mode : Icons.dark_mode,
+            size: 20,
+            color: sombre ? const Color(0xFFF5F1EA) : const Color(0xFF252525),
           ),
         ),
       ),
     );
   }
-
-  /// ⭐ MAQUETTE FINALE 5/11 : carte « Annonces » — emplacement réservé au
-  /// futur pilotage depuis En-Check Admin (chantier séparé) ; aucun contenu
-  /// inventé : tant qu'il n'y a rien, la carte le dit simplement.
-  Widget _carteAnnonces() {
-    final sombre = Theme.of(context).brightness == Brightness.dark;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-      decoration: BoxDecoration(
-        color: sombre ? const Color(0xFF1E2422) : const Color(0xFFF8F7F2),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-            color:
-                sombre ? const Color(0xFF2C3431) : const Color(0xFFE9E6E0)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Annonces',
-              style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                  color: sombre
-                      ? const Color(0xFFA29B92)
-                      : const Color(0xFF787570))),
-          const SizedBox(height: 12),
-          Center(
-            child: Text('Aucune annonce pour le moment',
-                style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w400,
-                    color: sombre
-                        ? const Color(0xFFA29B92)
-                        : const Color(0xFF787570))),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _rondScene({
     required IconData icon,
     required VoidCallback onTap,
@@ -3978,133 +3732,236 @@ class _PointageScreenState extends State<PointageScreen> {
   /// Le souhait de bienvenue, dans la langue du pays de l'entreprise.
   /// ⭐ MAQUETTE FINALE 5/11 : le souhait (« Mboté »…) centré, avec
   /// « chez l'entreprise » en dessous — exactement la maquette choisie.
-  Widget _buildSalutation({double taille = 26}) {
-    final nomEntreprise = entrepriseSelectionnee?['name']?.toString() ?? '';
+  Widget _buildSalutation(AccueilPalette palette) {
+    final nomEntreprise =
+        entrepriseSelectionnee?['name']?.toString().trim() ?? '';
+    final nomVisible = nomEntreprise.isEmpty ? 'votre entreprise' : nomEntreprise;
+    final logo = entrepriseSelectionnee?['logo_url']?.toString().trim() ?? '';
     final pays = entrepriseSelectionnee?['country_code']?.toString();
     final souhait = SouhaitsService.souhait(pays);
-    final sombre = Theme.of(context).brightness == Brightness.dark;
+
+    Widget plaqueContenu() {
+      if (logo.isNotEmpty) {
+        return Image.network(
+          logo,
+          fit: BoxFit.contain,
+          errorBuilder: (_, __, ___) => _nomPlaque(nomVisible, palette),
+        );
+      }
+      return _nomPlaque(nomVisible, palette);
+    }
+
     return _BlocSalut(
-      child: Column(
-        children: [
-          Text(
-            souhait,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: taille,
-              fontWeight: FontWeight.w800,
-              height: 1.1,
-              color:
-                  sombre ? const Color(0xFFF5F1EA) : const Color(0xFF2D2B2B),
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'chez $nomEntreprise',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-                fontSize: 14.5,
-                fontWeight: FontWeight.w400,
-                color: sombre
-                    ? const Color(0xFFA29B92)
-                    : const Color(0xFF787570)),
-          ),
-        ],
+      child: LayoutBuilder(
+        builder: (context, contraintes) {
+          final texte = MediaQuery.textScalerOf(context).scale(1.0);
+          final hauteurChez = math.min(
+            contraintes.maxHeight * 0.60,
+            math.max(34.0, 18.0 + 22.0 * texte),
+          );
+          final hauteurPlaque = contraintes.maxHeight - hauteurChez;
+          return Column(
+            children: [
+              SizedBox(
+                height: hauteurPlaque,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            souhait,
+                            maxLines: 1,
+                            style: TextStyle(
+                              fontSize: 28,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: -1.0,
+                              height: 1.1,
+                              color: palette.texte,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Container(
+                      width: 119,
+                      height: math.min(37.0, hauteurPlaque),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 7,
+                      ),
+                      decoration: BoxDecoration(
+                        color: palette.plaque,
+                        borderRadius: BorderRadius.circular(10),
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Color(0x24282214),
+                            blurRadius: 8,
+                            offset: Offset(0, 3),
+                          ),
+                        ],
+                      ),
+                      child: plaqueContenu(),
+                    ),
+                  ],
+                ),
+              ),
+              SizedBox(
+                height: hauteurChez,
+                child: Center(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      'chez $nomVisible',
+                      maxLines: 1,
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w400,
+                        letterSpacing: -0.25,
+                        color: palette.texteSecondaire,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
 
+  Widget _nomPlaque(String nom, AccueilPalette palette) {
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      child: Text(
+        nom.toUpperCase(),
+        maxLines: 1,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w500,
+          letterSpacing: 0.4,
+          color: palette.plaqueTexte,
+        ),
+      ),
+    );
+  }
   /// ⭐ MAQUETTE FINALE 5/11 : les deux gestes, même importance visuelle.
   /// Les libellés affichés sont ceux de la maquette ; les comportements
   /// (décision du type, validation) restent EXACTEMENT les mêmes.
   /// Couleurs FIXES échantillonnées sur la maquette choisie.
-  Widget _buildCartesAction() {
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(
-            child: _carteAction(
-              titre: 'Je commence\nmon service',
-              semantique: 'Arrivée — Je commence mon service',
-              depart: false,
-              onTap: () => _ouvrirValidationPointage('arrivee'),
-            ),
+  Widget _buildCartesAction(AccueilPalette palette) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          child: _carteAction(
+            palette: palette,
+            titre: 'Je commence\nmon service',
+            semantique: 'Arrivée — Je commence mon service',
+            depart: false,
+            onTap: () => _ouvrirValidationPointage('arrivee'),
           ),
-          const SizedBox(width: 11),
-          Expanded(
-            child: _carteAction(
-              titre: 'Je quitte\nmon poste',
-              semantique: 'Départ — Je quitte mon poste',
-              depart: true,
-              onTap: () => _ouvrirValidationPointage('depart'),
-            ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: _carteAction(
+            palette: palette,
+            titre: 'Je quitte\nmon poste',
+            semantique: 'Départ — Je quitte mon poste',
+            depart: true,
+            onTap: () => _ouvrirValidationPointage('depart'),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
   Widget _carteAction({
+    required AccueilPalette palette,
     required String titre,
     required String semantique,
     required bool depart,
     required VoidCallback onTap,
   }) {
-    final sombre = Theme.of(context).brightness == Brightness.dark;
-    final couleurTexte =
-        sombre ? const Color(0xFFF5F1EA) : const Color(0xFF2D2B2B);
-    final fond = depart
-        ? (sombre ? const Color(0xFF24322F) : const Color(0xFFCFDBD8))
-        : (sombre ? const Color(0xFF222A28) : const Color(0xFFF7F5EE));
-    final bordure =
-        sombre ? const Color(0xFF5F8A84) : const Color(0xFF22474D);
-    final cercleFond = depart
-        ? (sombre ? const Color(0xFF2C4A48) : const Color(0xFF203F44))
-        : (sombre ? const Color(0xFF2A3734) : const Color(0xFFCFDBD8));
-    final cercleIcone = depart
-        ? Colors.white
-        : (sombre ? const Color(0xFF8FB8B2) : const Color(0xFF22474D));
     return Semantics(
       button: true,
       label: semantique,
       child: GestureDetector(
         onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-          decoration: BoxDecoration(
-            color: fond,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: bordure, width: 1.6),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: cercleFond,
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(Icons.arrow_circle_right,
-                    color: cercleIcone, size: 22),
+        behavior: HitTestBehavior.opaque,
+        child: LayoutBuilder(
+          builder: (context, contraintes) {
+            final texte = MediaQuery.textScalerOf(context).scale(1.0);
+            final facteur = ((contraintes.maxHeight - 48.0 * texte) / 83.0)
+                .clamp(0.82, 1.0)
+                .toDouble();
+            final diametre = 44.0 * facteur;
+            return Container(
+              decoration: BoxDecoration(
+                color: depart ? palette.primaire : palette.carteDouce,
+                borderRadius: BorderRadius.circular(14),
+                boxShadow: [
+                  BoxShadow(
+                    color: depart
+                        ? const Color(0x29142828)
+                        : const Color(0x21282214),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
               ),
-              const SizedBox(height: 10),
-              Text(
-                titre,
-                style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    height: 1.05,
-                    color: couleurTexte),
+              child: Stack(
+                children: [
+                  Positioned(
+                    left: 18,
+                    top: 16 * facteur,
+                    width: diametre,
+                    height: diametre,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: depart
+                            ? palette.cerclePrimaire
+                            : palette.cercleDoux,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        Icons.login,
+                        size: 24 * facteur,
+                        color: depart
+                            ? palette.iconePrimaire
+                            : palette.iconeDouce,
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    left: 18,
+                    right: 12,
+                    bottom: 13 * facteur,
+                    child: Text(
+                      titre,
+                      maxLines: 2,
+                      style: TextStyle(
+                        fontSize: 18,
+                        height: 24 / 18,
+                        fontWeight: FontWeight.w500,
+                        letterSpacing: -0.18,
+                        color: depart ? palette.surPrimaire : palette.texte,
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ),
+            );
+          },
         ),
       ),
     );
   }
-
   /// La carte « Aujourd'hui » : qui est en pause, qui vient de pointer
   /// (contrat UX : le bandeau avec noms), et l'état de la synchronisation.
   Widget _buildCarteStatutJour() {
@@ -4288,28 +4145,17 @@ class _PointageScreenState extends State<PointageScreen> {
   /// ⭐ MAQUETTE FINALE 5/11 : barre de navigation plate (fond ivoire,
   /// filet supérieur), 4 onglets — l'onglet actif est vert profond, les
   /// autres gris. Comportements (Pause, Historique, Paramètres) inchangés.
-  Widget _buildBarreNavigation({bool pleineLargeur = false}) {
-    final sombre = Theme.of(context).brightness == Brightness.dark;
-    final barre = Container(
-      padding: const EdgeInsets.symmetric(vertical: 10),
+  Widget _buildBarreNavigation(AccueilPalette palette) {
+    return Container(
       decoration: BoxDecoration(
-        color: sombre ? const Color(0xFF1A201F) : const Color(0xFFF7F5EE),
-        borderRadius: pleineLargeur ? null : BorderRadius.circular(18),
-        border: pleineLargeur
-            ? Border(
-                top: BorderSide(
-                    color: sombre
-                        ? const Color(0xFF2A322F)
-                        : const Color(0xFFEBE7E1)))
-            : Border.all(
-                color: sombre
-                    ? const Color(0xFF2A322F)
-                    : const Color(0xFFEBE7E1)),
+        color: palette.navFond,
+        border: Border(top: BorderSide(color: palette.filet)),
       ),
       child: Row(
         children: [
           Expanded(
             child: _itemNav(
+              palette: palette,
               icon: Icons.home_filled,
               label: 'Accueil',
               actif: true,
@@ -4318,6 +4164,7 @@ class _PointageScreenState extends State<PointageScreen> {
           ),
           Expanded(
             child: _itemNav(
+              palette: palette,
               icon: Icons.restaurant,
               label: 'Pause',
               actif: false,
@@ -4326,6 +4173,7 @@ class _PointageScreenState extends State<PointageScreen> {
           ),
           Expanded(
             child: _itemNav(
+              palette: palette,
               icon: Icons.history,
               label: 'Historique',
               actif: false,
@@ -4334,49 +4182,98 @@ class _PointageScreenState extends State<PointageScreen> {
           ),
           Expanded(
             child: _itemNav(
+              palette: palette,
               icon: Icons.settings_outlined,
               label: 'Paramètres',
               actif: false,
+              badgeDemarrage: true,
               onTap: () => ouvrirPanneauMotif(context),
             ),
           ),
         ],
       ),
     );
-    return pleineLargeur ? SafeArea(top: false, child: barre) : barre;
   }
 
   Widget _itemNav({
+    required AccueilPalette palette,
     required IconData icon,
     required String label,
     required bool actif,
     required VoidCallback onTap,
+    bool badgeDemarrage = false,
   }) {
-    final sombre = Theme.of(context).brightness == Brightness.dark;
-    // Onglet actif : vert profond de la maquette (jamais de doré).
-    final couleur = actif
-        ? (sombre ? const Color(0xFF8FB8B2) : const Color(0xFF244951))
-        : (sombre ? const Color(0xFF9A938A) : const Color(0xFF8A8578));
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 23, color: couleur),
-          const SizedBox(height: 3),
-          Text(
-            label,
-            style: TextStyle(
+    final couleur = actif ? palette.navActif : palette.navInactif;
+    final icone = Icon(icon, size: 24, color: couleur);
+    return Semantics(
+      button: true,
+      label: label,
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            if (badgeDemarrage)
+              ListenableBuilder(
+                listenable: Listenable.merge([
+                  ChecklistService.motifChoisi,
+                  ChecklistService.premierPointage,
+                ]),
+                builder: (context, _) {
+                  final faites = 1 +
+                      (ChecklistService.motifChoisi.value ? 1 : 0) +
+                      (ChecklistService.premierPointage.value ? 1 : 0);
+                  if (faites == 3) return icone;
+                  return Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      icone,
+                      Positioned(
+                        right: -17,
+                        top: -7,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 4,
+                            vertical: 1,
+                          ),
+                          decoration: BoxDecoration(
+                            color: palette.navFond,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: palette.navActif),
+                          ),
+                          child: Text(
+                            '$faites/3',
+                            style: TextStyle(
+                              fontSize: 9,
+                              height: 1.1,
+                              fontWeight: FontWeight.w600,
+                              color: palette.navActif,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              )
+            else
+              icone,
+            const SizedBox(height: 4),
+            Text(
+              label,
+              maxLines: 1,
+              style: TextStyle(
                 fontSize: 11,
-                fontWeight: actif ? FontWeight.w700 : FontWeight.w500,
-                color: couleur),
-          ),
-        ],
+                fontWeight: actif ? FontWeight.w500 : FontWeight.w400,
+                color: couleur,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
-
   /// Autres modes (QR, visage, enrôlement borne) — modules actifs seulement.
   Widget _buildCarteModules() {
     final enfants = <Widget>[];
