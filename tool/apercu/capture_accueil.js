@@ -150,6 +150,7 @@ async function ouvrir(browser, scenario) {
   if (scenario.ouvrirPause) {
     // Le vrai onglet « Pause » de la navigation basse (2e de 4).
     await page.mouse.click(scenario.w * 0.375, scenario.h - 32);
+    await page.mouse.move(0, 0); // ne pas capturer un survol sur « Retour »
     await sleep(1400);
     calme = false;
     stable = 0;

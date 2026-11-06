@@ -739,6 +739,16 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
     bool chiffresSeuls = false,
     AccueilPalette? palette,
   }) {
+    final textePrefixe = chiffresSeuls && widget.matriculePrefix.isNotEmpty
+        ? '${widget.matriculePrefix}-'
+        : null;
+    final stylePrefixe = TextStyle(
+      fontFamily: 'JetBrainsMono',
+      fontSize: 18,
+      fontWeight: FontWeight.w700,
+      letterSpacing: 1.5,
+      color: couleurTexte,
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -772,16 +782,13 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
           ),
           decoration: InputDecoration(
             counterText: chiffresSeuls ? '' : null,
-            prefixText: chiffresSeuls && widget.matriculePrefix.isNotEmpty
-                ? '${widget.matriculePrefix}-'
+            // Pause affiche ENN- même sans focus et sans ouvrir le clavier.
+            // L'ancien parcours conserve son prefixText d'origine.
+            prefixText: palette == null ? textePrefixe : null,
+            prefix: palette != null && textePrefixe != null
+                ? Text(textePrefixe, style: stylePrefixe)
                 : null,
-            prefixStyle: TextStyle(
-              fontFamily: 'JetBrainsMono',
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 1.5,
-              color: couleurTexte,
-            ),
+            prefixStyle: stylePrefixe,
             filled: true,
             isDense: palette != null,
             fillColor: palette?.carteDouce ??
