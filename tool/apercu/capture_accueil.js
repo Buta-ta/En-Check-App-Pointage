@@ -9,14 +9,14 @@ const puppeteer = require('puppeteer-core');
 
 const BUILD = path.resolve(process.argv[2] || 'build/web');
 const OUT = path.resolve(process.argv[3] || 'apercu-accueil');
-const BASE = 'http://127.0.0.1:8080/';
+const BASE = process.env.APERCU_BASE_URL || 'http://127.0.0.1:8080/';
 const CHROME = process.env.CHROME_PATH ||
   ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser']
     .find((p) => fs.existsSync(p));
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const LIMIT = Number(process.env.APERCU_LIMIT || 0);
 
-const SCENARIOS = [
+const SCENARIOS_ACCUEIL = [
   { nom: 'reference-412x869-clair', w: 412, h: 869, dpr: 2, mobile: true },
   { nom: 'reference-412x869-sombre', w: 412, h: 869, dpr: 2, mobile: true, sombre: true },
   { nom: 'telephone-360x640-clair', w: 360, h: 640, dpr: 2, mobile: true },
@@ -26,6 +26,8 @@ const SCENARIOS = [
   { nom: 'pause-360x640-clair', w: 360, h: 640, dpr: 2, mobile: true, ouvrirPause: true },
   { nom: 'pause-412x869-clair', w: 412, h: 869, dpr: 2, mobile: true, ouvrirPause: true },
   { nom: 'pause-412x869-sombre', w: 412, h: 869, dpr: 2, mobile: true, sombre: true, ouvrirPause: true },
+  { nom: 'ma-journee-360x640-clair', w: 360, h: 640, dpr: 2, mobile: true, ouvrirMaJournee: true },
+  { nom: 'ma-journee-412x869-clair', w: 412, h: 869, dpr: 2, mobile: true, ouvrirMaJournee: true },
   { nom: 'tablette-800x1280-clair', w: 800, h: 1280, dpr: 2, tablette: true },
   { nom: 'tablette-800x1280-sombre', w: 800, h: 1280, dpr: 2, tablette: true, sombre: true },
   { nom: 'portable-1366x768-clair', w: 1366, h: 768, dpr: 1 },
@@ -40,6 +42,14 @@ const SCENARIOS = [
   { nom: 'checklist-incomplete-360x640', w: 360, h: 640, dpr: 2, mobile: true, checklistIncomplete: true },
   { nom: 'parametres-checklist-360x640', w: 360, h: 640, dpr: 2, mobile: true, checklistIncomplete: true, ouvrirParametres: true },
 ];
+const SCENARIOS_HISTORIQUE = [
+  { nom: 'historique-360x640-clair', w: 360, h: 640, dpr: 2, mobile: true },
+  { nom: 'historique-412x869-clair', w: 412, h: 869, dpr: 2, mobile: true },
+  { nom: 'historique-calendrier-360x640-clair', w: 360, h: 640, dpr: 2, mobile: true, ouvrirCalendrier: true },
+];
+const SCENARIOS = process.env.APERCU_MODE === 'historique'
+  ? SCENARIOS_HISTORIQUE
+  : SCENARIOS_ACCUEIL;
 
 function typeContenu(fichier) {
   if (fichier.endsWith('.wasm')) return 'application/wasm';
@@ -147,6 +157,26 @@ async function ouvrir(browser, scenario) {
     await page.mouse.click(scenario.w * 0.875, scenario.h - 32);
     await sleep(1200);
   }
+  if (scenario.ouvrirCalendrier) {
+    await page.mouse.click(scenario.w - 28, 28);
+    await sleep(500);
+  }
+  if (scenario.ouvrirMaJournee) {
+    // Onglet Historique de la navigation basse : la modale s'ouvre sans
+    // envoyer de matricule/PIN ni toucher au flux de consultation.
+    await page.mouse.click(scenario.w * 0.625, scenario.h - 32);
+    await sleep(900);
+    calme = false;
+    stable = 0;
+    precedent = -1;
+    for (let i = 0; i < 20 && !calme; i += 1) {
+      const raf = await page.evaluate(() => window.__raf);
+      stable = raf === precedent ? stable + 1 : 0;
+      precedent = raf;
+      calme = stable >= 4;
+      if (!calme) await sleep(400);
+    }
+  }
   if (scenario.ouvrirPause) {
     // Le vrai onglet « Pause » de la navigation basse (2e de 4).
     await page.mouse.click(scenario.w * 0.375, scenario.h - 32);
@@ -177,7 +207,10 @@ async function ouvrir(browser, scenario) {
 (async () => {
   if (!CHROME) throw new Error('Chrome introuvable (définir CHROME_PATH).');
   fs.mkdirSync(OUT, { recursive: true });
-  const resultats = [];
+  const mesuresExistantes = path.join(OUT, 'mesures.json');
+  const resultats = process.env.APERCU_MODE === 'historique' && fs.existsSync(mesuresExistantes)
+    ? JSON.parse(fs.readFileSync(mesuresExistantes, 'utf8'))
+    : [];
   const ARGS_COMPLET = [
 
       '--ash-no-nudges', '--disable-domain-reliability', '--disable-print-preview',
