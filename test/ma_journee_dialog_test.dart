@@ -89,7 +89,9 @@ void main() {
     expect(champPin.keyboardType, TextInputType.number);
     expect(champPin.textInputAction, TextInputAction.done);
     await tester.enterText(pin, '1234');
-    expect(find.text('1234'), findsNothing);
+    // Le finder Flutter inspecte la valeur interne d'EditableText même quand
+    // obscureText est actif : on vérifie donc le mode masqué du champ lui-même.
+    expect(tester.widget<TextField>(pin).obscureText, isTrue);
 
     // Simule le clavier ouvert sur un petit téléphone : les deux actions
     // restent au-dessus de la zone occupée par le clavier.
