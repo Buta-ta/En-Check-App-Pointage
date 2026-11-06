@@ -158,13 +158,13 @@ async function ouvrir(browser, scenario) {
     args: [
       '--ash-no-nudges', '--disable-domain-reliability', '--disable-print-preview',
       '--disk-cache-size=33554432', '--no-default-browser-check', '--no-pings',
-      '--single-process', '--font-render-hinting=none',
+      '--font-render-hinting=none',
       '--disable-features=AudioServiceOutOfProcess,IsolateOrigins,site-per-process',
       '--enable-features=SharedArrayBuffer', '--ignore-gpu-blocklist', '--in-process-gpu',
       '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
       '--allow-running-insecure-content', '--disable-setuid-sandbox',
       '--disable-site-isolation-trials', '--disable-web-security', '--no-sandbox',
-      '--no-zygote', '--disable-dev-shm-usage', '--lang=fr-FR',
+      '--disable-dev-shm-usage', '--lang=fr-FR',
     ],
     protocolTimeout: 180000,
   });
