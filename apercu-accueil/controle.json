@@ -1,0 +1,157 @@
+{
+  "methode": "Pixels de la PWA compilée ; fond local 99e percentile, glyphe 20e percentile.",
+  "captures": 18,
+  "contrastes": [
+    {
+      "scenario": "reference-412x869-clair",
+      "element": "En-Check",
+      "enteteTopPt": 28.0,
+      "ratio": 9.14,
+      "seuil": 4.5,
+      "glyphesPx": 1646,
+      "fondPx": 2998,
+      "ok": true
+    },
+    {
+      "scenario": "reference-412x869-clair",
+      "element": "heure",
+      "enteteTopPt": 28.0,
+      "ratio": 8.81,
+      "seuil": 3.0,
+      "glyphesPx": 1614,
+      "fondPx": 3530,
+      "ok": true
+    },
+    {
+      "scenario": "reference-412x869-clair",
+      "element": "date",
+      "enteteTopPt": 28.0,
+      "ratio": 5.73,
+      "seuil": 4.5,
+      "glyphesPx": 1283,
+      "fondPx": 3472,
+      "ok": true
+    },
+    {
+      "scenario": "reference-412x869-sombre",
+      "element": "En-Check",
+      "enteteTopPt": 28.0,
+      "ratio": 11.19,
+      "seuil": 4.5,
+      "glyphesPx": 1641,
+      "fondPx": 2998,
+      "ok": true
+    },
+    {
+      "scenario": "reference-412x869-sombre",
+      "element": "heure",
+      "enteteTopPt": 28.0,
+      "ratio": 10.72,
+      "seuil": 3.0,
+      "glyphesPx": 1611,
+      "fondPx": 3530,
+      "ok": true
+    },
+    {
+      "scenario": "reference-412x869-sombre",
+      "element": "date",
+      "enteteTopPt": 28.0,
+      "ratio": 6.97,
+      "seuil": 4.5,
+      "glyphesPx": 1275,
+      "fondPx": 3473,
+      "ok": true
+    },
+    {
+      "scenario": "telephone-360x640-clair",
+      "element": "En-Check",
+      "enteteTopPt": 21.0,
+      "ratio": 8.64,
+      "seuil": 4.5,
+      "glyphesPx": 1658,
+      "fondPx": 2996,
+      "ok": true
+    },
+    {
+      "scenario": "telephone-360x640-clair",
+      "element": "heure",
+      "enteteTopPt": 21.0,
+      "ratio": 7.97,
+      "seuil": 3.0,
+      "glyphesPx": 1614,
+      "fondPx": 3530,
+      "ok": true
+    },
+    {
+      "scenario": "telephone-360x640-clair",
+      "element": "date",
+      "enteteTopPt": 21.0,
+      "ratio": 5.8,
+      "seuil": 4.5,
+      "glyphesPx": 1271,
+      "fondPx": 3472,
+      "ok": true
+    },
+    {
+      "scenario": "telephone-360x640-sombre",
+      "element": "En-Check",
+      "enteteTopPt": 21.0,
+      "ratio": 10.75,
+      "seuil": 4.5,
+      "glyphesPx": 1650,
+      "fondPx": 2996,
+      "ok": true
+    },
+    {
+      "scenario": "telephone-360x640-sombre",
+      "element": "heure",
+      "enteteTopPt": 21.0,
+      "ratio": 9.76,
+      "seuil": 3.0,
+      "glyphesPx": 1610,
+      "fondPx": 3530,
+      "ok": true
+    },
+    {
+      "scenario": "telephone-360x640-sombre",
+      "element": "date",
+      "enteteTopPt": 21.0,
+      "ratio": 7.08,
+      "seuil": 4.5,
+      "glyphesPx": 1256,
+      "fondPx": 3473,
+      "ok": true
+    },
+    {
+      "scenario": "telephone-390x844-clair",
+      "element": "En-Check",
+      "enteteTopPt": 26.0,
+      "ratio": 9.28,
+      "seuil": 4.5,
+      "glyphesPx": 3595,
+      "fondPx": 6606,
+      "ok": true
+    },
+    {
+      "scenario": "telephone-390x844-clair",
+      "element": "heure",
+      "enteteTopPt": 26.0,
+      "ratio": 9.76,
+      "seuil": 3.0,
+      "glyphesPx": 3422,
+      "fondPx": 7957,
+      "ok": true
+    },
+    {
+      "scenario": "telephone-390x844-clair",
+      "element": "date",
+      "enteteTopPt": 26.0,
+      "ratio": 5.78,
+      "seuil": 4.5,
+      "glyphesPx": 2894,
+      "fondPx": 7827,
+      "ok": true
+    }
+  ],
+  "echecs": []
+}
