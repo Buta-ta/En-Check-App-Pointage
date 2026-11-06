@@ -12,7 +12,7 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: apercu-accueil-${{ github.event.pull_request.number || github.run_id }}
+  group: apercu-accueil-v2-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 env:
