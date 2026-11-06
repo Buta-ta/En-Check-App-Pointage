@@ -14,6 +14,7 @@ const CHROME = process.env.CHROME_PATH ||
   ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser']
     .find((p) => fs.existsSync(p));
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const LIMIT = Number(process.env.APERCU_LIMIT || 0);
 
 const SCENARIOS = [
   { nom: 'reference-412x869-clair', w: 412, h: 869, dpr: 2, mobile: true },
@@ -110,15 +111,26 @@ async function ouvrir(browser, scenario) {
     });
   }, scenario);
   const debut = Date.now();
-  await page.goto(BASE, { waitUntil: 'load', timeout: 120000 });
-  await page.waitForFunction(() => window.__firstFrame !== null, { timeout: 120000 });
-  const premierFrameMs = await page.evaluate(() => Math.round(window.__firstFrame));
+  try {
+    await page.goto(BASE, { waitUntil: 'load', timeout: 60000 });
+  } catch (e) {
+    throw new Error(`Chargement PWA: ${e}; requêtes bloquées: ${externes.join(', ')}`);
+  }
+  let premierFrameMs = null;
+  try {
+    await page.waitForFunction(() => window.__firstFrame !== null, { timeout: 30000 });
+    premierFrameMs = await page.evaluate(() => Math.round(window.__firstFrame));
+  } catch (e) {
+    // On capture quand même : l'image doit montrer ce qui bloque, et le
+    // rapport reste exploitable au lieu d'attendre deux minutes par taille.
+    erreurs.push(`Premier frame Flutter non reçu: ${String(e).slice(0, 220)}`);
+  }
 
   // Attendre la fin de l'animation unique et le chargement des images/fontes.
   let calme = false;
   let precedent = -1;
   let stable = 0;
-  for (let i = 0; i < 60 && !calme; i += 1) {
+  for (let i = 0; i < 20 && !calme; i += 1) {
     const raf = await page.evaluate(() => window.__raf);
     stable = raf === precedent ? stable + 1 : 0;
     precedent = raf;
@@ -154,7 +166,7 @@ async function ouvrir(browser, scenario) {
     protocolTimeout: 180000,
   });
   try {
-    for (const scenario of SCENARIOS) {
+    for (const scenario of (LIMIT > 0 ? SCENARIOS.slice(0, LIMIT) : SCENARIOS)) {
       process.stdout.write(`Capture ${scenario.nom}… `);
       try {
         const r = await ouvrir(browser, scenario);
