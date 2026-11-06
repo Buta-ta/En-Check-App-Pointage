@@ -13,39 +13,58 @@ class FriseMotif extends StatelessWidget {
   /// Réglages réservés aux accents mats : les grandes illustrations gardent
   /// leurs valeurs par défaut et leur cadrage habituel.
   final double opacite;
-  final double agrandissementHorizontal;
   final Color? fond;
+
+  /// Sur l'accueil, répète une rangée au bon ratio au lieu d'écraser toute
+  /// la nappe dans quelques pixels. Aucun ScrollView n'est introduit.
+  final bool tuilee;
 
   const FriseMotif({
     super.key,
     required this.motif,
     this.hauteur = 230,
     this.opacite = 1,
-    this.agrandissementHorizontal = 1,
     this.fond,
+    this.tuilee = false,
   })  : assert(hauteur > 0),
-        assert(opacite >= 0 && opacite <= 1),
-        assert(agrandissementHorizontal >= 1);
+        assert(opacite >= 0 && opacite <= 1);
 
   @override
   Widget build(BuildContext context) {
-    final friseFine = hauteur <= 40;
-    Widget image = Image.asset(
-      motif.asset,
-      // En frise fine, toute la hauteur des symboles reste visible. Les
-      // grands visuels gardent leur cadrage cover pour ne pas être déformés.
-      fit: friseFine ? BoxFit.fill : BoxFit.cover,
-      filterQuality: FilterQuality.medium,
-      errorBuilder: (_, __, ___) => Container(color: motif.couleurBouton),
-    );
-
-    // Sur l'accueil, élargir légèrement les formes évite un filet trop dense.
-    // L'échelle ne s'applique qu'à la frise explicitement configurée : les
-    // autres écrans conservent exactement leur rendu précédent.
-    if (friseFine && agrandissementHorizontal != 1) {
-      image = Transform.scale(
-        scaleX: agrandissementHorizontal,
-        child: image,
+    Widget image;
+    if (tuilee) {
+      image = LayoutBuilder(
+        builder: (context, contraintes) {
+          final largeurTuile = hauteur * motif.friseRatio;
+          final nombre = (contraintes.maxWidth / largeurTuile).ceil() + 1;
+          return Stack(
+            clipBehavior: Clip.hardEdge,
+            children: [
+              for (var i = 0; i < nombre; i++)
+                Positioned(
+                  left: i * largeurTuile,
+                  top: 0,
+                  bottom: 0,
+                  width: largeurTuile,
+                  child: Image.asset(
+                    motif.friseAsset,
+                    fit: BoxFit.fill,
+                    filterQuality: FilterQuality.medium,
+                    errorBuilder: (_, __, ___) =>
+                        ColoredBox(color: motif.couleurBouton),
+                  ),
+                ),
+            ],
+          );
+        },
+      );
+    } else {
+      image = Image.asset(
+        motif.asset,
+        // Les autres écrans conservent exactement leur rendu précédent.
+        fit: hauteur <= 40 ? BoxFit.fill : BoxFit.cover,
+        filterQuality: FilterQuality.medium,
+        errorBuilder: (_, __, ___) => Container(color: motif.couleurBouton),
       );
     }
     if (opacite < 1) image = Opacity(opacity: opacite, child: image);
@@ -66,36 +85,44 @@ class FriseMotif extends StatelessWidget {
   }
 }
 
-/// Un seul petit extrait de la MÊME étoffe, pour un espace vide de l'accueil.
-/// Ce n'est ni une icône générique, ni un nouveau dessin, ni un logo.
-class MotifSecondaire extends StatelessWidget {
-  const MotifSecondaire({
+/// Petit pictogramme UI issu de la MÊME rangée que le bandeau. Le crop
+/// centré contient un symbole identifiable ; ce n'est ni une icône générique,
+/// ni un nouveau dessin, ni un logo.
+class MotifUiIcon extends StatelessWidget {
+  const MotifUiIcon({
     super.key,
     required this.motif,
-    this.largeur = 42,
-    this.hauteur = 22,
-    this.opacite = 0.20,
+    required this.fond,
+    required this.bordure,
+    this.taille = 32,
+    this.opacite = 0.68,
   }) : assert(opacite >= 0 && opacite <= 1);
 
   final MotifCulturel motif;
-  final double largeur;
-  final double hauteur;
+  final Color fond;
+  final Color bordure;
+  final double taille;
   final double opacite;
 
   @override
   Widget build(BuildContext context) {
     return ExcludeSemantics(
-      child: Opacity(
-        opacity: opacite,
+      child: Container(
+        width: taille,
+        height: taille,
+        decoration: BoxDecoration(
+          color: fond,
+          border: Border.all(color: bordure),
+          borderRadius: BorderRadius.circular(8),
+        ),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(6),
-          child: SizedBox(
-            width: largeur,
-            height: hauteur,
+          borderRadius: BorderRadius.circular(7),
+          child: Opacity(
+            opacity: opacite,
             child: Image.asset(
-              motif.asset,
+              motif.friseAsset,
               fit: BoxFit.cover,
-              cacheWidth: 192,
+              cacheHeight: 128,
               filterQuality: FilterQuality.medium,
               errorBuilder: (_, __, ___) =>
                   ColoredBox(color: motif.couleurTint),
