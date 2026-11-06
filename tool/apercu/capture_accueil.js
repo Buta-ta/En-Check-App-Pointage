@@ -33,6 +33,7 @@ const SCENARIOS = [
   { nom: 'motif-bogolan-sombre', w: 412, h: 869, dpr: 2, mobile: true, motif: 'bogolan', sombre: true },
   { nom: 'motif-zoulou-clair', w: 412, h: 869, dpr: 2, mobile: true, motif: 'zoulou' },
   { nom: 'motif-zoulou-sombre', w: 412, h: 869, dpr: 2, mobile: true, motif: 'zoulou', sombre: true },
+  { nom: 'checklist-incomplete-360x640', w: 360, h: 640, dpr: 2, mobile: true, checklistIncomplete: true },
   { nom: 'parametres-checklist-360x640', w: 360, h: 640, dpr: 2, mobile: true, checklistIncomplete: true, ouvrirParametres: true },
 ];
 
