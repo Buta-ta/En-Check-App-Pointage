@@ -152,6 +152,9 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
         tailleFenetre.width < 620 || tailleFenetre.height < 520;
 
     return Scaffold(
+      // Pause masque la scène et le pied quand le clavier apparaît. Le
+      // Scaffold ne retire donc pas l'inset avant notre propre adaptation.
+      resizeToAvoidBottomInset: !widget.maquettePause,
       backgroundColor:
           palettePause?.fond ?? Theme.of(context).scaffoldBackgroundColor,
       body: Focus(
@@ -212,7 +215,7 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
                         child: _buildCarteIdentification(
                           context,
                           couleurTexte,
-                          paddingV: widget.maquettePause ? 16 : 20,
+                          paddingV: widget.maquettePause ? 14 : 20,
                           palette: palettePause,
                         ),
                       ),
@@ -316,7 +319,7 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
         paddingV: clavierOuvert
             ? 12
             : widget.maquettePause
-                ? 16
+                ? 14
                 : 20,
         palette: palette,
       ),
@@ -771,13 +774,14 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
               color: couleurTexte,
             ),
             filled: true,
+            isDense: palette != null,
             fillColor: palette?.carteDouce ??
                 (Theme.of(context).brightness == Brightness.dark
                     ? Colors.white.withOpacity(0.07)
                     : const Color(0xFFF6F1E8)),
             contentPadding: EdgeInsets.symmetric(
               horizontal: 16,
-              vertical: palette != null ? 12 : 14,
+              vertical: palette != null ? 8 : 14,
             ),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(14),
