@@ -3587,7 +3587,7 @@ class _PointageScreenState extends State<PointageScreen> {
                   top: 22,
                   width: largeur * 0.31,
                   height: 28 * texte,
-                  child: const FittedBox(
+                  child: FittedBox(
                     fit: BoxFit.scaleDown,
                     alignment: Alignment.centerLeft,
                     child: Row(

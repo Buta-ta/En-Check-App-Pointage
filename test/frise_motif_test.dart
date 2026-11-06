@@ -4,6 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+AssetImage _sourceAsset(Image image) {
+  final provider = image.image;
+  if (provider is ResizeImage) return provider.imageProvider as AssetImage;
+  return provider as AssetImage;
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -33,7 +39,7 @@ void main() {
     final frise = tester.widget<FriseMotif>(find.byType(FriseMotif));
     expect(frise.hauteur, 14);
     final image = tester.widget<Image>(find.byType(Image));
-    expect((image.image as AssetImage).assetName, MotifCulturel.adinkra.asset);
+    expect(_sourceAsset(image).assetName, MotifCulturel.adinkra.asset);
     expect(image.fit, BoxFit.fill);
     expect(tester.widget<Opacity>(find.byType(Opacity)).opacity, 0.90);
     final transform = tester.widget<Transform>(find.byType(Transform));
@@ -51,7 +57,7 @@ void main() {
     await tester.pump();
 
     final image = tester.widget<Image>(find.byType(Image));
-    expect((image.image as AssetImage).assetName, MotifCulturel.bogolan.asset);
+    expect(_sourceAsset(image).assetName, MotifCulturel.bogolan.asset);
     expect(image.fit, BoxFit.cover);
     expect(find.byType(Icon), findsNothing);
   });
