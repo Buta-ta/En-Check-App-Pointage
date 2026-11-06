@@ -1,0 +1,136 @@
+name: Aperçu et contrôle de l'accueil
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+# Les captures sont publiées sur une référence Git SÉPARÉE, jamais sur main :
+# elles restent accessibles sans artefact CI et sans déployer l'application.
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: apercu-accueil-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  apercu:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+
+      - name: Installer Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.44.9'
+          cache: true
+
+      - name: Télécharger les bibliothèques
+        run: flutter pub get
+
+      - name: Tester la disposition et les contrastes
+        run: flutter test
+
+      - name: Compiler la PWA à contrôler
+        run: flutter build web --release
+
+      - name: Installer Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Installer le pilote Chrome
+        run: npm ci --prefix tool/apercu --no-audit --no-fund
+
+      - name: Servir la PWA localement
+        run: |
+          python3 -m http.server 8080 --bind 127.0.0.1 --directory build/web >/tmp/apercu-serveur.log 2>&1 &
+          echo $! >/tmp/apercu-serveur.pid
+          for i in {1..30}; do
+            if curl -sf http://127.0.0.1:8080/ >/dev/null; then exit 0; fi
+            sleep 0.5
+          done
+          cat /tmp/apercu-serveur.log
+          exit 1
+
+      - name: Capturer tous les écrans
+        id: captures
+        continue-on-error: true
+        run: node tool/apercu/capture_accueil.js build/web apercu-accueil
+
+      - name: Mesurer débordements et contrastes
+        id: mesures
+        continue-on-error: true
+        run: |
+          python3 -m venv /tmp/apercu-venv
+          /tmp/apercu-venv/bin/pip install --quiet pillow numpy
+          /tmp/apercu-venv/bin/python tool/apercu/mesurer_captures.py apercu-accueil
+
+      - name: Publier les captures sur la référence d'aperçu
+        if: always() && hashFiles('apercu-accueil/mesures.json') != ''
+        id: publication
+        run: |
+          set -e
+          pr='${{ github.event.pull_request.number || github.run_id }}'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          export GIT_INDEX_FILE="$RUNNER_TEMP/apercu-index"
+          rm -f "$GIT_INDEX_FILE"
+          git read-tree --empty
+          git add -f apercu-accueil
+          arbre=$(git write-tree)
+          sha=$(git commit-tree "$arbre" -m "Aperçu accueil PR #$pr — ${GITHUB_SHA:0:12}")
+          git update-ref "refs/apercu/pr-$pr" "$sha"
+          git push origin "refs/apercu/pr-$pr"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "pr=$pr" >> "$GITHUB_OUTPUT"
+
+      - name: Commenter la Pull Request
+        if: always() && steps.publication.outputs.sha != ''
+        run: |
+          sha='${{ steps.publication.outputs.sha }}'
+          pr='${{ steps.publication.outputs.pr }}'
+          base="https://github.com/$GITHUB_REPOSITORY/blob/$sha/apercu-accueil"
+          {
+            echo "## Aperçu de l'accueil compilé — IA DEV 2"
+            echo
+            echo "Entreprise fictive, réseau externe bloqué. Aucun déploiement et aucune donnée réelle."
+            echo "[Tous les fichiers et mesures](https://github.com/$GITHUB_REPOSITORY/tree/$sha/apercu-accueil)"
+            echo
+            cat apercu-accueil/rapport.md
+            echo
+            echo "### Référence 412 × 869 — clair"
+            echo "![Référence clair]($base/reference-412x869-clair.png?raw=true)"
+            echo "### Référence 412 × 869 — sombre"
+            echo "![Référence sombre]($base/reference-412x869-sombre.png?raw=true)"
+            echo "### Téléphone 360 × 640 — clair"
+            echo "![Téléphone clair]($base/telephone-360x640-clair.png?raw=true)"
+            echo "### Tablette 800 × 1280 — clair"
+            echo "![Tablette clair]($base/tablette-800x1280-clair.png?raw=true)"
+          } >/tmp/apercu-commentaire.md
+          gh pr comment "$pr" --body-file /tmp/apercu-commentaire.md
+
+      - name: Verdict du contrôle
+        if: always()
+        run: |
+          echec=0
+          if [ '${{ steps.captures.outcome }}' != 'success' ]; then
+            echo '::error::Les captures ne sont pas toutes vertes.'
+            echec=1
+          fi
+          if [ '${{ steps.mesures.outcome }}' != 'success' ]; then
+            echo '::error::Les mesures visuelles ne sont pas toutes vertes.'
+            echec=1
+          fi
+          if [ ! -f apercu-accueil/controle.json ]; then
+            echo '::error::Aucun rapport de contrôle produit.'
+            echec=1
+          fi
+          exit "$echec"

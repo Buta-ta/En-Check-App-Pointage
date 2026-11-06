@@ -3566,15 +3566,15 @@ class _PointageScreenState extends State<PointageScreen> {
                           end: Alignment.bottomCenter,
                           colors: themeService.isDarkMode
                               ? const [
-                                  Color(0xC7060808),
-                                  Color(0xAD060808),
-                                  Color(0x47060808),
+                                  Color(0xD1060808),
+                                  Color(0xC2060808),
+                                  Color(0x75060808),
                                   Color(0x00060808),
                                 ]
                               : const [
+                                  Color(0xC70A0E0E),
                                   Color(0xB80A0E0E),
-                                  Color(0x9E0A0E0E),
-                                  Color(0x470A0E0E),
+                                  Color(0x6B0A0E0E),
                                   Color(0x000A0E0E),
                                 ],
                           stops: const [0.0, 0.45, 0.75, 1.0],
