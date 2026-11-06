@@ -4429,6 +4429,7 @@ class _PointageScreenState extends State<PointageScreen> {
           entrepriseId: entrepriseId,
           matriculePrefix:
               entrepriseSelectionnee?['matricule_prefix']?.toString() ?? '',
+          maquettePause: true,
         ),
       ),
     );

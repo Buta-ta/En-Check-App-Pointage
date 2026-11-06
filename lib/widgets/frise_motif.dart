@@ -133,3 +133,42 @@ class MotifUiIcon extends StatelessWidget {
     );
   }
 }
+
+
+/// Symbole seul, sans pastille ni bordure, pour le petit accent de la
+/// maquette Pause. Il provient du même crop que la frise et les autres UI.
+class MotifSymbole extends StatelessWidget {
+  const MotifSymbole({
+    super.key,
+    required this.motif,
+    this.taille = 22,
+    this.opacite = 0.72,
+  }) : assert(opacite >= 0 && opacite <= 1);
+
+  final MotifCulturel motif;
+  final double taille;
+  final double opacite;
+
+  @override
+  Widget build(BuildContext context) {
+    return ExcludeSemantics(
+      child: Opacity(
+        opacity: opacite,
+        child: SizedBox(
+          width: taille,
+          height: taille,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(3),
+            child: Image.asset(
+              motif.friseAsset,
+              fit: BoxFit.cover,
+              cacheHeight: 96,
+              filterQuality: FilterQuality.medium,
+              errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
