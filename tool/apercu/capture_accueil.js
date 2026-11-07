@@ -160,7 +160,8 @@ async function ouvrir(browser, scenario) {
   if (process.env.APERCU_MODE !== 'historique' && !scenario.entree) {
     // Sur l'app configurée, le premier écran est désormais le départ public.
     // On poursuit jusqu'à l'accueil interne pour les autres scénarios.
-    await page.mouse.click(scenario.w * 0.5, scenario.h * 0.62);
+    const hauteurBouton = scenario.h <= 700 ? 0.68 : 0.62;
+    await page.mouse.click(scenario.w * 0.5, scenario.h * hauteurBouton);
     await sleep(1100);
     calme = false;
     stable = 0;
