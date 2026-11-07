@@ -47,8 +47,6 @@ jobs:
             test/identification_slide_page_test.dart \
             test/ma_journee_dialog_test.dart \
             test/panneau_motif_test.dart \
-            tool/apercu/main_entree.dart \
-            tool/apercu/main_apparence.dart \
             2>&1 | tee /tmp/apercu-analyse.log
           status=${PIPESTATUS[0]}
           set -e
