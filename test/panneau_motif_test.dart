@@ -76,6 +76,9 @@ void main() {
     expect(find.textContaining('Bamana (Bambara)'), findsWidgets);
     expect(find.textContaining('Mali'), findsWidgets);
 
+    await tester.ensureVisible(
+        find.byKey(const Key('apparence-a-propos-motif')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('apparence-a-propos-motif')));
     await tester.pumpAndSettle();
     expect(find.textContaining('Peuple : Bamana (Bambara)'), findsOneWidget);
