@@ -24,7 +24,6 @@ import '../services/motif_service.dart';
 import '../services/supabase_service.dart';
 import '../services/theme_service.dart';
 import '../widgets/frise_motif.dart';
-import '../widgets/logo_empreinte.dart';
 import '../widgets/slide_valider.dart';
 import '../widgets/sans_etirement.dart';
 
