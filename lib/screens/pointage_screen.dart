@@ -121,6 +121,7 @@ class _BlocSalutState extends State<_BlocSalut>
 
 class _PointageScreenState extends State<PointageScreen> {
   String? _modeSelectionne;
+  String _sensActionQR = 'arrivee';
 
   // ⏸ VISIBILITÉ DES PAUSES (17/10/2026)
   //    'pointage' → les gestes enregistrent un pointage (comme d'habitude).
@@ -2011,6 +2012,7 @@ class _PointageScreenState extends State<PointageScreen> {
           _modeSelectionne = null;
           if (_intention == 'pause') _intention = 'pointage';
         }),
+        onPinFallback: _intention == 'pause' ? null : _ouvrirPinDepuisQR,
       );
     }
 
@@ -2023,6 +2025,7 @@ class _PointageScreenState extends State<PointageScreen> {
           _modeSelectionne = null;
           if (_intention == 'pause') _intention = 'pointage';
         }),
+        onPinFallback: _intention == 'pause' ? null : _ouvrirPinDepuisQR,
       );
     }
 
@@ -4509,11 +4512,26 @@ class _PointageScreenState extends State<PointageScreen> {
     ));
   }
 
+  /// Ferme proprement le scanner avant d'ouvrir l'identification PIN de repli.
+  void _ouvrirPinDepuisQR() {
+    if (!mounted) return;
+    setState(() {
+      _showScanner = false;
+      _showPhotoScanner = false;
+      _modeSelectionne = null;
+      if (_intention == 'pause') _intention = 'pointage';
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _ouvrirValidationPointage(_sensActionQR);
+    });
+  }
+
   /// Le QR devient le geste principal dès qu'il est activé pour l'entreprise.
   /// Sans QR, le code PIN reste le parcours par défaut.
   Future<void> _ouvrirActionPointage(String sens) async {
     final mode = ModePointagePolicy.principal(qrActif: _moduleQRActif);
     if (mode == MethodePointage.qr) {
+      _sensActionQR = sens;
       _ouvrirLecteurQR();
       return;
     }
