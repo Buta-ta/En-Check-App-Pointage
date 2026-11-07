@@ -272,11 +272,13 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
       _programmerRappel();
       final horsLigne = !ConnectivityService.isOnline;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(horsLigne
-            ? '⏸ Pause enregistrée hors-ligne : elle sera synchronisée.'
-            : '⏸ Pause enregistrée. Bonne pause !'),
+        content: Text(
+          horsLigne
+              ? '⏸ Pause enregistrée hors-ligne : elle sera synchronisée.'
+              : '⏸ Pause enregistrée. Bonne pause !',
+          style: TextStyle(color: _palette.surPrimaire),
+        ),
         backgroundColor: _estSombre ? _palette.primaire : EnCheckColors.terreChaude,
-        contentTextStyle: TextStyle(color: _palette.surPrimaire),
       ));
     } catch (e) {
       if (!mounted) return;
@@ -345,10 +347,11 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
       if (_rappelAffiche || !mounted) return;
       setState(() => _rappelAffiche = true);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: const Text(
-            'Toujours en pause ? Touche « Je reprends » si tu es de retour.'),
+        content: Text(
+          'Toujours en pause ? Touche « Je reprends » si tu es de retour.',
+          style: TextStyle(color: _palette.surPrimaire),
+        ),
         backgroundColor: _estSombre ? _palette.primaire : EnCheckColors.terreChaude,
-        contentTextStyle: TextStyle(color: _palette.surPrimaire),
       ));
     }
 
