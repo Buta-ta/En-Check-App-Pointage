@@ -31,6 +31,9 @@ jobs:
       - name: Télécharger les bibliothèques
         run: flutter pub get
 
+      - name: Analyser les sources Flutter
+        run: flutter analyze
+
       - name: Tester la disposition et les contrastes
         run: |
           set +e
