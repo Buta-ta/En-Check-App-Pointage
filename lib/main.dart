@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'screens/pointage_screen.dart';
 import 'screens/public_start_screen.dart';
 import 'screens/welcome_screen.dart';
+import 'services/public_start_service.dart';
 import 'services/supabase_service.dart';
 import 'services/connectivity_service.dart';
 import 'services/sync_service.dart';
@@ -85,6 +87,7 @@ class EnCheckApp extends StatefulWidget {
 class _EnCheckAppState extends State<EnCheckApp> {
   bool _isLoading = true;
   bool _hasEnterprise = false;
+  bool _afficherEcranCommencer = false;
 
   @override
   void initState() {
@@ -95,9 +98,15 @@ class _EnCheckAppState extends State<EnCheckApp> {
   Future<void> _verifierConfiguration() async {
     final prefs = await SharedPreferences.getInstance();
     final enterpriseId = prefs.getString('enterprise_id');
+    final hasEnterprise = enterpriseId != null && enterpriseId.isNotEmpty;
+    final afficherCommencer = enterpriseId != null &&
+        enterpriseId.isNotEmpty &&
+        !await PublicStartService.estDejaUtilise(enterpriseId);
 
+    if (!mounted) return;
     setState(() {
-      _hasEnterprise = enterpriseId != null;
+      _hasEnterprise = hasEnterprise;
+      _afficherEcranCommencer = afficherCommencer;
       _isLoading = false;
     });
   }
@@ -123,12 +132,20 @@ class _EnCheckAppState extends State<EnCheckApp> {
     return MaterialApp(
       title: 'En-Check',
       debugShowCheckedModeBanner: false,
+      routes: {
+        '/pointage': (_) => const PointageScreen(),
+        '/welcome': (_) => const WelcomeScreen(),
+      },
       theme: _buildLightTheme(),
       darkTheme: _buildDarkTheme(),
       themeMode: themeService.isDarkMode ? ThemeMode.dark : ThemeMode.light,
       builder: (context, child) =>
           CadreMotif(child: child ?? const SizedBox.shrink()),
-      home: _hasEnterprise ? const PublicStartScreen() : const WelcomeScreen(),
+      home: !_hasEnterprise
+          ? const WelcomeScreen()
+          : _afficherEcranCommencer
+              ? const PublicStartScreen()
+              : const PointageScreen(),
     );
   }
 

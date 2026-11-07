@@ -110,6 +110,9 @@ async function ouvrir(browser, scenario) {
     const S = (k, v) => localStorage.setItem('flutter.' + k, JSON.stringify(v));
     // Entreprise entièrement fictive : aucune donnée de l'équipe ou du fondateur.
     S('enterprise_id', '11111111-2222-3333-4444-555555555555');
+    // Isole chaque scénario : Commencer a la même persistance par entreprise
+    // que l'application, mais ne doit pas contaminer les captures suivantes.
+    S('public_start_utilise_v1_11111111-2222-3333-4444-555555555555', false);
     S('enterprise_name', 'EN-NOUS');
     S('matricule_prefix', 'ENN');
     S('enterprise_pays', 'CG');

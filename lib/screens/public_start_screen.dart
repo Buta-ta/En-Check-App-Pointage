@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/motif_service.dart';
+import '../services/public_start_service.dart';
 import '../theme/accueil_palette.dart';
 import '../widgets/logo_empreinte.dart';
 import 'pointage_screen.dart';
@@ -18,19 +20,32 @@ class PublicStartScreen extends StatefulWidget {
 }
 
 class _PublicStartScreenState extends State<PublicStartScreen> {
+  late final Future<void> _ecranMarqueCommeAffiche;
+
   @override
   void initState() {
     super.initState();
     MotifService.charger();
+    _ecranMarqueCommeAffiche = _marquerEcranCommeAffiche();
   }
 
-  void _commencer() {
+  Future<void> _marquerEcranCommeAffiche() async {
+    final prefs = await SharedPreferences.getInstance();
+    await PublicStartService.marquerUtilise(prefs.getString('enterprise_id'));
+  }
+
+  Future<void> _commencer() async {
+    await _ecranMarqueCommeAffiche;
+    if (!mounted) return;
+
     final action = widget.onCommencer;
     if (action != null) {
       action();
       return;
     }
-    Navigator.of(context).push<void>(
+    // Remplace l'écran initial : revenir en arrière depuis l'identification
+    // ne réaffichera pas « Commencer ».
+    await Navigator.of(context).pushReplacement<void, void>(
       MaterialPageRoute<void>(builder: (_) => const PointageScreen()),
     );
   }

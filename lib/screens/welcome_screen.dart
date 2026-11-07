@@ -15,6 +15,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/app_theme.dart';
 import '../services/appareil_service.dart';
 import '../services/motif_service.dart';
+import '../services/public_start_service.dart';
 import '../services/supabase_service.dart';
 import '../widgets/frise_motif.dart';
 import '../widgets/panneau_motif.dart';
@@ -110,11 +111,20 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
               'enterprise_pays', response['country_code'].toString());
         }
 
+        final publicStartUtilise = await PublicStartService.estDejaUtilise(
+          response['id'].toString(),
+        );
         if (mounted) {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (context) => const PublicStartScreen()),
-          );
+          if (publicStartUtilise) {
+            Navigator.pushReplacementNamed(context, '/pointage');
+          } else {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(
+                builder: (context) => const PublicStartScreen(),
+              ),
+            );
+          }
         }
       } else {
         setState(() => _error = 'Code entreprise introuvable');

@@ -4239,7 +4239,7 @@ class _PointageScreenState extends State<PointageScreen> {
               icon: Icons.home_filled,
               label: 'Accueil',
               actif: true,
-              onTap: () => Navigator.of(context).popUntil((route) => route.isFirst),
+              onTap: _confirmerRetourIdentificationEntreprise,
             ),
           ),
           Expanded(
@@ -4408,7 +4408,37 @@ class _PointageScreenState extends State<PointageScreen> {
 
   // NAVIGATION VERS LES PAGES (une page = une action)
 
-  /// Annule une identification et revient à l'écran public de départ.
+  /// Le retour vers la configuration est volontaire et confirmé : le code
+  /// entreprise existant sera redemandé par l'écran Welcome.
+  Future<void> _confirmerRetourIdentificationEntreprise() async {
+    final confirmer = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Retour à l’identification de l’entreprise ?'),
+        content: const Text(
+          'Vous allez quitter l’écran de pointage. Les pointages déjà enregistrés ne seront pas supprimés. Pour continuer, vous devrez saisir le code entreprise.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('ANNULER'),
+          ),
+          FilledButton(
+            key: const Key('pointage-confirmer-retour-entreprise'),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('CONTINUER'),
+          ),
+        ],
+      ),
+    );
+    if (confirmer != true || !mounted) return;
+
+    await Navigator.of(context).pushReplacementNamed<void, void>(
+      '/welcome',
+    );
+  }
+
+  /// Annule une identification et revient à l'écran d'accueil du pointage.
   /// Le parcours est détruit ; aucune validation métier n'est appelée.
   void _retourAccueilPublic() {
     numeroMatricule = '';
@@ -4492,7 +4522,6 @@ class _PointageScreenState extends State<PointageScreen> {
           matriculePrefix:
               entrepriseSelectionnee?['matricule_prefix']?.toString() ?? '',
           maquettePointage: true,
-          onAccueil: _retourAccueilPublic,
         ),
       ),
     );

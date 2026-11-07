@@ -246,19 +246,17 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
                           key: widget.maquettePause
                               ? const Key('pause-retour')
                               : widget.maquettePointage
-                                  ? const Key('pointage-accueil')
+                                  ? const Key('pointage-retour')
                                   : null,
                           onPressed: _retourAccueil,
                           icon: Icon(
-                            widget.maquettePointage
-                                ? Icons.home_outlined
-                                : Icons.arrow_back,
+                            Icons.arrow_back,
                             size: 16,
                             color: palettePause?.texteSecondaire ??
                                 EnCheckColors.gris,
                           ),
                           label: Text(
-                            widget.maquettePause ? 'Retour' : 'Accueil',
+                            'Retour',
                             style: TextStyle(
                               fontSize: widget.maquettePause ? 14 : 13,
                               color: palettePause?.texteSecondaire ??
@@ -409,16 +407,16 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
               key: widget.maquettePause
                   ? const Key('pause-retour')
                   : widget.maquettePointage
-                      ? const Key('pointage-accueil')
+                      ? const Key('pointage-retour')
                       : null,
               onPressed: _retourAccueil,
               icon: Icon(
-                widget.maquettePointage ? Icons.home_outlined : Icons.arrow_back,
+                Icons.arrow_back,
                 size: 16,
                 color: palette?.texteSecondaire ?? EnCheckColors.gris,
               ),
               label: Text(
-                widget.maquettePause ? 'Retour' : 'Accueil',
+                'Retour',
                 style: TextStyle(
                   fontSize: widget.maquettePause ? 14 : 13,
                   color: palette?.texteSecondaire ?? EnCheckColors.gris,
@@ -488,48 +486,82 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
               ),
             ),
           ),
-          Positioned(
-            top: 12 + margeHaut,
-            left: 14,
-            right: 14,
-            child: Row(
-              children: [
-                _rondScene(
-                  key: widget.maquettePointage
-                      ? const Key('pointage-scene-accueil')
-                      : null,
-                  icon: widget.maquettePointage
-                      ? Icons.home_outlined
-                      : Icons.arrow_back,
-                  onTap: _retourAccueil,
-                ),
-                const Spacer(),
-                Text(
-                  widget.titre,
-                  style: const TextStyle(
-                    fontSize: 19,
-                    fontWeight: FontWeight.w800,
-                    color: EnCheckColors.blanc,
-                    shadows: [
-                      Shadow(color: Colors.black54, blurRadius: 6),
-                    ],
+          if (widget.maquettePointage) ...[
+            Positioned(
+              top: 12 + margeHaut,
+              left: 14,
+              child: _rondScene(
+                key: const Key('pointage-scene-retour'),
+                icon: Icons.arrow_back,
+                onTap: _retourAccueil,
+              ),
+            ),
+            Positioned(
+              top: 12 + margeHaut,
+              left: 70,
+              right: 70,
+              child: SizedBox(
+                height: 36,
+                child: Center(
+                  child: Text(
+                    widget.titre,
+                    maxLines: 1,
+                    style: const TextStyle(
+                      fontSize: 19,
+                      fontWeight: FontWeight.w800,
+                      color: EnCheckColors.blanc,
+                      shadows: [Shadow(color: Colors.black54, blurRadius: 6)],
+                    ),
                   ),
                 ),
-                const Spacer(),
-                _rondScene(
-                  icon: Icons.light_mode,
-                  actif: !themeService.isDarkMode,
-                  onTap: () => themeService.setDarkMode(false),
-                ),
-                const SizedBox(width: 7),
-                _rondScene(
-                  icon: Icons.dark_mode,
-                  actif: themeService.isDarkMode,
-                  onTap: () => themeService.setDarkMode(true),
-                ),
-              ],
+              ),
             ),
-          ),
+            Positioned(
+              top: 13 + margeHaut,
+              right: 14,
+              child: _boutonLunePause(
+                themeService,
+                key: const Key('pointage-theme'),
+              ),
+            ),
+          ] else
+            Positioned(
+              top: 12 + margeHaut,
+              left: 14,
+              right: 14,
+              child: Row(
+                children: [
+                  _rondScene(
+                    icon: Icons.arrow_back,
+                    onTap: _retourAccueil,
+                  ),
+                  const Spacer(),
+                  Text(
+                    widget.titre,
+                    style: const TextStyle(
+                      fontSize: 19,
+                      fontWeight: FontWeight.w800,
+                      color: EnCheckColors.blanc,
+                      shadows: [
+                        Shadow(color: Colors.black54, blurRadius: 6),
+                      ],
+                    ),
+                  ),
+                  const Spacer(),
+                  _rondScene(
+                    icon: Icons.light_mode,
+                    actif: !themeService.isDarkMode,
+                    onTap: () => themeService.setDarkMode(false),
+                  ),
+                  const SizedBox(width: 7),
+                  _rondScene(
+                    icon: Icons.dark_mode,
+                    actif: themeService.isDarkMode,
+                    onTap: () => themeService.setDarkMode(true),
+                  ),
+                ],
+              ),
+            ),
         ],
       ),
     );
@@ -616,13 +648,16 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
     );
   }
 
-  Widget _boutonLunePause(ThemeService themeService) {
+  Widget _boutonLunePause(
+    ThemeService themeService, {
+    Key key = const Key('pause-theme'),
+  }) {
     final sombre = themeService.isDarkMode;
     return Semantics(
       button: true,
       label: sombre ? 'Activer le mode clair' : 'Activer le mode sombre',
       child: GestureDetector(
-        key: const Key('pause-theme'),
+        key: key,
         onTap: () => themeService.setDarkMode(!sombre),
         child: Container(
           width: 53,
