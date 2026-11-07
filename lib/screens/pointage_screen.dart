@@ -19,6 +19,7 @@ import '../theme/accueil_palette.dart';
 import 'identification_slide_page.dart';
 import '../widgets/panneau_motif.dart';
 import '../services/motif_service.dart';
+import '../services/mode_pointage_policy.dart';
 import '../services/souhaits_service.dart';
 import '../widgets/qr_scanner_widget.dart';
 import '../widgets/qr_photo_scanner_widget.dart';
@@ -171,6 +172,13 @@ class _PointageScreenState extends State<PointageScreen> {
   bool _modulePhotoActif = false;
   bool _moduleGeofencingActif = false;
   bool _moduleRecoFacialeActif = false;
+
+  List<MethodePointage> get _modesSecondaires =>
+      ModePointagePolicy.autresModes(
+        qrActif: _moduleQRActif,
+        reconnaissanceFacialeActive: _moduleRecoFacialeActif,
+        borneActive: _kioskMode,
+      );
 
   // 🤖 Mode personnel
   bool _faceEnrolled = false;
@@ -713,6 +721,13 @@ class _PointageScreenState extends State<PointageScreen> {
     if (_intention == 'pause') return; // déjà en route (anti-double-tap)
     setState(() => _intention = 'pause');
 
+    // Le QR est lancé directement lorsqu'il est activé, y compris pour
+    // s'identifier avant une pause ou une reprise.
+    if (_moduleQRActif) {
+      _ouvrirLecteurQR();
+      return;
+    }
+
     // Mode visage exclusif / obligatoire : on lance tout de suite le scan
     // visage (reconnaissance SEULE — aucun pointage enregistré).
     if (_moduleRecoFacialeActif) {
@@ -728,8 +743,8 @@ class _PointageScreenState extends State<PointageScreen> {
         return;
       }
     }
-    // Sinon : les outils habituels (clavier PIN, scanner QR) sont déjà à
-    // l'écran — la ligne « MODE PAUSE » explique quoi faire.
+    // Sinon, le parcours PIN par défaut reste disponible à l'écran ; les
+    // options secondaires s'ouvrent depuis « Autres modes ».
   }
 
   void _annulerFluxPause() {
@@ -1994,6 +2009,7 @@ class _PointageScreenState extends State<PointageScreen> {
         onClose: () => setState(() {
           _showScanner = false;
           _modeSelectionne = null;
+          if (_intention == 'pause') _intention = 'pointage';
         }),
       );
     }
@@ -2005,6 +2021,7 @@ class _PointageScreenState extends State<PointageScreen> {
         onClose: () => setState(() {
           _showPhotoScanner = false;
           _modeSelectionne = null;
+          if (_intention == 'pause') _intention = 'pointage';
         }),
       );
     }
@@ -2084,8 +2101,7 @@ class _PointageScreenState extends State<PointageScreen> {
       valueListenable: MotifService.actif,
       builder: (context, motif, _) {
         final palette = AccueilPalette.pour(motif, themeService.isDarkMode);
-        final modesVisibles =
-            _moduleQRActif || _moduleRecoFacialeActif || _kioskMode;
+        final modesVisibles = _modesSecondaires.isNotEmpty;
         final borneVisible =
             (_moduleRecoFacialeActif || _kioskMode) && !_bornePrete;
 
@@ -2397,25 +2413,25 @@ class _PointageScreenState extends State<PointageScreen> {
                 ],
               ),
               const SizedBox(height: 12),
-              if (_moduleQRActif) ...[
+              if (_modesSecondaires.contains(MethodePointage.codePin)) ...[
+                const Text(
+                  'Le lecteur QR est le mode principal. Le PIN reste disponible en repli.',
+                  style: TextStyle(fontSize: 12, color: EnCheckColors.gris),
+                ),
+                const SizedBox(height: 8),
                 _boutonScene(
-                  label: 'Scanner QR',
-                  icon: Icons.qr_code_scanner,
+                  label: 'Code PIN',
+                  icon: Icons.pin_outlined,
                   rempli: false,
                   onTap: () {
                     Navigator.pop(sheetContext);
-                    setState(() {
-                      if (_modulePhotoActif) {
-                        _showPhotoScanner = true;
-                      } else {
-                        _showScanner = true;
-                      }
-                    });
+                    _ouvrirValidationPointage('arrivee');
                   },
                 ),
                 const SizedBox(height: 8),
               ],
-              if (_moduleRecoFacialeActif) ...[
+              if (_modesSecondaires
+                  .contains(MethodePointage.reconnaissanceFaciale)) ...[
                 _boutonScene(
                   label: 'Reconnaissance faciale',
                   icon: Icons.face,
@@ -3931,8 +3947,9 @@ class _PointageScreenState extends State<PointageScreen> {
     );
   }
   /// ⭐ MAQUETTE FINALE 5/11 : les deux gestes, même importance visuelle.
-  /// Les libellés affichés sont ceux de la maquette ; les comportements
-  /// (décision du type, validation) restent EXACTEMENT les mêmes.
+  /// Les libellés affichés sont ceux de la maquette ; le type (arrivée/départ)
+  /// reste décidé automatiquement après l'identification. QR actif = scan direct,
+  /// sinon le parcours PIN reste le défaut.
   /// Couleurs FIXES échantillonnées sur la maquette choisie.
   Widget _buildCartesAction(AccueilPalette palette) {
     return Row(
@@ -3944,7 +3961,7 @@ class _PointageScreenState extends State<PointageScreen> {
             titre: 'Je commence\nmon service',
             semantique: 'Arrivée — Je commence mon service',
             depart: false,
-            onTap: () => _ouvrirValidationPointage('arrivee'),
+            onTap: () => _ouvrirActionPointage('arrivee'),
           ),
         ),
         const SizedBox(width: 12),
@@ -3954,7 +3971,7 @@ class _PointageScreenState extends State<PointageScreen> {
             titre: 'Je quitte\nmon poste',
             semantique: 'Départ — Je quitte mon poste',
             depart: true,
-            onTap: () => _ouvrirValidationPointage('depart'),
+            onTap: () => _ouvrirActionPointage('depart'),
           ),
         ),
       ],
@@ -4354,21 +4371,15 @@ class _PointageScreenState extends State<PointageScreen> {
       ),
     );
   }
-  /// Autres modes (QR, visage, enrôlement borne) — modules actifs seulement.
+  /// Modes de repli (PIN, visage, enrôlement borne).
   Widget _buildCarteModules() {
     final enfants = <Widget>[];
-    if (_moduleQRActif) {
+    if (_modesSecondaires.contains(MethodePointage.codePin)) {
       enfants.add(_boutonScene(
-        label: 'Scanner QR',
-        icon: Icons.qr_code_scanner,
+        label: 'Code PIN',
+        icon: Icons.pin_outlined,
         rempli: false,
-        onTap: () => setState(() {
-          if (_modulePhotoActif) {
-            _showPhotoScanner = true;
-          } else {
-            _showScanner = true;
-          }
-        }),
+        onTap: () => _ouvrirValidationPointage('arrivee'),
       ));
     }
     if (_moduleRecoFacialeActif) {
@@ -4496,6 +4507,28 @@ class _PointageScreenState extends State<PointageScreen> {
           ? 'Reprise enregistree. Bon service !'
           : 'Pause demarree pour $nom.'),
     ));
+  }
+
+  /// Le QR devient le geste principal dès qu'il est activé pour l'entreprise.
+  /// Sans QR, le code PIN reste le parcours par défaut.
+  Future<void> _ouvrirActionPointage(String sens) async {
+    final mode = ModePointagePolicy.principal(qrActif: _moduleQRActif);
+    if (mode == MethodePointage.qr) {
+      _ouvrirLecteurQR();
+      return;
+    }
+    await _ouvrirValidationPointage(sens);
+  }
+
+  void _ouvrirLecteurQR() {
+    if (!mounted) return;
+    setState(() {
+      if (_modulePhotoActif) {
+        _showPhotoScanner = true;
+      } else {
+        _showScanner = true;
+      }
+    });
   }
 
   Future<void> _ouvrirValidationPointage(String sens) async {

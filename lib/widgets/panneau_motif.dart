@@ -4,7 +4,8 @@
 // ═══════════════════════════════════════════════════════════
 //
 //  Le bouton « Paramètres » ouvre ce panneau. Le choix d'apparence est
-//  enregistré sur l'appareil ; aucune provenance n'est attribuée sans source.
+//  enregistré sur l'appareil ; chaque motif affiche son peuple et son pays
+//  d'inspiration culturelle.
 //  ⌨️ Touche Échap (clavier physique) = fermer le panneau.
 // ═══════════════════════════════════════════════════════════
 
@@ -103,20 +104,33 @@ Future<void> ouvrirPanneauMotif(BuildContext context) async {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
-                                'Motif textile géométrique',
-                                style: TextStyle(
+                              Text(
+                                choix.nom,
+                                style: const TextStyle(
                                   fontSize: 15,
                                   fontWeight: FontWeight.w600,
                                   color: EnCheckColors.brunProfond,
                                 ),
                               ),
+                              Text(
+                                '${choix.peuple} · ${choix.pays}',
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 10.5,
+                                  color: EnCheckColors.gris,
+                                ),
+                              ),
                               TextButton.icon(
                                 key: const Key('apparence-a-propos-motif'),
-                                onPressed: () => _afficherAproposMotif(sheetContext),
+                                onPressed: () =>
+                                    _afficherAproposMotif(sheetContext, choix),
                                 style: TextButton.styleFrom(
                                   foregroundColor: choix.couleurBouton,
-                                  padding: const EdgeInsets.symmetric(vertical: 6),
+                                  padding: EdgeInsets.zero,
+                                  minimumSize: Size.zero,
+                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                  visualDensity: VisualDensity.compact,
                                 ),
                                 icon: const Icon(Icons.info_outline, size: 17),
                                 label: const Text('À propos du motif'),
@@ -140,7 +154,7 @@ Future<void> ouvrirPanneauMotif(BuildContext context) async {
                     physics: const NeverScrollableScrollPhysics(),
                     mainAxisSpacing: 14,
                     crossAxisSpacing: 14,
-                    childAspectRatio: 1.45,
+                    childAspectRatio: 1.25,
                     children: [
                       for (final motif in MotifCulturel.tous)
                         _vignetteMotif(
@@ -214,12 +228,19 @@ Future<void> ouvrirPanneauMotif(BuildContext context) async {
   );
 }
 
-Future<void> _afficherAproposMotif(BuildContext context) => showDialog<void>(
+Future<void> _afficherAproposMotif(
+  BuildContext context,
+  MotifCulturel motif,
+) =>
+    showDialog<void>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('À propos du motif'),
-        content: const Text(
-          'Ce motif est utilisé comme texture de l’interface. Aucune tradition ni provenance géographique ne lui est attribuée sans source vérifiée.',
+        title: Text('À propos du motif ${motif.nom}'),
+        content: Text(
+          '${motif.inspiration}.\n\n'
+          'Peuple : ${motif.peuple}.\n'
+          'Pays : ${motif.pays}.\n\n'
+          'Le visuel de l’application est une interprétation graphique inspirée de cette tradition.',
         ),
         actions: [
           TextButton(
@@ -294,11 +315,23 @@ Widget _vignetteMotif(
         const SizedBox(height: 6),
         Text(
           motif.nom,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
           textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: 13,
             fontWeight: selectionne ? FontWeight.w800 : FontWeight.w600,
             color: EnCheckColors.brunProfond,
+          ),
+        ),
+        Text(
+          '${motif.peuple} · ${motif.pays}',
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            fontSize: 9.5,
+            color: EnCheckColors.gris,
           ),
         ),
       ],

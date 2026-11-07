@@ -295,7 +295,7 @@ class _BoutonCoque extends StatelessWidget {
   }
 }
 
-/// Repère visuel neutre, sans origine attribuée au textile.
+/// Nom du motif et repère culturel affichés dans le cadre d'accueil.
 class _MessageMotif extends StatelessWidget {
   const _MessageMotif();
 
@@ -311,15 +311,28 @@ class _MessageMotif extends StatelessWidget {
           children: [
             Container(width: 28, height: 2, color: motif.couleurAccent),
             const SizedBox(height: 10),
-            const Text(
-              'Motif textile géométrique',
-              style: TextStyle(
+            Text(
+              motif.nom,
+              style: const TextStyle(
                 fontFamily: 'Poppins',
                 fontSize: 12.5,
                 fontWeight: FontWeight.w600,
                 color: Color(0xFFF4EFE2),
                 letterSpacing: 0.2,
                 height: 1.35,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              '${motif.peuple} · ${motif.pays}',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontFamily: 'Poppins',
+                fontSize: 9.5,
+                fontWeight: FontWeight.w400,
+                color: Color(0xFFE5DCC8),
+                height: 1.25,
               ),
             ),
           ],
