@@ -32,7 +32,21 @@ jobs:
         run: flutter pub get
 
       - name: Analyser les sources Flutter
-        run: flutter analyze
+        run: |
+          set +e
+          flutter analyze 2>&1 | tee /tmp/apercu-analyse.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            python3 - <<'PY'
+          from pathlib import Path
+          lignes = Path('/tmp/apercu-analyse.log').read_text(errors='replace').splitlines()
+          texte = chr(10).join(lignes[-160:])
+          texte = texte.replace('%', '%25').replace(chr(13), '%0D').replace(chr(10), '%0A')
+          print('::error::Détail de flutter analyze :%0A' + texte)
+          PY
+            exit "$status"
+          fi
 
       - name: Tester la disposition et les contrastes
         run: |
