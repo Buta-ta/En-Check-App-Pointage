@@ -26,7 +26,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Apparence'), findsOneWidget);
-    expect(find.text('Motif d’interface'), findsOneWidget);
+    expect(find.text('Motif d’interface'), findsNWidgets(2));
     expect(find.text('Motif textile géométrique'), findsOneWidget);
     expect(find.byKey(const Key('apparence-a-propos-motif')), findsOneWidget);
 
