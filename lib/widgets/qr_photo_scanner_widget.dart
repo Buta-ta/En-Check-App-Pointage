@@ -4,11 +4,13 @@
 // ═══════════════════════════════════════════════════════════
 
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../theme/app_theme.dart';
+import 'qr_scanner_chrome.dart';
 
 // Import conditionnel caméra
 import '../stubs/camera_stub.dart' if (dart.library.io) 'package:camera/camera.dart' as cam;
@@ -20,11 +22,13 @@ import '../stubs/camera_stub.dart' if (dart.library.io) 'package:camera/camera.d
 class QRPhotoScannerWidget extends StatefulWidget {
   final Function(String qrCode, Uint8List? photoBytes) onCompleted;
   final VoidCallback onClose;
+  final VoidCallback? onPinFallback;
 
   const QRPhotoScannerWidget({
     super.key,
     required this.onCompleted,
     required this.onClose,
+    this.onPinFallback,
   });
 
   @override
@@ -40,6 +44,13 @@ class _QRPhotoScannerWidgetState extends State<QRPhotoScannerWidget>
   bool _hasScanned = false;
   bool _isCapturingPhoto = false;
   bool _photoTaken = false;
+  bool _photoUnavailable = false;
+  bool _photoDeferredToWebCamera = false;
+  bool _photoCameraFailed = false;
+  bool _processCompleted = false;
+  bool _isFrontScanner = true;
+  MobileScannerErrorCode? _cameraError;
+  MobileScannerErrorCode? _queuedCameraError;
   String? _scannedCode;
   Uint8List? _capturedPhoto;
 
@@ -88,6 +99,7 @@ class _QRPhotoScannerWidgetState extends State<QRPhotoScannerWidget>
       // La photo sera prise par WebCameraWidget dans pointage_screen
       setState(() {
         _photoTaken = true;
+        _photoDeferredToWebCamera = true;
       });
       await Future.delayed(const Duration(milliseconds: 300));
       _completeProcess();
@@ -109,7 +121,7 @@ class _QRPhotoScannerWidgetState extends State<QRPhotoScannerWidget>
       }
       frontCamera ??= cameras.isNotEmpty ? cameras.first : null;
       if (frontCamera == null) {
-        _completeWithoutPhoto();
+        await _setPhotoCameraError();
         return;
       }
       _cameraController = cam.CameraController(
@@ -124,7 +136,7 @@ class _QRPhotoScannerWidgetState extends State<QRPhotoScannerWidget>
         _startPhotoCountdown();
       }
     } catch (e) {
-      _completeWithoutPhoto();
+      await _setPhotoCameraError();
     }
   }
 
@@ -176,14 +188,14 @@ class _QRPhotoScannerWidgetState extends State<QRPhotoScannerWidget>
 
   Future<void> _capturePhoto() async {
     if (kIsWeb) {
-      _completeWithoutPhoto();
+      await _setPhotoCameraError();
       return;
     }
 
     try {
       if (_cameraController == null || !_cameraController!.value.isInitialized) {
         print('❌ Caméra non prête');
-        _completeWithoutPhoto();
+        await _setPhotoCameraError();
         return;
       }
 
@@ -202,284 +214,343 @@ class _QRPhotoScannerWidgetState extends State<QRPhotoScannerWidget>
       _completeProcess();
     } catch (e) {
       print('❌ Erreur capture photo: $e');
-      _completeWithoutPhoto();
+      await _setPhotoCameraError();
     }
   }
 
-  void _completeWithoutPhoto() {
-    print('⚠️ Continuation sans photo');
+  Future<void> _setPhotoCameraError() async {
+    final cameraController = _cameraController;
+    _cameraController = null;
+    await cameraController?.dispose();
+    if (!mounted) return;
     setState(() {
-      _photoTaken = true;
-    });
-
-    Future.delayed(const Duration(milliseconds: 500), () {
-      _completeProcess();
+      _isCameraReady = false;
+      _photoCameraFailed = true;
     });
   }
 
+  Future<void> _retryPhotoCamera() async {
+    if (!mounted) return;
+    await _cameraController?.dispose();
+    setState(() => _photoCameraFailed = false);
+    await _initCameraForPhoto();
+  }
+
+  void _continueWithoutPhoto() {
+    if (!mounted) return;
+    setState(() {
+      _photoTaken = true;
+      _photoUnavailable = true;
+      _photoCameraFailed = false;
+      _isCapturingPhoto = false;
+    });
+    Future.delayed(const Duration(milliseconds: 500), _completeProcess);
+  }
+
   void _completeProcess() {
+    if (_processCompleted || !mounted || _scannedCode == null) return;
+    _processCompleted = true;
     print('🏁 Processus terminé - QR: $_scannedCode, Photo: ${_capturedPhoto?.length ?? 0} bytes');
     widget.onCompleted(_scannedCode!, _capturedPhoto);
   }
 
+  void _queueCameraError(MobileScannerException exception) {
+    final code = exception.errorCode;
+    if (_cameraError == code || _queuedCameraError == code) return;
+    _queuedCameraError = code;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _queuedCameraError = null;
+      if (_cameraError != code) setState(() => _cameraError = code);
+    });
+  }
+
+  Future<void> _retryScanner() async {
+    setState(() => _cameraError = null);
+    try {
+      await _scannerController?.start();
+    } catch (_) {
+      // L'erreur sera renvoyée par MobileScanner.errorBuilder.
+    }
+  }
+
+  Future<void> _switchScannerCamera() async {
+    try {
+      await _scannerController?.switchCamera();
+      if (mounted) setState(() => _isFrontScanner = !_isFrontScanner);
+    } catch (_) {
+      // Si l'appareil n'a qu'un objectif, le scan reste disponible.
+    }
+  }
+
+  Future<void> _toggleScannerTorch() async {
+    try {
+      await _scannerController?.toggleTorch();
+      if (mounted) setState(() {});
+    } catch (_) {
+      // La lampe peut ne pas être prise en charge par cet appareil.
+    }
+  }
+
+  String? get _cameraErrorTitle {
+    switch (_cameraError) {
+      case MobileScannerErrorCode.permissionDenied:
+        return 'Autorisez l’accès à la caméra';
+      case MobileScannerErrorCode.unsupported:
+        return 'Caméra indisponible';
+      case MobileScannerErrorCode.controllerDisposed:
+      case MobileScannerErrorCode.controllerUninitialized:
+      case MobileScannerErrorCode.controllerAlreadyInitialized:
+      case MobileScannerErrorCode.genericError:
+        return 'Impossible d’ouvrir la caméra';
+      case null:
+        return null;
+    }
+  }
+
+  String? get _cameraErrorMessage {
+    switch (_cameraError) {
+      case MobileScannerErrorCode.permissionDenied:
+        return 'Autorisez l’accès à la caméra dans les réglages, puis réessayez.';
+      case MobileScannerErrorCode.unsupported:
+        return 'Cet appareil ou ce navigateur ne prend pas en charge la lecture caméra.';
+      case MobileScannerErrorCode.controllerDisposed:
+      case MobileScannerErrorCode.controllerUninitialized:
+      case MobileScannerErrorCode.controllerAlreadyInitialized:
+      case MobileScannerErrorCode.genericError:
+        return 'Vérifiez la caméra puis réessayez, ou utilisez le code PIN.';
+      case null:
+        return null;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Stack(
-        children: [
-          if (!_hasScanned && _scannerController != null)
-            MobileScanner(
-              controller: _scannerController!,
-              onDetect: _onDetect,
-            )
-          else if (_isCameraReady && _cameraController != null && !kIsWeb)
-            SizedBox.expand(
-              child: FittedBox(
-                fit: BoxFit.cover,
-                child: SizedBox(
-                  width: _cameraController!.value.previewSize?.height ?? 100,
-                  height: _cameraController!.value.previewSize?.width ?? 100,
-                  child: cam.CameraPreview(_cameraController!),
-                ),
-              ),
-            )
-          else
-            Container(color: Colors.black),
-          _buildOverlay(),
-          _buildHeader(),
-          _buildCentralContent(),
-          _buildCameraIndicator(),
-          if (_photoTaken && _capturedPhoto != null) _buildPhotoPreview(),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildOverlay() {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.black.withOpacity(_isCapturingPhoto ? 0.3 : 0.5),
-      ),
-      child: Stack(
-        children: [
-          if (!_hasScanned)
-            Center(
-              child: Container(
-                width: 280,
-                height: 280,
-                decoration: BoxDecoration(
-                  border: Border.all(color: EnCheckColors.orDoux, width: 3),
-                  borderRadius: BorderRadius.circular(20),
-                  color: Colors.transparent,
-                ),
-              ),
-            ),
-          if (!_hasScanned)
-            Center(
-              child: SizedBox(
-                width: 280,
-                height: 280,
-                child: CustomPaint(painter: _CornersPainter()),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildHeader() {
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            GestureDetector(
-              onTap: _isCapturingPhoto ? null : widget.onClose,
-              child: Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.5),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(
-                  Icons.close,
-                  color: _isCapturingPhoto ? Colors.grey : Colors.white,
-                  size: 24,
-                ),
-              ),
-            ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-              decoration: BoxDecoration(
-                color: _hasScanned
-                    ? EnCheckColors.succes.withOpacity(0.8)
-                    : Colors.black.withOpacity(0.5),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text(
-                _getHeaderTitle(),
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ),
-            const SizedBox(width: 48),
-          ],
+    final scanner = _scannerController;
+    final scanning = !_hasScanned && scanner != null;
+    final Widget cameraPreview;
+    if (scanning) {
+      cameraPreview = MobileScanner(
+        controller: scanner!,
+        onDetect: _onDetect,
+        errorBuilder: (context, exception, child) {
+          _queueCameraError(exception);
+          return const ColoredBox(color: Color(0xFF292824));
+        },
+      );
+    } else if (_isCameraReady && _cameraController != null && !kIsWeb) {
+      cameraPreview = SizedBox.expand(
+        child: FittedBox(
+          fit: BoxFit.cover,
+          child: SizedBox(
+            width: _cameraController!.value.previewSize?.height ?? 100.0,
+            height: _cameraController!.value.previewSize?.width ?? 100.0,
+            child: cam.CameraPreview(_cameraController!),
+          ),
         ),
-      ),
+      );
+    } else {
+      cameraPreview = const ColoredBox(color: Color(0xFF292824));
+    }
+
+    final isCapturing = _isCapturingPhoto && !_photoTaken;
+    return QrScannerChrome(
+      cameraPreview: cameraPreview,
+      onClose: widget.onClose,
+      headerTitle: isCapturing || _photoDeferredToWebCamera
+          ? 'Badge reconnu'
+          : _photoTaken
+              ? (_photoUnavailable ? 'Photo indisponible' : 'Photo prise')
+              : 'Scanner le badge',
+      instruction: isCapturing
+          ? 'Regardez l’écran : la photo de contrôle va être prise.'
+          : _photoTaken
+              ? 'Le pointage continue.'
+              : 'Montrez le QR code du badge face à la caméra',
+      statusLabel: scanning
+          ? 'Recherche du QR code…'
+          : _photoDeferredToWebCamera
+              ? 'Ouverture de la caméra de contrôle…'
+              : isCapturing
+                  ? 'Photo de contrôle en cours…'
+                  : _photoUnavailable
+                      ? 'La lecture QR reste valide'
+                      : 'Photo capturée — poursuite du pointage…',
+      cameraLabel: scanning
+          ? (_isFrontScanner ? 'Caméra frontale' : 'Caméra arrière')
+          : 'Caméra frontale',
+      isFrontCamera: scanning ? _isFrontScanner : true,
+      showTorchButton: scanning,
+      torchAvailable:
+          scanning && scanner?.value.torchState != TorchState.unavailable,
+      torchEnabled: scanning && scanner?.value.torchState == TorchState.on,
+      showSwitchButton: scanning,
+      onToggleTorch: _toggleScannerTorch,
+      onSwitchCamera: _switchScannerCamera,
+      showViewfinder: scanning,
+      isBusy: _isCapturingPhoto && !_photoCameraFailed,
+      onPinFallback: _photoCameraFailed
+          ? _continueWithoutPhoto
+          : scanning
+              ? widget.onPinFallback
+              : null,
+      pinFallbackLabel:
+          _photoCameraFailed ? 'Continuer sans photo' : 'Utiliser le code PIN',
+      centerContent: scanning ? null : _buildPhotoCaptureContent(),
+      cameraErrorTitle: _photoCameraFailed
+          ? 'Caméra de contrôle indisponible'
+          : _cameraErrorTitle,
+      cameraErrorMessage: _photoCameraFailed
+          ? 'Réessayez la caméra ou continuez le pointage sans photo.'
+          : _cameraErrorMessage,
+      onRetryCamera: _photoCameraFailed ? _retryPhotoCamera : _retryScanner,
+      foregroundOverlay:
+          _photoTaken && _capturedPhoto != null ? _buildPhotoPreview() : null,
     );
   }
 
-  String _getHeaderTitle() {
-    if (_photoTaken) return '📸 Photo prise !';
-    if (_isCapturingPhoto) return '✅ Badge reconnu';
-    return 'Scanner le Badge';
-  }
+  Widget _buildPhotoCaptureContent() {
+    if (_photoTaken) {
+      final title = _photoUnavailable
+          ? 'Photo non disponible'
+          : _photoDeferredToWebCamera
+              ? 'Badge reconnu'
+              : 'Photo prise';
+      final subtitle = _photoUnavailable
+          ? 'Le pointage continue sans photo.'
+          : _photoDeferredToWebCamera
+              ? 'Ouverture de la caméra de contrôle…'
+              : 'La photo de contrôle est prête.';
+      return _phaseCard(
+        icon: _photoUnavailable ? Icons.info_outline_rounded : Icons.check_circle_outline_rounded,
+        title: title,
+        subtitle: subtitle,
+      );
+    }
 
-  Widget _buildCentralContent() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          if (!_hasScanned) ...[
-            const SizedBox(height: 200),
-          ],
-          if (_isCapturingPhoto && !_photoTaken) ...[
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 20),
-              margin: const EdgeInsets.symmetric(horizontal: 40),
-              decoration: BoxDecoration(
-                color: EnCheckColors.brunProfond.withOpacity(0.9),
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: [
-                  BoxShadow(
-                    color: EnCheckColors.orDoux.withOpacity(0.3),
-                    blurRadius: 20,
-                    spreadRadius: 5,
-                  ),
-                ],
-              ),
-              child: Column(
-                children: [
-                  const Text('😊', style: TextStyle(fontSize: 50)),
-                  const SizedBox(height: 15),
-                  const Text(
-                    'Un petit sourire',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 22,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 5),
-                  const Text(
-                    'et c\'est tout !',
-                    style: TextStyle(
-                      color: EnCheckColors.orDoux,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w400,
-                    ),
-                  ),
-                  const SizedBox(height: 25),
-                  ScaleTransition(
-                    scale: _pulseAnimation,
-                    child: Container(
-                      width: 80,
-                      height: 80,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: EnCheckColors.terreChaude,
-                        boxShadow: [
-                          BoxShadow(
-                            color: EnCheckColors.terreChaude.withOpacity(0.5),
-                            blurRadius: 20,
-                            spreadRadius: 5,
-                          ),
-                        ],
-                      ),
-                      child: Center(
-                        child: Text(
-                          '$_countdown',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 40,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-          if (_photoTaken) ...[
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 20),
-              margin: const EdgeInsets.symmetric(horizontal: 40),
-              decoration: BoxDecoration(
-                color: EnCheckColors.succes.withOpacity(0.9),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: const Column(
-                children: [
-                  Icon(Icons.check_circle, color: Colors.white, size: 60),
-                  SizedBox(height: 15),
-                  Text(
-                    'Pointage enregistré !',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 20,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
+    if (!_isCameraReady) {
+      return _phaseCard(
+        icon: Icons.camera_alt_outlined,
+        title: 'Badge reconnu',
+        subtitle: 'Préparation de la caméra de contrôle…',
+        showLoader: true,
+      );
+    }
+
+    return Container(
+      width: math
+          .min(340.0, MediaQuery.sizeOf(context).width - 40)
+          .toDouble(),
+      padding: const EdgeInsets.fromLTRB(24, 22, 24, 24),
+      decoration: BoxDecoration(
+        color: const Color(0xFF233A37).withOpacity(0.97),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: const Color(0xFF71877F).withOpacity(0.62)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.25),
+            blurRadius: 28,
+            offset: const Offset(0, 12),
+          ),
         ],
       ),
-    );
-  }
-
-  Widget _buildCameraIndicator() {
-    if (_isCapturingPhoto) return const SizedBox.shrink();
-
-    return Positioned(
-      bottom: 100,
-      left: 0,
-      right: 0,
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-            margin: const EdgeInsets.symmetric(horizontal: 40),
-            decoration: BoxDecoration(
-              color: EnCheckColors.brunProfond.withOpacity(0.8),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Text(
-              'Montrez votre badge QR face à l\'écran',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white, fontSize: 14),
+          const Text('😊', style: TextStyle(fontSize: 42)),
+          const SizedBox(height: 10),
+          const Text(
+            'Un petit sourire',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Color(0xFFF2E7D4),
+              fontSize: 19,
+              fontWeight: FontWeight.w600,
             ),
           ),
-          const SizedBox(height: 20),
-          if (!_hasScanned)
+          const SizedBox(height: 5),
+          const Text(
+            'et c’est tout !',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: EnCheckColors.orDoux, fontSize: 15),
+          ),
+          const SizedBox(height: 18),
+          ScaleTransition(
+            scale: _pulseAnimation,
+            child: Container(
+              width: 66,
+              height: 66,
+              decoration: const BoxDecoration(
+                color: Color(0xFF233A37),
+                shape: BoxShape.circle,
+              ),
+              child: Center(
+                child: Text(
+                  '$_countdown',
+                  style: const TextStyle(
+                    color: Color(0xFFF2E7D4),
+                    fontSize: 34,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _phaseCard({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    bool showLoader = false,
+  }) {
+    return Container(
+      width: math
+          .min(320.0, MediaQuery.sizeOf(context).width - 48)
+          .toDouble(),
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: const Color(0xFF233A37).withOpacity(0.97),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: const Color(0xFF71877F).withOpacity(0.62)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (showLoader)
             const SizedBox(
-              width: 40,
-              height: 40,
+              width: 30,
+              height: 30,
               child: CircularProgressIndicator(
+                strokeWidth: 2.5,
                 color: EnCheckColors.orDoux,
-                strokeWidth: 2,
               ),
             )
           else
-            const Icon(Icons.check_circle, color: EnCheckColors.succes, size: 40),
+            Icon(icon, color: EnCheckColors.orDoux, size: 38),
+          const SizedBox(height: 12),
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: Color(0xFFF2E7D4),
+              fontSize: 17,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            subtitle,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: Color(0xFFD7D0C5),
+              fontSize: 13,
+              height: 1.35,
+            ),
+          ),
         ],
       ),
     );
@@ -487,8 +558,8 @@ class _QRPhotoScannerWidgetState extends State<QRPhotoScannerWidget>
 
   Widget _buildPhotoPreview() {
     return Positioned(
-      bottom: 30,
-      right: 30,
+      top: 88,
+      right: 24,
       child: Container(
         width: 100,
         height: 130,
@@ -512,37 +583,4 @@ class _QRPhotoScannerWidgetState extends State<QRPhotoScannerWidget>
       ),
     );
   }
-}
-
-class _CornersPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = EnCheckColors.orDoux
-      ..strokeWidth = 4
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
-
-    const cornerLength = 30.0;
-    const radius = 20.0;
-
-    canvas.drawLine(const Offset(0, cornerLength), const Offset(0, radius), paint);
-    canvas.drawArc(const Rect.fromLTWH(0, 0, radius * 2, radius * 2), 3.14, 0.5, false, paint);
-    canvas.drawLine(const Offset(radius, 0), const Offset(cornerLength, 0), paint);
-
-    canvas.drawLine(Offset(size.width - cornerLength, 0), Offset(size.width - radius, 0), paint);
-    canvas.drawArc(Rect.fromLTWH(size.width - radius * 2, 0, radius * 2, radius * 2), -0.5, 0.5, false, paint);
-    canvas.drawLine(Offset(size.width, radius), Offset(size.width, cornerLength), paint);
-
-    canvas.drawLine(Offset(size.width, size.height - cornerLength), Offset(size.width, size.height - radius), paint);
-    canvas.drawArc(Rect.fromLTWH(size.width - radius * 2, size.height - radius * 2, radius * 2, radius * 2), 0, 0.5, false, paint);
-    canvas.drawLine(Offset(size.width - radius, size.height), Offset(size.width - cornerLength, size.height), paint);
-
-    canvas.drawLine(Offset(cornerLength, size.height), Offset(radius, size.height), paint);
-    canvas.drawArc(Rect.fromLTWH(0, size.height - radius * 2, radius * 2, radius * 2), 0.5, 0.5, false, paint);
-    canvas.drawLine(Offset(0, size.height - radius), Offset(0, size.height - cornerLength), paint);
-  }
-
-  @override
-  bool shouldRepaint(CustomPainter oldDelegate) => false;
 }
