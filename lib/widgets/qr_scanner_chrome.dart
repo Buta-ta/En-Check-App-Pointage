@@ -111,7 +111,7 @@ class QrScannerChrome extends StatelessWidget {
               SafeArea(
                 child: Column(
                   children: [
-                    _buildHeader(),
+                    _buildHeader(context),
                     const Spacer(),
                     _buildFooter(context),
                   ],
@@ -125,7 +125,7 @@ class QrScannerChrome extends StatelessWidget {
     );
   }
 
-  Widget _buildHeader() {
+  Widget _buildHeader(BuildContext context) {
     final showTorch = showTorchButton && !isFrontCamera;
     final controlSize = MediaQuery.sizeOf(context).width < 380 ? 48.0 : 56.0;
     return Padding(
@@ -133,6 +133,7 @@ class QrScannerChrome extends StatelessWidget {
       child: Row(
         children: [
           _controlButton(
+            context,
             icon: Icons.close_rounded,
             label: 'Fermer le lecteur QR',
             onPressed: isBusy ? null : onClose,
@@ -158,6 +159,7 @@ class QrScannerChrome extends StatelessWidget {
             children: [
               if (showTorch)
                 _controlButton(
+                  context,
                   icon: torchEnabled ? Icons.flash_on_rounded : Icons.flash_off_rounded,
                   label: torchAvailable ? 'Activer ou désactiver la lampe' : 'Lampe indisponible',
                   onPressed: torchAvailable ? onToggleTorch : null,
@@ -166,6 +168,7 @@ class QrScannerChrome extends StatelessWidget {
               if (showTorch && showSwitchButton) const SizedBox(width: 8),
               if (showSwitchButton)
                 _controlButton(
+                  context,
                   icon: Icons.cameraswitch_rounded,
                   label: 'Changer de caméra',
                   onPressed: isBusy ? null : onSwitchCamera,
@@ -316,9 +319,8 @@ class QrScannerChrome extends StatelessWidget {
     );
   }
 
-  bool get _hasCameraError => cameraErrorTitle != null;
-
-  Widget _controlButton({
+  Widget _controlButton(
+    BuildContext context, {
     required IconData icon,
     required String label,
     required VoidCallback? onPressed,
