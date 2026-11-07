@@ -35,8 +35,11 @@ jobs:
         run: |
           set +e
           flutter analyze --no-fatal-infos \
+            lib/main.dart \
             lib/screens/public_start_screen.dart \
+            lib/screens/welcome_screen.dart \
             lib/screens/identification_slide_page.dart \
+            lib/services/public_start_service.dart \
             lib/services/historique_periode.dart \
             lib/services/motif_service.dart \
             lib/widgets/cadre_motif.dart \
@@ -44,6 +47,7 @@ jobs:
             lib/widgets/ma_journee_dialog.dart \
             lib/widgets/panneau_motif.dart \
             test/public_start_screen_test.dart \
+            test/public_start_service_test.dart \
             test/identification_slide_page_test.dart \
             test/ma_journee_dialog_test.dart \
             test/panneau_motif_test.dart \
