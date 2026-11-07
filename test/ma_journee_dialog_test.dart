@@ -12,10 +12,14 @@ const _employeTest = <String, dynamic>{
 Future<void> _ouvrirDialog(
   WidgetTester tester, {
   String prefixe = 'ENN',
+  bool sombre = false,
   required Future<ResultatVerificationJournee> Function(String, String) verifier,
   required void Function(Map<String, dynamic>?) apresFermeture,
 }) async {
   await tester.pumpWidget(MaterialApp(
+    theme: ThemeData.light(),
+    darkTheme: ThemeData.dark(),
+    themeMode: sombre ? ThemeMode.dark : ThemeMode.light,
     home: Builder(
       builder: (context) => Scaffold(
         body: Center(
@@ -146,6 +150,27 @@ void main() {
     await tester.tap(find.byKey(const Key('ma-journee-consulter')));
     await tester.pumpAndSettle();
     expect(matriculeVerifie, 'ACME-0042');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('la modale garde un contraste lisible en mode sombre',
+      (tester) async {
+    await _ouvrirDialog(
+      tester,
+      sombre: true,
+      verifier: (_, __) async =>
+          const ResultatVerificationJournee.echec('Code invalide.'),
+      apresFermeture: (_) {},
+    );
+
+    final dialog = tester.widget<AlertDialog>(find.byType(AlertDialog).last);
+    expect(dialog.backgroundColor, const Color(0xFF1D1E1C));
+    final matricule = tester.widget<TextField>(
+      find.byKey(const Key('ma-journee-matricule')),
+    );
+    expect(matricule.decoration!.fillColor, const Color(0xFF2A2A27));
+    expect(matricule.style!.color, const Color(0xFFF5F1EA));
+    expect(find.text('MA JOURNÉE'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
