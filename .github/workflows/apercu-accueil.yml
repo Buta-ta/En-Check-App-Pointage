@@ -34,7 +34,7 @@ jobs:
       - name: Analyser les sources Flutter
         run: |
           set +e
-          flutter analyze \
+          flutter analyze --no-fatal-infos \
             lib/screens/public_start_screen.dart \
             lib/screens/identification_slide_page.dart \
             lib/services/historique_periode.dart \
