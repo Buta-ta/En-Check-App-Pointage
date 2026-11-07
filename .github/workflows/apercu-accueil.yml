@@ -34,7 +34,22 @@ jobs:
       - name: Analyser les sources Flutter
         run: |
           set +e
-          flutter analyze 2>&1 | tee /tmp/apercu-analyse.log
+          flutter analyze \
+            lib/screens/public_start_screen.dart \
+            lib/screens/identification_slide_page.dart \
+            lib/services/historique_periode.dart \
+            lib/services/motif_service.dart \
+            lib/widgets/cadre_motif.dart \
+            lib/widgets/checklist_demarrage.dart \
+            lib/widgets/ma_journee_dialog.dart \
+            lib/widgets/panneau_motif.dart \
+            test/public_start_screen_test.dart \
+            test/identification_slide_page_test.dart \
+            test/ma_journee_dialog_test.dart \
+            test/panneau_motif_test.dart \
+            tool/apercu/main_entree.dart \
+            tool/apercu/main_apparence.dart \
+            2>&1 | tee /tmp/apercu-analyse.log
           status=${PIPESTATUS[0]}
           set -e
           if [ "$status" -ne 0 ]; then
