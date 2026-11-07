@@ -38,10 +38,14 @@ class HistoriquePeriode {
   /// d'exemple du champ comme donnée. Le préfixe vient de l'entreprise active.
   static String matriculeComplet(String saisie, String prefixe) {
     final propre = saisie.trim().toUpperCase();
-    final prefixePropre = prefixe.trim().toUpperCase();
+    final prefixePropre =
+        prefixe.trim().toUpperCase().replaceFirst(RegExp(r'-+$'), '');
     if (prefixePropre.isEmpty || propre.startsWith('$prefixePropre-')) {
       return propre;
     }
-    return '$prefixePropre-$propre';
+    final suffixe = propre.startsWith(prefixePropre)
+        ? propre.substring(prefixePropre.length).replaceFirst(RegExp(r'^-+'), '')
+        : propre;
+    return '$prefixePropre-$suffixe';
   }
 }

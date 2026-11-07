@@ -17,6 +17,10 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const LIMIT = Number(process.env.APERCU_LIMIT || 0);
 
 const SCENARIOS_ACCUEIL = [
+  { nom: 'entree-412x869-clair', w: 412, h: 869, dpr: 2, mobile: true, entree: true },
+  { nom: 'entree-360x640-clair', w: 360, h: 640, dpr: 2, mobile: true, entree: true },
+  { nom: 'identification-pointage-412x869-clair', w: 412, h: 869, dpr: 2, mobile: true, ouvrirIdentification: true },
+  { nom: 'identification-pointage-360x640-clair', w: 360, h: 640, dpr: 2, mobile: true, ouvrirIdentification: true },
   { nom: 'reference-412x869-clair', w: 412, h: 869, dpr: 2, mobile: true },
   { nom: 'reference-412x869-sombre', w: 412, h: 869, dpr: 2, mobile: true, sombre: true },
   { nom: 'telephone-360x640-clair', w: 360, h: 640, dpr: 2, mobile: true },
@@ -152,6 +156,38 @@ async function ouvrir(browser, scenario) {
     precedent = raf;
     calme = stable >= 4;
     if (!calme) await sleep(400);
+  }
+  if (process.env.APERCU_MODE !== 'historique' && !scenario.entree) {
+    // Sur l'app configurée, le premier écran est désormais le départ public.
+    // On poursuit jusqu'à l'accueil interne pour les autres scénarios.
+    const hauteurBouton = scenario.h <= 700 ? 0.68 : 0.62;
+    await page.mouse.click(scenario.w * 0.5, scenario.h * hauteurBouton);
+    await sleep(1100);
+    calme = false;
+    stable = 0;
+    precedent = -1;
+    for (let i = 0; i < 20 && !calme; i += 1) {
+      const raf = await page.evaluate(() => window.__raf);
+      stable = raf === precedent ? stable + 1 : 0;
+      precedent = raf;
+      calme = stable >= 4;
+      if (!calme) await sleep(400);
+    }
+  }
+  if (scenario.ouvrirIdentification) {
+    // Première carte d'action « Je commence mon service ».
+    await page.mouse.click(scenario.w * 0.28, scenario.h * 0.49);
+    await sleep(900);
+    calme = false;
+    stable = 0;
+    precedent = -1;
+    for (let i = 0; i < 20 && !calme; i += 1) {
+      const raf = await page.evaluate(() => window.__raf);
+      stable = raf === precedent ? stable + 1 : 0;
+      precedent = raf;
+      calme = stable >= 4;
+      if (!calme) await sleep(400);
+    }
   }
   if (scenario.ouvrirParametres) {
     await page.mouse.click(scenario.w * 0.875, scenario.h - 32);

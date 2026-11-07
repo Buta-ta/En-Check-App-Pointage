@@ -4,10 +4,8 @@
 // ═══════════════════════════════════════════════════════════
 //
 //  Sur grand écran, l'app est présentée comme un SMARTPHONE posé
-//  sur le motif culturel actif (étoffe + vignette chaude).
-//
-//  - Gauche, en bas : « Motifs culturels du … — Peuple … »
-//    (UNIQUEMENT dans l'espace latéral, jamais dans l'app).
+//  sur le motif d'interface actif (étoffe + vignette chaude).
+//  Aucune provenance n'est affichée sans source vérifiée.
 //  - Droite, centré : le slogan d'En-Check.
 //
 //  Le cadre du téléphone s'amincit automatiquement quand la
@@ -123,13 +121,13 @@ class CadreMotif extends StatelessWidget {
                   ),
                 ),
               ),
-              // Message culturel — SEULEMENT dans l'espace latéral gauche.
+              // Repère visuel neutre — sans attribution de provenance.
               if (cote >= 200)
                 Positioned(
                   left: 28,
                   bottom: 32,
                   width: cote - 56,
-                  child: const _MessageCulturel(),
+                  child: const _MessageMotif(),
                 ),
               // Slogan d'En-Check — dans l'espace latéral droit.
               if (cote >= 200)
@@ -297,9 +295,9 @@ class _BoutonCoque extends StatelessWidget {
   }
 }
 
-/// « Motifs culturels du Congo » + « Raphia — Peuple Kuba ».
-class _MessageCulturel extends StatelessWidget {
-  const _MessageCulturel();
+/// Repère visuel neutre, sans origine attribuée au textile.
+class _MessageMotif extends StatelessWidget {
+  const _MessageMotif();
 
   @override
   Widget build(BuildContext context) {
@@ -313,25 +311,14 @@ class _MessageCulturel extends StatelessWidget {
           children: [
             Container(width: 28, height: 2, color: motif.couleurAccent),
             const SizedBox(height: 10),
-            Text(
-              titreMotifsCulturels(motif.pays),
-              style: const TextStyle(
+            const Text(
+              'Motif textile géométrique',
+              style: TextStyle(
                 fontFamily: 'Poppins',
                 fontSize: 12.5,
                 fontWeight: FontWeight.w600,
                 color: Color(0xFFF4EFE2),
                 letterSpacing: 0.2,
-                height: 1.35,
-              ),
-            ),
-            const SizedBox(height: 3),
-            Text(
-              '${motif.nom} — Peuple ${motif.peuple}',
-              style: const TextStyle(
-                fontFamily: 'Poppins',
-                fontSize: 11,
-                fontWeight: FontWeight.w400,
-                color: Color(0xB8F4EFE2),
                 height: 1.35,
               ),
             ),

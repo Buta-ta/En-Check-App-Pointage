@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:hive_flutter/hive_flutter.dart';
-import 'screens/pointage_screen.dart';
+import 'screens/public_start_screen.dart';
 import 'screens/welcome_screen.dart';
 import 'services/supabase_service.dart';
 import 'services/connectivity_service.dart';
@@ -128,7 +128,7 @@ class _EnCheckAppState extends State<EnCheckApp> {
       themeMode: themeService.isDarkMode ? ThemeMode.dark : ThemeMode.light,
       builder: (context, child) =>
           CadreMotif(child: child ?? const SizedBox.shrink()),
-      home: _hasEnterprise ? const PointageScreen() : const WelcomeScreen(),
+      home: _hasEnterprise ? const PublicStartScreen() : const WelcomeScreen(),
     );
   }
 

@@ -24,7 +24,6 @@ import '../services/motif_service.dart';
 import '../services/supabase_service.dart';
 import '../services/theme_service.dart';
 import '../widgets/frise_motif.dart';
-import '../widgets/logo_empreinte.dart';
 import '../widgets/slide_valider.dart';
 import '../widgets/sans_etirement.dart';
 
@@ -46,6 +45,12 @@ class IdentificationSlidePage extends StatefulWidget {
   /// son apparence actuelle tant que sa propre maquette n'est pas validée.
   final bool maquettePause;
 
+  /// Refonte visuelle dédiée à l'identification d'un pointage.
+  final bool maquettePointage;
+
+  /// Retour direct à l'écran public, sans renvoyer d'employé à l'appelant.
+  final VoidCallback? onAccueil;
+
   const IdentificationSlidePage({
     super.key,
     required this.titre,
@@ -56,6 +61,8 @@ class IdentificationSlidePage extends StatefulWidget {
     this.matriculeInitial,
     this.statut,
     this.maquettePause = false,
+    this.maquettePointage = false,
+    this.onAccueil,
   });
 
   @override
@@ -77,9 +84,23 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
 
   @override
   void dispose() {
+    _identifiantCtrl.clear();
+    _motDePasseCtrl.clear();
     _identifiantCtrl.dispose();
     _motDePasseCtrl.dispose();
     super.dispose();
+  }
+
+  void _retourAccueil() {
+    _identifiantCtrl.clear();
+    _motDePasseCtrl.clear();
+    FocusScope.of(context).unfocus();
+    final action = widget.onAccueil;
+    if (action != null) {
+      action();
+    } else {
+      Navigator.of(context).pop();
+    }
   }
 
   /// Vérifie les identifiants : renvoie l'employé, ou null (erreur affichée).
@@ -136,7 +157,7 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
   @override
   Widget build(BuildContext context) {
     final themeService = Provider.of<ThemeService>(context);
-    final palettePause = widget.maquettePause
+    final palettePause = (widget.maquettePause || widget.maquettePointage)
         ? AccueilPalette.pour(
             MotifService.actif.value,
             Theme.of(context).brightness == Brightness.dark,
@@ -162,7 +183,7 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
         onKeyEvent: (noeud, event) {
           if (event is KeyDownEvent &&
               event.logicalKey == LogicalKeyboardKey.escape) {
-            Navigator.pop(context);
+            _retourAccueil();
             return KeyEventResult.handled;
           }
           return KeyEventResult.ignored;
@@ -224,18 +245,25 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
                         child: TextButton.icon(
                           key: widget.maquettePause
                               ? const Key('pause-retour')
-                              : null,
-                          onPressed: () => Navigator.pop(context),
-                          icon: Icon(Icons.arrow_back,
-                              size: 16,
-                              color: palettePause?.texteSecondaire ??
-                                  EnCheckColors.gris),
+                              : widget.maquettePointage
+                                  ? const Key('pointage-accueil')
+                                  : null,
+                          onPressed: _retourAccueil,
+                          icon: Icon(
+                            widget.maquettePointage
+                                ? Icons.home_outlined
+                                : Icons.arrow_back,
+                            size: 16,
+                            color: palettePause?.texteSecondaire ??
+                                EnCheckColors.gris,
+                          ),
                           label: Text(
-                            'Retour',
+                            widget.maquettePause ? 'Retour' : 'Accueil',
                             style: TextStyle(
-                                fontSize: widget.maquettePause ? 14 : 13,
-                                color: palettePause?.texteSecondaire ??
-                                    EnCheckColors.gris),
+                              fontSize: widget.maquettePause ? 14 : 13,
+                              color: palettePause?.texteSecondaire ??
+                                  EnCheckColors.gris,
+                            ),
                           ),
                         ),
                       ),
@@ -378,16 +406,23 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
         if (!clavierOuvert) ...[
           Center(
             child: TextButton.icon(
-              key: widget.maquettePause ? const Key('pause-retour') : null,
-              onPressed: () => Navigator.pop(context),
-              icon: Icon(Icons.arrow_back,
-                  size: 16,
-                  color: palette?.texteSecondaire ?? EnCheckColors.gris),
+              key: widget.maquettePause
+                  ? const Key('pause-retour')
+                  : widget.maquettePointage
+                      ? const Key('pointage-accueil')
+                      : null,
+              onPressed: _retourAccueil,
+              icon: Icon(
+                widget.maquettePointage ? Icons.home_outlined : Icons.arrow_back,
+                size: 16,
+                color: palette?.texteSecondaire ?? EnCheckColors.gris,
+              ),
               label: Text(
-                'Retour',
+                widget.maquettePause ? 'Retour' : 'Accueil',
                 style: TextStyle(
-                    fontSize: widget.maquettePause ? 14 : 13,
-                    color: palette?.texteSecondaire ?? EnCheckColors.gris),
+                  fontSize: widget.maquettePause ? 14 : 13,
+                  color: palette?.texteSecondaire ?? EnCheckColors.gris,
+                ),
               ),
             ),
           ),
@@ -460,8 +495,13 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
             child: Row(
               children: [
                 _rondScene(
-                  icon: Icons.arrow_back,
-                  onTap: () => Navigator.pop(context),
+                  key: widget.maquettePointage
+                      ? const Key('pointage-scene-accueil')
+                      : null,
+                  icon: widget.maquettePointage
+                      ? Icons.home_outlined
+                      : Icons.arrow_back,
+                  onTap: _retourAccueil,
                 ),
                 const Spacer(),
                 Text(
@@ -609,11 +649,13 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
   }
 
   Widget _rondScene({
+    Key? key,
     required IconData icon,
     required VoidCallback onTap,
     bool actif = false,
   }) {
     return GestureDetector(
+      key: key,
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.all(8),
@@ -633,13 +675,18 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
     double paddingV = 20,
     AccueilPalette? palette,
   }) {
-    final estPause = palette != null;
+    final estPause = widget.maquettePause;
+    final paletteActive = palette != null;
     return Container(
-      key: estPause ? const Key('pause-carte-identification') : null,
+      key: estPause
+          ? const Key('pause-carte-identification')
+          : widget.maquettePointage
+              ? const Key('pointage-carte-identification')
+              : null,
       padding: EdgeInsets.symmetric(horizontal: 20, vertical: paddingV),
       decoration: BoxDecoration(
         color: palette?.surface ?? Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(estPause ? 16 : 20),
+        borderRadius: BorderRadius.circular(paletteActive ? 16 : 20),
         border: Border.all(
           color: palette?.texteTertiaire.withOpacity(0.62) ??
               Theme.of(context).dividerColor.withOpacity(0.35),
@@ -649,7 +696,9 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            'IDENTIFIEZ-VOUS',
+            widget.maquettePointage
+                ? 'IDENTIFICATION DU POINTAGE'
+                : 'IDENTIFIEZ-VOUS',
             textAlign: TextAlign.center,
             style: TextStyle(
               fontFamily: 'JetBrainsMono',
@@ -661,7 +710,10 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
           ),
           const SizedBox(height: 16),
           _champ(
-            label: 'Identifiant',
+            key: widget.maquettePointage
+                ? const Key('identification-matricule')
+                : null,
+            label: widget.maquettePointage ? 'Matricule' : 'Identifiant',
             controller: _identifiantCtrl,
             obscure: false,
             couleurTexte: couleurTexte,
@@ -671,7 +723,8 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
           ),
           const SizedBox(height: 12),
           _champ(
-            label: 'Code',
+            key: widget.maquettePointage ? const Key('identification-pin') : null,
+            label: widget.maquettePointage ? 'PIN' : 'Code',
             controller: _motDePasseCtrl,
             obscure: true,
             couleurTexte: couleurTexte,
@@ -701,7 +754,11 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
           ],
           SizedBox(height: estPause ? 14 : 16),
           SlideValider(
-            key: estPause ? const Key('pause-glisser-valider') : null,
+            key: estPause
+                ? const Key('pause-glisser-valider')
+                : widget.maquettePointage
+                    ? const Key('pointage-glisser-valider')
+                    : null,
             onGlisse: _valider,
             fond: palette?.primaire,
             bordure: palette?.primaire,
@@ -719,7 +776,11 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
             Align(
               alignment: Alignment.centerRight,
               child: MotifSymbole(
-                key: const Key('pause-motif-symbole'),
+                key: widget.maquettePause
+                    ? const Key('pause-motif-symbole')
+                    : widget.maquettePointage
+                        ? const Key('pointage-motif-symbole')
+                        : null,
                 motif: MotifService.actif.value,
               ),
             ),
@@ -730,6 +791,7 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
   }
 
   Widget _champ({
+    Key? key,
     required String label,
     required TextEditingController controller,
     required bool obscure,
@@ -763,6 +825,7 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
         ),
         const SizedBox(height: 6),
         TextField(
+          key: key,
           controller: controller,
           obscureText: obscure,
           textInputAction: action,

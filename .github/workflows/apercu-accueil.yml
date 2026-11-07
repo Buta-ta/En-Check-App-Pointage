@@ -5,18 +5,14 @@ on:
     types: [opened, synchronize, reopened]
   workflow_dispatch:
 
-# Les captures sont publiées sur une référence Git SÉPARÉE, jamais sur main :
-# elles restent accessibles sans artefact CI et sans déployer l'application.
+# Recettes de validation uniquement : aucune mise en production, publication
+# publique de captures ou écriture dans les références Git du dépôt.
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 concurrency:
   group: apercu-accueil-v2-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
-
-env:
-  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
   apercu:
@@ -34,6 +30,36 @@ jobs:
 
       - name: Télécharger les bibliothèques
         run: flutter pub get
+
+      - name: Analyser les sources Flutter
+        run: |
+          set +e
+          flutter analyze --no-fatal-infos \
+            lib/screens/public_start_screen.dart \
+            lib/screens/identification_slide_page.dart \
+            lib/services/historique_periode.dart \
+            lib/services/motif_service.dart \
+            lib/widgets/cadre_motif.dart \
+            lib/widgets/checklist_demarrage.dart \
+            lib/widgets/ma_journee_dialog.dart \
+            lib/widgets/panneau_motif.dart \
+            test/public_start_screen_test.dart \
+            test/identification_slide_page_test.dart \
+            test/ma_journee_dialog_test.dart \
+            test/panneau_motif_test.dart \
+            2>&1 | tee /tmp/apercu-analyse.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            python3 - <<'PY'
+          from pathlib import Path
+          lignes = Path('/tmp/apercu-analyse.log').read_text(errors='replace').splitlines()
+          texte = chr(10).join(lignes[-160:])
+          texte = texte.replace('%', '%25').replace(chr(13), '%0D').replace(chr(10), '%0A')
+          print('::error::Détail de flutter analyze :%0A' + texte)
+          PY
+            exit "$status"
+          fi
 
       - name: Tester la disposition et les contrastes
         run: |
@@ -109,45 +135,6 @@ jobs:
           if [ "$status" -ne 0 ]; then python3 tool/apercu/annoter_log.py /tmp/apercu-historique-captures.log 'Captures Historique'; fi
           exit "$status"
 
-      - name: Installer Java 17 pour la recette Android
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - name: Compiler l'APK de recette Historique
-        run: |
-          if [ -n "${ANDROID_HOME:-}" ] && [ ! -d "$ANDROID_HOME/ndk/27.0.12077973" ]; then
-            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.0.12077973"
-          fi
-          flutter build apk --debug -t tool/apercu/main_historique.dart
-
-      - name: Activer KVM pour l'émulateur Android
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-
-      - name: Capturer Historique et calendrier sur Android
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 35
-          target: google_apis
-          arch: x86_64
-          profile: pixel_2
-          emulator-boot-timeout: 900
-          emulator-options: -no-window -no-snapshot -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          disable-animations: true
-          script: |
-            adb install build/app/outputs/flutter-apk/app-debug.apk
-            adb shell am start -n com.example.en_check/.MainActivity
-            sleep 8
-            mkdir -p apercu-accueil
-            adb exec-out screencap -p > apercu-accueil/historique-android.png
-            adb shell input tap 996 156
-            sleep 2
-            adb exec-out screencap -p > apercu-accueil/historique-calendrier-android.png
-
       - name: Mesurer débordements et contrastes
         id: mesures
         continue-on-error: true
@@ -160,86 +147,11 @@ jobs:
           if [ "$status" -ne 0 ]; then python3 tool/apercu/annoter_log.py /tmp/apercu-mesures.log 'Mesures'; fi
           exit "$status"
 
-      - name: Publier les captures sur la référence d'aperçu
-        if: always() && hashFiles('apercu-accueil/mesures.json') != ''
-        id: publication
-        run: |
-          set -e
-          pr='${{ github.event.pull_request.number || github.run_id }}'
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          export GIT_INDEX_FILE="$RUNNER_TEMP/apercu-index"
-          rm -f "$GIT_INDEX_FILE"
-          git read-tree --empty
-          git add -f apercu-accueil
-          arbre=$(git write-tree)
-          sha=$(git commit-tree "$arbre" -m "Aperçu accueil PR #$pr — ${GITHUB_SHA:0:12}")
-          git update-ref "refs/apercu/pr-$pr" "$sha"
-          git push --force origin "refs/apercu/pr-$pr"
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          echo "pr=$pr" >> "$GITHUB_OUTPUT"
-
-      - name: Commenter la Pull Request
-        if: always() && steps.publication.outputs.sha != ''
-        run: |
-          sha='${{ steps.publication.outputs.sha }}'
-          pr='${{ steps.publication.outputs.pr }}'
-          base="https://github.com/$GITHUB_REPOSITORY/blob/$sha/apercu-accueil"
-          {
-            echo "## Aperçu de l'accueil compilé — IA DEV 2"
-            echo
-            echo "Entreprise fictive, réseau externe bloqué. Aucun déploiement et aucune donnée réelle."
-            echo "[Tous les fichiers et mesures](https://github.com/$GITHUB_REPOSITORY/tree/$sha/apercu-accueil)"
-            echo
-            cat apercu-accueil/rapport.md
-            echo
-            echo "### Référence 412 × 869 — clair"
-            echo "![Référence clair]($base/reference-412x869-clair.png?raw=true)"
-            echo "### Référence 412 × 869 — sombre"
-            echo "![Référence sombre]($base/reference-412x869-sombre.png?raw=true)"
-            echo "### Téléphone 360 × 640 — clair"
-            echo "![Téléphone clair]($base/telephone-360x640-clair.png?raw=true)"
-            echo "### Tablette 800 × 1280 — clair"
-            echo "![Tablette clair]($base/tablette-800x1280-clair.png?raw=true)"
-            echo "### Sans Autres modes — 360 × 640"
-            echo "![Accueil sans Autres modes]($base/accueil-sans-autres-modes-360x640.png?raw=true)"
-            echo "### Pause — 360 × 640 clair"
-            echo "![Pause clair]($base/pause-360x640-clair.png?raw=true)"
-            echo "### Pause — 412 × 869 sombre"
-            echo "![Pause sombre]($base/pause-412x869-sombre.png?raw=true)"
-            echo "### Modale Ma journée — 360 × 640"
-            echo "![Modale Ma journée téléphone]($base/ma-journee-360x640-clair.png?raw=true)"
-            echo "[Modale Ma journée 412 × 869]($base/ma-journee-412x869-clair.png?raw=true)"
-            echo "### Historique — données fictives de recette, hors-ligne"
-            echo "![Historique 360 × 640]($base/historique-360x640-clair.png?raw=true)"
-            echo "[Historique 412 × 869]($base/historique-412x869-clair.png?raw=true) · [Sélecteur calendrier 360 × 640]($base/historique-calendrier-360x640-clair.png?raw=true)"
-            echo "### Captures natives Android (Pixel 2 API 35)"
-            echo "![Historique Android]($base/historique-android.png?raw=true)"
-            echo "[Sélecteur calendrier Android]($base/historique-calendrier-android.png?raw=true)"
-            echo "### Checklist 1/3 puis Paramètres — 360 × 640"
-            echo "![Badge checklist 1/3]($base/checklist-incomplete-360x640.png?raw=true)"
-            echo "[Voir la checklist déplacée dans Paramètres]($base/parametres-checklist-360x640.png?raw=true)"
-          } >/tmp/apercu-commentaire.md
-          gh pr comment "$pr" --body-file /tmp/apercu-commentaire.md
-
-      - name: Verdict du contrôle
-        if: always()
-        run: |
-          echec=0
-          if [ '${{ steps.captures.outcome }}' != 'success' ]; then
-            echo '::error::Les captures ne sont pas toutes vertes.'
-            echec=1
-          fi
-          if [ '${{ steps.captures_historique.outcome }}' != 'success' ]; then
-            echo '::error::Les captures Historique/calendrier ne sont pas toutes vertes.'
-            echec=1
-          fi
-          if [ '${{ steps.mesures.outcome }}' != 'success' ]; then
-            echo '::error::Les mesures visuelles ne sont pas toutes vertes.'
-            echec=1
-          fi
-          if [ ! -f apercu-accueil/controle.json ]; then
-            echo '::error::Aucun rapport de contrôle produit.'
-            echec=1
-          fi
-          exit "$echec"
+      - name: Joindre les captures PWA comme artefact de recette
+        if: always() && hashFiles('apercu-accueil/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: captures-pwa
+          path: apercu-accueil/
+          if-no-files-found: warn
+          retention-days: 14

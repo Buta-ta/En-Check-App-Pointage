@@ -4239,7 +4239,7 @@ class _PointageScreenState extends State<PointageScreen> {
               icon: Icons.home_filled,
               label: 'Accueil',
               actif: true,
-              onTap: () {},
+              onTap: () => Navigator.of(context).popUntil((route) => route.isFirst),
             ),
           ),
           Expanded(
@@ -4408,6 +4408,17 @@ class _PointageScreenState extends State<PointageScreen> {
 
   // NAVIGATION VERS LES PAGES (une page = une action)
 
+  /// Annule une identification et revient à l'écran public de départ.
+  /// Le parcours est détruit ; aucune validation métier n'est appelée.
+  void _retourAccueilPublic() {
+    numeroMatricule = '';
+    codePin = '';
+    afficherPin = false;
+    _modeSelectionne = null;
+    FocusManager.instance.primaryFocus?.unfocus();
+    Navigator.of(context).popUntil((route) => route.isFirst);
+  }
+
   Future<void> _ouvrirPagePause() async {
     final entrepriseId = entrepriseSelectionnee?['id']?.toString() ?? '';
     final employe = await Navigator.push<Map<String, dynamic>?>(
@@ -4421,6 +4432,7 @@ class _PointageScreenState extends State<PointageScreen> {
           matriculePrefix:
               entrepriseSelectionnee?['matricule_prefix']?.toString() ?? '',
           maquettePause: true,
+          onAccueil: _retourAccueilPublic,
         ),
       ),
     );
@@ -4479,6 +4491,8 @@ class _PointageScreenState extends State<PointageScreen> {
           entrepriseId: entrepriseId,
           matriculePrefix:
               entrepriseSelectionnee?['matricule_prefix']?.toString() ?? '',
+          maquettePointage: true,
+          onAccueil: _retourAccueilPublic,
         ),
       ),
     );

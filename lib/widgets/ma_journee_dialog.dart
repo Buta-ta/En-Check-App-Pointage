@@ -40,11 +40,20 @@ class _MaJourneeDialogState extends State<MaJourneeDialog> {
 
   @override
   void dispose() {
+    _matriculeController.clear();
+    _pinController.clear();
     _matriculeController.dispose();
     _pinController.dispose();
     _matriculeFocus.dispose();
     _pinFocus.dispose();
     super.dispose();
+  }
+
+  void _annuler() {
+    _matriculeController.clear();
+    _pinController.clear();
+    FocusScope.of(context).unfocus();
+    Navigator.of(context).pop();
   }
 
   Future<void> _consulter() async {
@@ -93,9 +102,10 @@ class _MaJourneeDialogState extends State<MaJourneeDialog> {
   Widget build(BuildContext context) {
     final taille = MediaQuery.sizeOf(context);
     final clavier = MediaQuery.viewInsetsOf(context).bottom;
-    final exempleMatricule = widget.prefixeEntreprise.trim().isEmpty
-        ? 'ENN'
-        : widget.prefixeEntreprise.trim().toUpperCase();
+    final prefixe = widget.prefixeEntreprise
+        .trim()
+        .toUpperCase()
+        .replaceFirst(RegExp(r'-+$'), '');
 
     return AlertDialog(
       scrollable: true,
@@ -148,14 +158,40 @@ class _MaJourneeDialogState extends State<MaJourneeDialog> {
             keyboardType: TextInputType.text,
             textCapitalization: TextCapitalization.characters,
             textInputAction: TextInputAction.next,
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9-]')),
+            ],
             autocorrect: false,
             enableSuggestions: false,
             enabled: !_verificationEnCours,
             onSubmitted: (_) => _pinFocus.requestFocus(),
             decoration: InputDecoration(
               labelText: 'Matricule',
-              hintText: 'Ex. $exempleMatricule-0002',
-              prefixIcon: const Icon(Icons.badge_outlined),
+              hintText: 'Ex. 0002',
+              prefixIcon: Row(
+                key: const Key('ma-journee-prefixe'),
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(width: 14),
+                  const Icon(Icons.badge_outlined),
+                  if (prefixe.isNotEmpty) ...[
+                    const SizedBox(width: 8),
+                    Text(
+                      '$prefixe-',
+                      style: const TextStyle(
+                        color: EnCheckColors.textePrincipal,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                  ] else
+                    const SizedBox(width: 14),
+                ],
+              ),
+              prefixIconConstraints: const BoxConstraints(
+                minWidth: 0,
+                minHeight: 0,
+              ),
               filled: true,
               fillColor: EnCheckColors.blanc,
               border: OutlineInputBorder(
@@ -207,7 +243,7 @@ class _MaJourneeDialogState extends State<MaJourneeDialog> {
       actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
       actions: [
         TextButton(
-          onPressed: _verificationEnCours ? null : () => Navigator.pop(context),
+          onPressed: _verificationEnCours ? null : _annuler,
           child: const Text(
             'ANNULER',
             style: TextStyle(color: EnCheckColors.vertAccent),

@@ -3,14 +3,11 @@
 // 🏠 ACCUEIL — code entreprise (page 1 de la refonte design)
 // ═══════════════════════════════════════════════════════════
 //
-//  MAQUETTE VALIDÉE le 27/10 : frise raphia (motif par défaut) en haut,
-//  plaque logo « En-Check — On gère ! », carte CODE ENTREPRISE, bouton
-//  « Se connecter », modes appareil (privé / kiosque), ligne technique.
-//  Le bouton ⚙️ ouvre le panneau « Motif culturel » (Raphia, Adinkra,
-//  Bogolan, Zoulou — Raphia = défaut).
+//  Écran de configuration initiale : entreprise, mode de l'appareil et
+//  apparence. Après validation, l'application ouvre l'écran public « Commencer ».
 //
-//  ⚠️ La logique de connexion (_verifierCode) est inchangée : lecture du
-//  code dans `enterprises`, sauvegarde des modules, puis PointageScreen.
+//  La logique de connexion (_verifierCode) est inchangée : lecture du code
+//  dans `enterprises` et sauvegarde des modules.
 // ═══════════════════════════════════════════════════════════
 
 import 'package:flutter/material.dart';
@@ -22,7 +19,7 @@ import '../services/supabase_service.dart';
 import '../widgets/frise_motif.dart';
 import '../widgets/panneau_motif.dart';
 import '../widgets/logo_empreinte.dart';
-import 'pointage_screen.dart';
+import 'public_start_screen.dart';
 
 class WelcomeScreen extends StatefulWidget {
   const WelcomeScreen({super.key});
@@ -116,7 +113,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
         if (mounted) {
           Navigator.pushReplacement(
             context,
-            MaterialPageRoute(builder: (context) => const PointageScreen()),
+            MaterialPageRoute(builder: (context) => const PublicStartScreen()),
           );
         }
       } else {

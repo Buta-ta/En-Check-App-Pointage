@@ -1,10 +1,10 @@
 // lib/widgets/panneau_motif.dart
 // ═══════════════════════════════════════════════════════════
-// 🧵 PANNEAU « MOTIF CULTUREL » — partagé (accueil + pointage)
+// 🧵 APPARENCE — motif d'interface partagé (accueil + pointage)
 // ═══════════════════════════════════════════════════════════
 //
-//  Le bouton ⚙️/« Paramètres » ouvre ce panneau. Raphia (Kuba) est le
-//  motif PAR DÉFAUT ; le choix est enregistré sur l'appareil.
+//  Le bouton « Paramètres » ouvre ce panneau. Le choix d'apparence est
+//  enregistré sur l'appareil ; aucune provenance n'est attribuée sans source.
 //  ⌨️ Touche Échap (clavier physique) = fermer le panneau.
 // ═══════════════════════════════════════════════════════════
 
@@ -53,7 +53,7 @@ Future<void> ouvrirPanneauMotif(BuildContext context) async {
                     children: [
                       const Expanded(
                         child: Text(
-                          'Motif culturel',
+                          'Apparence',
                           style: TextStyle(
                             fontSize: 21,
                             fontWeight: FontWeight.w800,
@@ -68,8 +68,64 @@ Future<void> ouvrirPanneauMotif(BuildContext context) async {
                     ],
                   ),
                   const Text(
-                    'Choisissez le motif de votre entreprise',
+                    'Motif d’interface',
                     style: TextStyle(fontSize: 13.5, color: EnCheckColors.gris),
+                  ),
+                  const SizedBox(height: 14),
+                  Container(
+                    key: const Key('apparence-apercu-motif'),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: choix.couleurTint,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: choix.couleurAccent.withOpacity(0.36),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(10),
+                          child: Image.asset(
+                            choix.asset,
+                            width: 104,
+                            height: 76,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => SizedBox(
+                              width: 104,
+                              height: 76,
+                              child: ColoredBox(color: choix.couleurBouton),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Motif textile géométrique',
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                  color: EnCheckColors.brunProfond,
+                                ),
+                              ),
+                              TextButton.icon(
+                                key: const Key('apparence-a-propos-motif'),
+                                onPressed: () => _afficherAproposMotif(sheetContext),
+                                style: TextButton.styleFrom(
+                                  foregroundColor: choix.couleurBouton,
+                                  padding: const EdgeInsets.symmetric(vertical: 6),
+                                ),
+                                icon: const Icon(Icons.info_outline, size: 17),
+                                label: const Text('À propos du motif'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                   // Décision 3 : la checklist ne prend plus de place sur
                   // l'accueil ; elle reste disponible ici jusqu'à sa fin.
@@ -157,6 +213,22 @@ Future<void> ouvrirPanneauMotif(BuildContext context) async {
     },
   );
 }
+
+Future<void> _afficherAproposMotif(BuildContext context) => showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('À propos du motif'),
+        content: const Text(
+          'Ce motif est utilisé comme texture de l’interface. Aucune tradition ni provenance géographique ne lui est attribuée sans source vérifiée.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('FERMER'),
+          ),
+        ],
+      ),
+    );
 
 Widget _vignetteMotif(
   MotifCulturel motif, {

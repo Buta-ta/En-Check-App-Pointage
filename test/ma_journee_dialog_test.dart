@@ -11,6 +11,7 @@ const _employeTest = <String, dynamic>{
 
 Future<void> _ouvrirDialog(
   WidgetTester tester, {
+  String prefixe = 'ENN',
   required Future<ResultatVerificationJournee> Function(String, String) verifier,
   required void Function(Map<String, dynamic>?) apresFermeture,
 }) async {
@@ -23,7 +24,7 @@ Future<void> _ouvrirDialog(
               final resultat = await showDialog<Map<String, dynamic>>(
                 context: context,
                 builder: (_) => MaJourneeDialog(
-                  prefixeEntreprise: 'ENN',
+                  prefixeEntreprise: prefixe,
                   verifier: verifier,
                 ),
               );
@@ -62,8 +63,9 @@ void main() {
     expect(find.text(
       'Saisissez votre matricule et votre PIN pour consulter vos pointages du jour. Aucun pointage ne sera enregistré.',
     ), findsOneWidget);
-    expect(find.text('Ex. ENN-0002'), findsOneWidget);
+    expect(find.text('Ex. 0002'), findsOneWidget);
     expect(find.text('Ex. 1234'), findsOneWidget);
+    expect(find.text('ENN-'), findsOneWidget);
     expect(tester.widget<TextField>(find.byKey(const Key('ma-journee-matricule'))).controller!.text, isEmpty);
     expect(tester.widget<TextField>(find.byKey(const Key('ma-journee-pin'))).controller!.text, isEmpty);
     expect(tester.widget<TextField>(find.byKey(const Key('ma-journee-matricule'))).focusNode!.hasFocus, isFalse);
@@ -80,7 +82,10 @@ void main() {
     expect(champMatricule.textInputAction, TextInputAction.next);
 
     await tester.tap(matricule);
-    await tester.enterText(matricule, 'enn-0002');
+    await tester.enterText(matricule, '0002');
+    await tester.enterText(matricule, '');
+    expect(find.text('ENN-'), findsOneWidget);
+    await tester.enterText(matricule, '0002');
     await tester.testTextInput.receiveAction(TextInputAction.next);
     await tester.pump();
     expect(tester.widget<TextField>(pin).focusNode!.hasFocus, isTrue);
@@ -120,9 +125,36 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('ANNULER ferme la modale sans appeler la vérification', (tester) async {
+  testWidgets('le préfixe de l’entreprise active reste fixe et entre dans le matricule',
+      (tester) async {
+    String? matriculeVerifie;
+    await _ouvrirDialog(
+      tester,
+      prefixe: 'ACME-',
+      verifier: (matricule, _) async {
+        matriculeVerifie = matricule;
+        return const ResultatVerificationJournee.reussite(_employeTest);
+      },
+      apresFermeture: (_) {},
+    );
+
+    final champ = find.byKey(const Key('ma-journee-matricule'));
+    expect(find.text('ACME-'), findsOneWidget);
+    expect(find.text('Ex. 0002'), findsOneWidget);
+    await tester.enterText(champ, '0042');
+    await tester.enterText(find.byKey(const Key('ma-journee-pin')), '5678');
+    await tester.tap(find.byKey(const Key('ma-journee-consulter')));
+    await tester.pumpAndSettle();
+    expect(matriculeVerifie, 'ACME-0042');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('ANNULER ferme la modale, efface les saisies et ne vérifie pas',
+      (tester) async {
     var nombreVerifications = 0;
     Map<String, dynamic>? resultatDialog = _employeTest;
+    late TextEditingController matriculeController;
+    late TextEditingController pinController;
 
     await _ouvrirDialog(
       tester,
@@ -133,9 +165,19 @@ void main() {
       apresFermeture: (resultat) => resultatDialog = resultat,
     );
 
+    matriculeController = tester
+        .widget<TextField>(find.byKey(const Key('ma-journee-matricule')))
+        .controller!;
+    pinController = tester
+        .widget<TextField>(find.byKey(const Key('ma-journee-pin')))
+        .controller!;
+    await tester.enterText(find.byKey(const Key('ma-journee-matricule')), '0002');
+    await tester.enterText(find.byKey(const Key('ma-journee-pin')), '1234');
     await tester.tap(find.text('ANNULER'));
     await tester.pumpAndSettle();
     expect(nombreVerifications, 0);
+    expect(matriculeController.text, isEmpty);
+    expect(pinController.text, isEmpty);
     expect(resultatDialog, isNull);
     expect(find.text('MA JOURNÉE'), findsNothing);
   });
