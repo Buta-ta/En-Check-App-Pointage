@@ -186,7 +186,9 @@ jobs:
             adb shell am start -n com.example.en_check/.MainActivity
             sleep 5
             adb exec-out screencap -p > apercu-accueil/entree-android.png
-            read largeur hauteur <<<"$(adb shell wm size | sed -n 's/.*: \([0-9]*\)x\([0-9]*\).*/\1 \2/p')"
+            dimensions="$(adb shell wm size | sed -n 's/.*: \([0-9]*\)x\([0-9]*\).*/\1 \2/p' | tr -d '\r')"
+            largeur="$(printf '%s\n' "$dimensions" | awk '{print $1}')"
+            hauteur="$(printf '%s\n' "$dimensions" | awk '{print $2}')"
             adb shell input tap "$((largeur / 2))" "$((hauteur * 68 / 100))"
             sleep 3
             adb exec-out screencap -p > apercu-accueil/identification-pointage-android.png
