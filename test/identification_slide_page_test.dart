@@ -1,5 +1,6 @@
 import 'package:en_check/screens/identification_slide_page.dart';
 import 'package:en_check/services/theme_service.dart';
+import 'package:en_check/widgets/frise_motif.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
@@ -47,6 +48,11 @@ void main() {
     expect(find.text('Accueil'), findsNothing);
     expect(find.text('Retour'), findsOneWidget);
     expect(find.byKey(const Key('pointage-scene-retour')), findsOneWidget);
+    final frise = tester.widget<FriseMotif>(
+      find.byKey(const Key('pointage-frise')),
+    );
+    expect(frise.hauteur, 40);
+    expect(frise.tuilee, isTrue);
 
     final themeButton = find.byKey(const Key('pointage-theme'));
     expect(themeButton, findsOneWidget);

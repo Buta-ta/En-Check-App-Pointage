@@ -11,6 +11,7 @@ import '../services/pause_service.dart'; // ⏸ LOT D — les pauses
 import '../services/geofencing_service.dart'; // ⏸ LOT D — mention « Hors site »
 import '../services/motif_service.dart';
 import '../services/historique_periode.dart';
+import '../theme/accueil_palette.dart';
 import '../widgets/sans_etirement.dart';
 
 class HistoriqueScreen extends StatefulWidget {
@@ -45,6 +46,15 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
   /// l'écran précédent — mêmes identifiants, le rafraîchissement par jeton
   /// n'étant accepté que pour le même employé.
   Map<String, dynamic> get _fiche => _ficheFraiche ?? widget.employee;
+
+  bool get _estSombre => Theme.of(context).brightness == Brightness.dark;
+
+  AccueilPalette get _palette =>
+      AccueilPalette.pour(MotifService.actif.value, _estSombre);
+
+  Color get _accentAmbre => _estSombre
+      ? const Color(0xFFE0BE82)
+      : EnCheckColors.terreChaude;
 
   /// Message à afficher quand la lecture a échoué. Sans lui, un refus
   /// d'autorisation sur la table `attendances` produisait une liste vide et
@@ -262,10 +272,13 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
       _programmerRappel();
       final horsLigne = !ConnectivityService.isOnline;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(horsLigne
-            ? '⏸ Pause enregistrée hors-ligne : elle sera synchronisée.'
-            : '⏸ Pause enregistrée. Bonne pause !'),
-        backgroundColor: EnCheckColors.terreChaude,
+        content: Text(
+          horsLigne
+              ? '⏸ Pause enregistrée hors-ligne : elle sera synchronisée.'
+              : '⏸ Pause enregistrée. Bonne pause !',
+          style: TextStyle(color: _palette.surPrimaire),
+        ),
+        backgroundColor: _estSombre ? _palette.primaire : EnCheckColors.terreChaude,
       ));
     } catch (e) {
       if (!mounted) return;
@@ -333,10 +346,12 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
     void afficher() {
       if (_rappelAffiche || !mounted) return;
       setState(() => _rappelAffiche = true);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(
-            'Toujours en pause ? Touche « Je reprends » si tu es de retour.'),
-        backgroundColor: EnCheckColors.terreChaude,
+          'Toujours en pause ? Touche « Je reprends » si tu es de retour.',
+          style: TextStyle(color: _palette.surPrimaire),
+        ),
+        backgroundColor: _estSombre ? _palette.primaire : EnCheckColors.terreChaude,
       ));
     }
 
@@ -356,13 +371,12 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
   Widget _pastilleHorsSite() => Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: BoxDecoration(
-          color: EnCheckColors.terreChaude.withOpacity(0.12),
+          color: _accentAmbre.withOpacity(0.12),
           borderRadius: BorderRadius.circular(12),
         ),
-        child: const Text(
+        child: Text(
           '📍 Hors site',
-          style:
-              TextStyle(fontSize: 11, color: EnCheckColors.terreChaude),
+          style: TextStyle(fontSize: 11, color: _accentAmbre),
         ),
       );
 
@@ -389,7 +403,7 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: debutIso != null
-              ? EnCheckColors.terreChaude.withOpacity(0.55)
+              ? _accentAmbre.withOpacity(0.55)
               : EnCheckColors.succes.withOpacity(0.35),
         ),
       ),
@@ -399,8 +413,7 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
           if (debutIso != null) ...[
             Row(
               children: [
-                const Icon(Icons.pause_circle,
-                    color: EnCheckColors.terreChaude, size: 18),
+                Icon(Icons.pause_circle, color: _accentAmbre, size: 18),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -422,9 +435,9 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
               const SizedBox(height: 8),
               Text(
                 'Pause prévue ${_pausePrevue!['debut']}–${_pausePrevue!['fin']}',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 12,
-                  color: EnCheckColors.gris,
+                  color: _palette.texteSecondaire,
                   fontStyle: FontStyle.italic,
                 ),
               ),
@@ -436,18 +449,17 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
                 margin: const EdgeInsets.only(top: 10),
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: EnCheckColors.terreChaude.withOpacity(0.12),
+                  color: _accentAmbre.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Row(
+                child: Row(
                   children: [
-                    Icon(Icons.alarm, size: 16, color: EnCheckColors.terreChaude),
-                    SizedBox(width: 8),
+                    Icon(Icons.alarm, size: 16, color: _accentAmbre),
+                    const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         'Toujours en pause ? Touche « Je reprends » si tu es de retour.',
-                        style: TextStyle(
-                            fontSize: 12, color: EnCheckColors.terreChaude),
+                        style: TextStyle(fontSize: 12, color: _accentAmbre),
                       ),
                     ),
                   ],
@@ -456,8 +468,9 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
             ],
 
             const SizedBox(height: 12),
-            const Text('Motif facultatif :',
-                style: TextStyle(fontSize: 12, color: EnCheckColors.gris)),
+            Text('Motif facultatif :',
+                style: TextStyle(
+                    fontSize: 12, color: _palette.texteSecondaire)),
             const SizedBox(height: 6),
             Wrap(
               spacing: 8,
@@ -467,7 +480,7 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
                   ChoiceChip(
                     label: Text(motif),
                     selected: motifActif == motif,
-                    selectedColor: EnCheckColors.terreChaude.withOpacity(0.2),
+                    selectedColor: _accentAmbre.withOpacity(0.2),
                     onSelected: (_) => _choisirMotif(motif),
                   ),
               ],
@@ -494,7 +507,7 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
                       : Icons.radio_button_unchecked,
                   color: serviceDepuis != null
                       ? EnCheckColors.succes
-                      : EnCheckColors.gris,
+                      : _palette.texteSecondaire,
                   size: 18,
                 ),
                 const SizedBox(width: 8),
@@ -520,8 +533,11 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
                 icon: const Icon(Icons.pause),
                 label: const Text('Je pars en pause'),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: EnCheckColors.terreChaude,
-                  foregroundColor: EnCheckColors.blanc,
+                  backgroundColor:
+                      _estSombre ? _accentAmbre : EnCheckColors.terreChaude,
+                  foregroundColor: _estSombre
+                      ? const Color(0xFF2A241A)
+                      : EnCheckColors.blanc,
                 ),
               ),
             ),
@@ -677,11 +693,12 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
     final bool estTelephone =
         tailleFenetre.width < 620 || tailleFenetre.height < 520;
 
+    final palette = _palette;
     return Scaffold(
-      backgroundColor: EnCheckColors.fondPage,
+      backgroundColor: palette.fond,
       appBar: AppBar(
-        backgroundColor: EnCheckColors.navFond,
-        foregroundColor: EnCheckColors.brunProfond,
+        backgroundColor: palette.navFond,
+        foregroundColor: palette.texte,
         elevation: 0,
         title: const Text(
           'HISTORIQUE',
@@ -886,10 +903,10 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
           ],
 
           if (chargement)
-            const SizedBox(
+            SizedBox(
               height: 220,
               child: Center(
-                child: CircularProgressIndicator(color: EnCheckColors.vertAccent),
+                child: CircularProgressIndicator(color: _palette.lien),
               ),
             )
           else if (pointages.isEmpty && erreur != null)
@@ -911,19 +928,19 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: EnCheckColors.terreChaude.withOpacity(0.12),
+        color: _accentAmbre.withOpacity(0.12),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: EnCheckColors.terreChaude.withOpacity(0.4)),
+        border: Border.all(color: _accentAmbre.withOpacity(0.4)),
       ),
       child: Row(
         children: [
-          const Icon(Icons.lock_clock, color: EnCheckColors.terreChaude, size: 20),
+          Icon(Icons.lock_clock, color: _accentAmbre, size: 20),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
               _messageSession(_sessionRaison!),
-              style: const TextStyle(
-                color: EnCheckColors.brunProfond,
+              style: TextStyle(
+                color: _palette.texte,
                 fontSize: 13,
                 height: 1.4,
               ),
@@ -939,9 +956,11 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.history, size: 80, color: EnCheckColors.gris.withOpacity(0.5)),
+          Icon(Icons.history,
+              size: 80, color: _palette.texteSecondaire.withOpacity(0.5)),
           const SizedBox(height: 20),
-          const Text('Aucun pointage', style: TextStyle(color: EnCheckColors.gris, fontSize: 18)),
+          Text('Aucun pointage',
+              style: TextStyle(color: _palette.texteSecondaire, fontSize: 18)),
         ],
       ),
     );
@@ -958,24 +977,31 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.cloud_off, size: 70, color: EnCheckColors.gris.withOpacity(0.5)),
+            Icon(Icons.cloud_off,
+                size: 70, color: _palette.texteSecondaire.withOpacity(0.5)),
             const SizedBox(height: 20),
-            const Text(
+            Text(
               'Historique indisponible',
-              style: TextStyle(color: EnCheckColors.gris, fontSize: 18, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                  color: _palette.texteSecondaire,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 12),
             Text(
               erreur!,
-              style: TextStyle(color: EnCheckColors.gris.withOpacity(0.8), fontSize: 14, height: 1.5),
+              style: TextStyle(
+                  color: _palette.texteSecondaire.withOpacity(0.8),
+                  fontSize: 14,
+                  height: 1.5),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 24),
             TextButton.icon(
               onPressed: _chargerHistorique,
-              icon: const Icon(Icons.refresh, color: EnCheckColors.terreChaude),
-              label: const Text('Réessayer', style: TextStyle(color: EnCheckColors.terreChaude)),
+              icon: Icon(Icons.refresh, color: _palette.lien),
+              label: Text('Réessayer', style: TextStyle(color: _palette.lien)),
             ),
           ],
         ),
@@ -991,6 +1017,9 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
 
   Future<void> _ouvrirCalendrier() async {
     final maintenant = HeurePointage.maintenant();
+    final palette = _palette;
+    final surfaceCalendrier =
+        _estSombre ? palette.surface : EnCheckColors.cremePapier;
     final choisi = await showDatePicker(
       context: context,
       initialDate: _dateSelectionnee,
@@ -1001,17 +1030,41 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
       helpText: 'Consulter les pointages du jour',
       cancelText: 'ANNULER',
       confirmText: 'CHOISIR',
-      builder: (context, child) => Theme(
-        data: Theme.of(context).copyWith(
-          colorScheme: Theme.of(context).colorScheme.copyWith(
-            primary: EnCheckColors.vertAccent,
-            onPrimary: EnCheckColors.blanc,
-            surface: EnCheckColors.cremePapier,
-            onSurface: EnCheckColors.brunProfond,
+      builder: (context, child) {
+        final theme = Theme.of(context);
+        final couleurs = theme.colorScheme.copyWith(
+          primary: palette.primaire,
+          onPrimary: palette.surPrimaire,
+          secondary: palette.lien,
+          surface: surfaceCalendrier,
+          onSurface: palette.texte,
+          onSurfaceVariant: palette.texteSecondaire,
+          surfaceContainerLowest: surfaceCalendrier,
+          surfaceContainerLow: surfaceCalendrier,
+          surfaceContainer: surfaceCalendrier,
+          surfaceContainerHigh: surfaceCalendrier,
+          surfaceContainerHighest: surfaceCalendrier,
+        );
+        return Theme(
+          data: theme.copyWith(
+            colorScheme: couleurs,
+            textButtonTheme: TextButtonThemeData(
+              style: TextButton.styleFrom(foregroundColor: palette.lien),
+            ),
+            datePickerTheme: theme.datePickerTheme.copyWith(
+              backgroundColor: surfaceCalendrier,
+              headerBackgroundColor: palette.primaire,
+              headerForegroundColor: palette.surPrimaire,
+              dividerColor: palette.filet,
+              cancelButtonStyle:
+                  TextButton.styleFrom(foregroundColor: palette.lien),
+              confirmButtonStyle:
+                  TextButton.styleFrom(foregroundColor: palette.lien),
+            ),
           ),
-        ),
-        child: child!,
-      ),
+          child: child!,
+        );
+      },
     );
     if (choisi == null || !mounted) return;
     setState(() => _dateSelectionnee = HistoriquePeriode.jour(choisi));
@@ -1043,12 +1096,13 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(Icons.event_available_outlined,
-                size: 52, color: EnCheckColors.vertAccent.withOpacity(0.55)),
+                size: 52, color: _palette.lien.withOpacity(0.75)),
             const SizedBox(height: 12),
             Text(
               'Aucun pointage le $dateTexte.',
               textAlign: TextAlign.center,
-              style: const TextStyle(color: EnCheckColors.gris, fontSize: 16),
+              style: TextStyle(
+                  color: _palette.texteSecondaire, fontSize: 16),
             ),
           ],
         ),
@@ -1082,7 +1136,7 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
       key: const Key('historique-evenements-date-inconnue'),
       margin: const EdgeInsets.only(top: 4, bottom: 12),
       decoration: BoxDecoration(
-        color: EnCheckColors.blanc,
+        color: _palette.surface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: EnCheckColors.erreur.withOpacity(0.26)),
       ),
@@ -1226,9 +1280,9 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
     return Container(
       key: const Key('historique-carte-jour'),
       decoration: BoxDecoration(
-        color: EnCheckColors.blanc,
+        color: _palette.surface,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: EnCheckColors.sableDore.withOpacity(0.28)),
+        border: Border.all(color: _palette.bordure.withOpacity(0.8)),
         boxShadow: [
           BoxShadow(
             color: EnCheckColors.brunProfond.withOpacity(0.08),
@@ -1250,15 +1304,16 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(titreJour, style: const TextStyle(
-                      color: EnCheckColors.brunProfond,
+                    Text(titreJour, style: TextStyle(
+                      color: _palette.texte,
                       fontSize: 17,
                       fontWeight: FontWeight.w600,
                     )),
                     const SizedBox(height: 3),
                     Text(
                       '${pointagesJour.length} événement${pointagesJour.length == 1 ? '' : 's'}',
-                      style: const TextStyle(color: EnCheckColors.gris, fontSize: 12),
+                      style: TextStyle(
+                          color: _palette.texteSecondaire, fontSize: 12),
                     ),
                   ],
                 ),
@@ -1271,13 +1326,13 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     decoration: BoxDecoration(
-                      color: (sortiManquante ? EnCheckColors.erreur : EnCheckColors.vertAccent).withOpacity(0.10),
+                      color: (sortiManquante ? EnCheckColors.erreur : _palette.lien).withOpacity(0.14),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Text(
                       _formaterDuree(totalDuree),
                       style: TextStyle(
-                        color: sortiManquante ? EnCheckColors.erreur : EnCheckColors.vertAccent,
+                        color: sortiManquante ? EnCheckColors.erreur : _palette.lien,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -1286,15 +1341,16 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
               ],
             ),
           ),
-          const Divider(height: 1, color: EnCheckColors.sableClair),
+          Divider(height: 1, color: _palette.filet),
           for (var i = 0; i < pointagesJour.length; i++)
             _construireEvenement(pointagesJour[i], i),
           if (_limiteAtteinte)
-            const Padding(
+            Padding(
               padding: EdgeInsets.fromLTRB(16, 8, 16, 12),
               child: Text(
                 'Historique limité aux 500 derniers événements autorisés.',
-                style: TextStyle(color: EnCheckColors.gris, fontSize: 12),
+                style: TextStyle(
+                    color: _palette.texteSecondaire, fontSize: 12),
               ),
             ),
         ],
@@ -1307,7 +1363,7 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
       {bool dateInconnue = false}) {
     final estEntree = pointage['check_type'] == 'in';
     final enAttente = pointage['sync_pending'] == true;
-    final couleur = estEntree ? EnCheckColors.vertAccent : EnCheckColors.terreChaude;
+    final couleur = estEntree ? _palette.lien : _accentAmbre;
     final heure = HeurePointage.heureDePointage(pointage);
     final heureCourte = heure.length >= 5 ? heure.substring(0, 5) : heure;
 
@@ -1318,7 +1374,7 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
       decoration: BoxDecoration(
         border: index == 0
             ? null
-            : const Border(top: BorderSide(color: EnCheckColors.sableClair)),
+            : Border(top: BorderSide(color: _palette.filet)),
       ),
       child: Row(
         children: [
@@ -1338,8 +1394,8 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Text(estEntree ? 'Entrée' : 'Sortie', style: const TextStyle(
-                  color: EnCheckColors.brunProfond,
+                Text(estEntree ? 'Entrée' : 'Sortie', style: TextStyle(
+                  color: _palette.texte,
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
                 )),
@@ -1348,7 +1404,7 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
                   Text(
                     enAttente ? 'En attente de synchronisation' : 'Heure non vérifiable',
                     style: TextStyle(
-                      color: enAttente ? EnCheckColors.terreChaude : EnCheckColors.erreur,
+                      color: enAttente ? _accentAmbre : EnCheckColors.erreur,
                       fontSize: 11,
                     ),
                   ),
@@ -1360,8 +1416,8 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
           Text(
             heureCourte,
             textAlign: TextAlign.end,
-            style: const TextStyle(
-              color: EnCheckColors.brunProfond,
+            style: TextStyle(
+              color: _palette.texte,
               fontSize: 14,
               fontWeight: FontWeight.w600,
               fontFamily: 'JetBrainsMono',

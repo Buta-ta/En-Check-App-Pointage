@@ -219,16 +219,22 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
                       ),
                       ValueListenableBuilder<MotifCulturel>(
                         valueListenable: MotifService.actif,
-                        builder: (context, motif, _) => FriseMotif(
-                          key: widget.maquettePause
-                              ? const Key('pause-frise')
-                              : null,
-                          motif: motif,
-                          hauteur: widget.maquettePause ? 40 : 10,
-                          tuilee: widget.maquettePause,
-                          opacite: widget.maquettePause ? 0.96 : 1,
-                          fond: palettePause?.carteDouce,
-                        ),
+                        builder: (context, motif, _) {
+                          final friseVisible =
+                              widget.maquettePause || widget.maquettePointage;
+                          return FriseMotif(
+                            key: widget.maquettePause
+                                ? const Key('pause-frise')
+                                : widget.maquettePointage
+                                    ? const Key('pointage-frise')
+                                    : null,
+                            motif: motif,
+                            hauteur: friseVisible ? 40 : 10,
+                            tuilee: friseVisible,
+                            opacite: friseVisible ? 0.96 : 1,
+                            fond: palettePause?.carteDouce,
+                          );
+                        },
                       ),
                       Padding(
                         padding: const EdgeInsets.symmetric(
@@ -379,14 +385,22 @@ class _IdentificationSlidePageState extends State<IdentificationSlidePage> {
         if (!clavierOuvert)
           ValueListenableBuilder<MotifCulturel>(
             valueListenable: MotifService.actif,
-            builder: (context, motif, _) => FriseMotif(
-              key: widget.maquettePause ? const Key('pause-frise') : null,
-              motif: motif,
-              hauteur: widget.maquettePause ? 40 : 8,
-              tuilee: widget.maquettePause,
-              opacite: widget.maquettePause ? 0.96 : 1,
-              fond: palette?.carteDouce,
-            ),
+            builder: (context, motif, _) {
+              final friseVisible =
+                  widget.maquettePause || widget.maquettePointage;
+              return FriseMotif(
+                key: widget.maquettePause
+                    ? const Key('pause-frise')
+                    : widget.maquettePointage
+                        ? const Key('pointage-frise')
+                        : null,
+                motif: motif,
+                hauteur: friseVisible ? 40 : 8,
+                tuilee: friseVisible,
+                opacite: friseVisible ? 0.96 : 1,
+                fond: palette?.carteDouce,
+              );
+            },
           ),
         // Ne défile QUE si la configuration ne permet pas tout d'afficher
         // d'un coup (jamais en silence : la bande « faites défiler » le dit).

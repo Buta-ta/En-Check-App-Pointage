@@ -31,6 +31,7 @@ const SCENARIOS_ACCUEIL = [
   { nom: 'pause-412x869-clair', w: 412, h: 869, dpr: 2, mobile: true, ouvrirPause: true },
   { nom: 'pause-412x869-sombre', w: 412, h: 869, dpr: 2, mobile: true, sombre: true, ouvrirPause: true },
   { nom: 'ma-journee-360x640-clair', w: 360, h: 640, dpr: 2, mobile: true, ouvrirMaJournee: true },
+  { nom: 'ma-journee-360x640-sombre', w: 360, h: 640, dpr: 2, mobile: true, sombre: true, ouvrirMaJournee: true },
   { nom: 'ma-journee-412x869-clair', w: 412, h: 869, dpr: 2, mobile: true, ouvrirMaJournee: true },
   { nom: 'tablette-800x1280-clair', w: 800, h: 1280, dpr: 2, tablette: true },
   { nom: 'tablette-800x1280-sombre', w: 800, h: 1280, dpr: 2, tablette: true, sombre: true },
@@ -49,7 +50,10 @@ const SCENARIOS_ACCUEIL = [
 const SCENARIOS_HISTORIQUE = [
   { nom: 'historique-360x640-clair', w: 360, h: 640, dpr: 2, mobile: true },
   { nom: 'historique-412x869-clair', w: 412, h: 869, dpr: 2, mobile: true },
+  { nom: 'historique-360x640-sombre', w: 360, h: 640, dpr: 2, mobile: true, sombre: true },
+  { nom: 'historique-412x869-sombre', w: 412, h: 869, dpr: 2, mobile: true, sombre: true },
   { nom: 'historique-calendrier-360x640-clair', w: 360, h: 640, dpr: 2, mobile: true, ouvrirCalendrier: true },
+  { nom: 'historique-calendrier-360x640-sombre', w: 360, h: 640, dpr: 2, mobile: true, ouvrirCalendrier: true, sombre: true },
 ];
 const SCENARIOS = process.env.APERCU_MODE === 'historique'
   ? SCENARIOS_HISTORIQUE

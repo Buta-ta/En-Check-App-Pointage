@@ -3698,12 +3698,12 @@ class _PointageScreenState extends State<PointageScreen> {
                   left: 0,
                   right: 0,
                   bottom: 0,
-                  height: 20,
+                  height: 40,
                   child: RepaintBoundary(
                     child: FriseMotif(
                       key: const Key('accueil-bandeau-motif'),
                       motif: MotifService.actif.value,
-                      hauteur: 20,
+                      hauteur: 40,
                       tuilee: true,
                       opacite: 0.92,
                       fond: palette.carteDouce,

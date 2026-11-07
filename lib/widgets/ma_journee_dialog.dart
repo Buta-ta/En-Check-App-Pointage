@@ -100,6 +100,26 @@ class _MaJourneeDialogState extends State<MaJourneeDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final sombre = theme.brightness == Brightness.dark;
+    final couleurSurface = sombre
+        ? const Color(0xFF1D1E1C)
+        : EnCheckColors.carteClaire;
+    final couleurChamp = sombre
+        ? const Color(0xFF2A2A27)
+        : EnCheckColors.blanc;
+    final couleurTexte = sombre
+        ? const Color(0xFFF5F1EA)
+        : EnCheckColors.textePrincipal;
+    final couleurSecondaire = sombre
+        ? const Color(0xFFC2BEB5)
+        : EnCheckColors.texteSecondaire;
+    final couleurAccent = sombre
+        ? const Color(0xFF9FCBC6)
+        : EnCheckColors.vertAccent;
+    final couleurBordure = sombre
+        ? const Color(0xFF4A4842)
+        : EnCheckColors.bordureClaire;
     final taille = MediaQuery.sizeOf(context);
     final clavier = MediaQuery.viewInsetsOf(context).bottom;
     final prefixe = widget.prefixeEntreprise
@@ -116,15 +136,15 @@ class _MaJourneeDialogState extends State<MaJourneeDialog> {
             .clamp(180.0, taille.height)
             .toDouble(),
       ),
-      backgroundColor: EnCheckColors.carteClaire,
+      backgroundColor: couleurSurface,
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(22),
-        side: const BorderSide(color: EnCheckColors.bordureClaire),
+        side: BorderSide(color: couleurBordure),
       ),
       title: Row(
         children: [
-          const Icon(Icons.today_outlined, color: EnCheckColors.vertAccent),
+          Icon(Icons.today_outlined, color: couleurAccent),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -132,7 +152,7 @@ class _MaJourneeDialogState extends State<MaJourneeDialog> {
               style: TextStyle(
                 letterSpacing: 2,
                 fontWeight: FontWeight.w600,
-                color: Theme.of(context).textTheme.bodyLarge?.color,
+                color: couleurTexte,
               ),
             ),
           ),
@@ -142,10 +162,10 @@ class _MaJourneeDialogState extends State<MaJourneeDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'Saisissez votre matricule et votre PIN pour consulter vos pointages du jour. Aucun pointage ne sera enregistré.',
             style: TextStyle(
-              color: EnCheckColors.texteSecondaire,
+              color: couleurSecondaire,
               fontSize: 14,
               height: 1.4,
             ),
@@ -155,6 +175,8 @@ class _MaJourneeDialogState extends State<MaJourneeDialog> {
             key: const Key('ma-journee-matricule'),
             controller: _matriculeController,
             focusNode: _matriculeFocus,
+            style: TextStyle(color: couleurTexte),
+            cursorColor: couleurAccent,
             keyboardType: TextInputType.text,
             textCapitalization: TextCapitalization.characters,
             textInputAction: TextInputAction.next,
@@ -167,7 +189,10 @@ class _MaJourneeDialogState extends State<MaJourneeDialog> {
             onSubmitted: (_) => _pinFocus.requestFocus(),
             decoration: InputDecoration(
               labelText: 'Matricule',
+              labelStyle: TextStyle(color: couleurSecondaire),
               hintText: 'Ex. 0002',
+              hintStyle: TextStyle(color: couleurSecondaire.withOpacity(0.8)),
+              prefixIconColor: couleurSecondaire,
               prefixIcon: Row(
                 key: const Key('ma-journee-prefixe'),
                 mainAxisSize: MainAxisSize.min,
@@ -178,8 +203,8 @@ class _MaJourneeDialogState extends State<MaJourneeDialog> {
                     const SizedBox(width: 8),
                     Text(
                       '$prefixe-',
-                      style: const TextStyle(
-                        color: EnCheckColors.textePrincipal,
+                      style: TextStyle(
+                        color: couleurTexte,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -193,13 +218,18 @@ class _MaJourneeDialogState extends State<MaJourneeDialog> {
                 minHeight: 0,
               ),
               filled: true,
-              fillColor: EnCheckColors.blanc,
+              fillColor: couleurChamp,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide(color: couleurBordure),
               ),
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(14),
-                borderSide: const BorderSide(color: EnCheckColors.bordureClaire),
+                borderSide: BorderSide(color: couleurBordure),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide(color: couleurAccent, width: 1.5),
               ),
             ),
           ),
@@ -208,6 +238,8 @@ class _MaJourneeDialogState extends State<MaJourneeDialog> {
             key: const Key('ma-journee-pin'),
             controller: _pinController,
             focusNode: _pinFocus,
+            style: TextStyle(color: couleurTexte),
+            cursorColor: couleurAccent,
             keyboardType: TextInputType.number,
             textInputAction: TextInputAction.done,
             obscureText: true,
@@ -218,16 +250,24 @@ class _MaJourneeDialogState extends State<MaJourneeDialog> {
             onSubmitted: (_) => _consulter(),
             decoration: InputDecoration(
               labelText: 'PIN',
+              labelStyle: TextStyle(color: couleurSecondaire),
               hintText: 'Ex. 1234',
+              hintStyle: TextStyle(color: couleurSecondaire.withOpacity(0.8)),
               prefixIcon: const Icon(Icons.lock_outline),
+              prefixIconColor: couleurSecondaire,
               filled: true,
-              fillColor: EnCheckColors.blanc,
+              fillColor: couleurChamp,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide(color: couleurBordure),
               ),
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(14),
-                borderSide: const BorderSide(color: EnCheckColors.bordureClaire),
+                borderSide: BorderSide(color: couleurBordure),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide(color: couleurAccent, width: 1.5),
               ),
             ),
           ),
@@ -244,16 +284,16 @@ class _MaJourneeDialogState extends State<MaJourneeDialog> {
       actions: [
         TextButton(
           onPressed: _verificationEnCours ? null : _annuler,
-          child: const Text(
-            'ANNULER',
-            style: TextStyle(color: EnCheckColors.vertAccent),
-          ),
+          style: TextButton.styleFrom(foregroundColor: couleurAccent),
+          child: const Text('ANNULER'),
         ),
         ElevatedButton(
           key: const Key('ma-journee-consulter'),
           onPressed: _verificationEnCours ? null : _consulter,
           style: ElevatedButton.styleFrom(
-            backgroundColor: EnCheckColors.vertBouton,
+            backgroundColor: sombre
+                ? const Color(0xFF3D6F74)
+                : EnCheckColors.vertBouton,
             foregroundColor: EnCheckColors.blanc,
             minimumSize: const Size(120, 48),
             shape: RoundedRectangleBorder(
