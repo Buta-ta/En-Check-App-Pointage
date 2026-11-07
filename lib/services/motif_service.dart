@@ -4,8 +4,9 @@
 // ═══════════════════════════════════════════════════════════
 //
 //  Le bouton Paramètres ouvre l'écran Apparence. Le choix du motif est
-//  enregistré sur l'appareil et appliqué immédiatement. Aucune provenance
-//  culturelle n'est affichée sans source vérifiée.
+//  enregistré sur l'appareil et appliqué immédiatement. Les provenances
+//  présentées sont formulées comme des inspirations culturelles, pas comme
+//  l'authentification historique de chaque image.
 //
 //  Les images déjà embarquées dans assets/motifs/ sont utilisées telles
 //  quelles : aucune analyse ni recoloration à l'exécution.
@@ -19,6 +20,9 @@ import 'checklist_service.dart';
 class MotifCulturel {
   final String id;
   final String nom;
+  final String pays;
+  final String peuple;
+  final String inspiration;
   final String asset;
 
   /// Extrait horizontal d'UNE rangée du même textile, pour l'accueil.
@@ -35,6 +39,9 @@ class MotifCulturel {
   const MotifCulturel({
     required this.id,
     required this.nom,
+    required this.pays,
+    required this.peuple,
+    required this.inspiration,
     required this.asset,
     required this.friseAsset,
     required this.friseRatio,
@@ -43,10 +50,13 @@ class MotifCulturel {
     required this.couleurTint,
   });
 
-  /// Texture géométrique disponible, identifiant historique conservé.
+  /// Motif inspiré des textiles Kuba en raphia (RDC, peuple Kuba).
   static const raphia = MotifCulturel(
     id: 'raphia',
-    nom: 'Motif textile 1',
+    nom: 'Raphia Kuba',
+    pays: 'République démocratique du Congo',
+    peuple: 'Kuba',
+    inspiration: 'Textiles géométriques Kuba tissés en raphia',
     asset: 'assets/motifs/raphia.webp',
     friseAsset: 'assets/motifs/frises/raphia.webp',
     friseRatio: 4 / 3,
@@ -55,10 +65,13 @@ class MotifCulturel {
     couleurTint: Color(0xFFF7EFE0),
   );
 
-  /// Texture géométrique disponible, identifiant historique conservé.
+  /// Motif inspiré des tissus adinkra des peuples Akan du Ghana.
   static const adinkra = MotifCulturel(
     id: 'adinkra',
-    nom: 'Motif textile 2',
+    nom: 'Adinkra',
+    pays: 'Ghana',
+    peuple: 'Akan (notamment Asante)',
+    inspiration: 'Tissus adinkra imprimés des peuples Akan',
     asset: 'assets/motifs/adinkra.webp',
     friseAsset: 'assets/motifs/frises/adinkra.webp',
     friseRatio: 400 / 95,
@@ -67,10 +80,13 @@ class MotifCulturel {
     couleurTint: Color(0xFFD0DEDD),
   );
 
-  /// Texture géométrique disponible, identifiant historique conservé.
+  /// Motif inspiré du bogolan des Bamana du Mali.
   static const bogolan = MotifCulturel(
     id: 'bogolan',
-    nom: 'Motif textile 3',
+    nom: 'Bogolan',
+    pays: 'Mali',
+    peuple: 'Bamana (Bambara)',
+    inspiration: 'Bogolan, étoffe teinte et décorée selon la tradition bamana',
     asset: 'assets/motifs/bogolan.webp',
     friseAsset: 'assets/motifs/frises/bogolan.webp',
     friseRatio: 400 / 75,
@@ -79,10 +95,13 @@ class MotifCulturel {
     couleurTint: Color(0xFFF2EADD),
   );
 
-  /// Texture géométrique disponible, identifiant historique conservé.
+  /// Motif inspiré des perles géométriques zouloues d'Afrique du Sud.
   static const zoulou = MotifCulturel(
     id: 'zoulou',
-    nom: 'Motif textile 4',
+    nom: 'Perles zouloues',
+    pays: 'Afrique du Sud',
+    peuple: 'Zoulou',
+    inspiration: 'Perlage géométrique traditionnel zoulou',
     asset: 'assets/motifs/zoulou.webp',
     friseAsset: 'assets/motifs/frises/zoulou.webp',
     friseRatio: 2.4,
