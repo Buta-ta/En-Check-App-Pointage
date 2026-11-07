@@ -68,6 +68,8 @@ void main() {
     ));
     await tester.tap(find.text('Ouvrir Apparence'));
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Bogolan').first);
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Bogolan').first);
     await tester.pumpAndSettle();
 
