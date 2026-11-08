@@ -14,15 +14,64 @@ void main() {
     );
   });
 
-  test('sans option active, le PIN reste seul et aucun Autre mode ne s’affiche',
-      () {
+  test('sans autre méthode, seul le PIN est proposé', () {
     expect(
-      ModePointagePolicy.autresModes(
+      ModePointagePolicy.modesDisponibles(
         qrActif: false,
         reconnaissanceFacialeActive: false,
-        borneActive: false,
       ),
-      isEmpty,
+      [MethodePointage.codePin],
+    );
+  });
+
+  test('QR et PIN sont des choix distincts et ordonnés avec QR en premier', () {
+    expect(
+      ModePointagePolicy.modesDisponibles(
+        qrActif: true,
+        reconnaissanceFacialeActive: false,
+      ),
+      [MethodePointage.qr, MethodePointage.codePin],
+    );
+  });
+
+  test('le mode facial libre s’ajoute aux autres méthodes autorisées', () {
+    expect(
+      ModePointagePolicy.modesDisponibles(
+        qrActif: true,
+        reconnaissanceFacialeActive: true,
+        modeFacial: 'face_free',
+      ),
+      [
+        MethodePointage.qr,
+        MethodePointage.codePin,
+        MethodePointage.reconnaissanceFaciale,
+      ],
+    );
+  });
+
+  test('les modes faciaux obligatoires ou exclusifs ne sont pas contournés', () {
+    for (final mode in ['face_required', 'face_exclusive']) {
+      expect(
+        ModePointagePolicy.modesDisponibles(
+          qrActif: true,
+          reconnaissanceFacialeActive: true,
+          modeFacial: mode,
+        ),
+        [MethodePointage.reconnaissanceFaciale],
+      );
+    }
+  });
+
+  test('un réglage facial sans repli garde la reconnaissance comme seul choix',
+      () {
+    expect(
+      ModePointagePolicy.modesDisponibles(
+        qrActif: true,
+        reconnaissanceFacialeActive: true,
+        modeFacial: 'face_free',
+        repliFacialAutorise: false,
+      ),
+      [MethodePointage.reconnaissanceFaciale],
     );
   });
 
@@ -54,6 +103,5 @@ void main() {
         MethodePointage.enrollementBorne,
       ]),
     );
-    expect(autres, isNot(contains(MethodePointage.qr)));
   });
 }

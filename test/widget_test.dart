@@ -20,9 +20,8 @@ Future<void> _verifier(
   WidgetTester tester,
   Size taille, {
   double texte = 1,
-  bool modes = true,
-  bool annonces = false,
   bool alerte = false,
+  bool actionBorne = false,
 }) async {
   await tester.binding.setSurfaceSize(taille);
   addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -46,10 +45,9 @@ Future<void> _verifier(
               "AUJOURD'HUI\nPrêt pour les pointages",
               Colors.white,
             ),
-            autresModes: modes ? _bloc('Autres modes', Colors.white) : null,
-            annonces:
-                annonces ? _bloc('Annonces\nUne annonce', Colors.white) : null,
             alerteBorne: alerte ? _bloc('Borne à activer', Colors.amber) : null,
+            actionBorne:
+                actionBorne ? _bloc('Enrôler un employé', Colors.white) : null,
             navigation: const SizedBox(
               key: Key('navigation-test'),
               child: ColoredBox(
@@ -78,8 +76,7 @@ Future<void> _verifier(
     if (alerte) 'accueil-alerte',
     'accueil-actions',
     'accueil-aujourdhui',
-    if (modes) 'accueil-autres',
-    if (annonces) 'accueil-annonces',
+    if (actionBorne) 'accueil-action-borne',
   ];
   Rect? precedent;
   for (final cle in cles) {
@@ -102,12 +99,10 @@ void main() {
     await _verifier(tester, const Size(412, 869));
     await _verifier(tester, const Size(360, 640));
     await _verifier(tester, const Size(360, 640), texte: 1.3);
-    await _verifier(tester, const Size(390, 844), modes: false);
     await _verifier(tester, const Size(800, 1280));
     await _verifier(tester, const Size(1366, 768));
-    await _verifier(tester, const Size(320, 568),
-        texte: 1.3, annonces: true, alerte: true);
-    await _verifier(tester, const Size(360, 480),
-        texte: 1.3, annonces: true, alerte: true);
+    await _verifier(tester, const Size(800, 1280), actionBorne: true);
+    await _verifier(tester, const Size(320, 568), texte: 1.3, alerte: true);
+    await _verifier(tester, const Size(360, 480), texte: 1.3, alerte: true);
   });
 }

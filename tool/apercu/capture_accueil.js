@@ -19,6 +19,7 @@ const LIMIT = Number(process.env.APERCU_LIMIT || 0);
 const SCENARIOS_ACCUEIL = [
   { nom: 'entree-412x869-clair', w: 412, h: 869, dpr: 2, mobile: true, entree: true },
   { nom: 'entree-360x640-clair', w: 360, h: 640, dpr: 2, mobile: true, entree: true },
+  { nom: 'selection-modes-412x869-clair', w: 412, h: 869, dpr: 2, mobile: true, selectionModes: true },
   { nom: 'identification-pointage-412x869-clair', w: 412, h: 869, dpr: 2, mobile: true, ouvrirIdentification: true },
   { nom: 'identification-pointage-360x640-clair', w: 360, h: 640, dpr: 2, mobile: true, ouvrirIdentification: true },
   { nom: 'reference-412x869-clair', w: 412, h: 869, dpr: 2, mobile: true },
@@ -114,9 +115,11 @@ async function ouvrir(browser, scenario) {
     const S = (k, v) => localStorage.setItem('flutter.' + k, JSON.stringify(v));
     // Entreprise entièrement fictive : aucune donnée de l'équipe ou du fondateur.
     S('enterprise_id', '11111111-2222-3333-4444-555555555555');
-    // Isole chaque scénario : Commencer a la même persistance par entreprise
-    // que l'application, mais ne doit pas contaminer les captures suivantes.
-    S('public_start_utilise_v1_11111111-2222-3333-4444-555555555555', false);
+    // Les scénarios d'accueil ouvrent directement le pointage comme un appareil
+    // qui a déjà utilisé « Commencer » ; les deux scénarios d'entrée gardent
+    // cet écran. Le sélecteur est testé séparément dans selectionModes.
+    S('public_start_utilise_v1_11111111-2222-3333-4444-555555555555', !s.entree);
+    localStorage.removeItem('flutter.dernier_mode_pointage_11111111-2222-3333-4444-555555555555');
     S('enterprise_name', 'EN-NOUS');
     S('matricule_prefix', 'ENN');
     S('enterprise_pays', 'CG');
@@ -124,7 +127,7 @@ async function ouvrir(browser, scenario) {
     S('tutoriel_vue_v1', true);
     S('checklist_motif_choisi', !s.checklistIncomplete);
     S('checklist_premier_pointage', !s.checklistIncomplete);
-    S('module_qr_scanner', !s.sansAutresModes); // variante sans « Autres modes »
+    S('module_qr_scanner', !!s.selectionModes);
     S('motif_culturel_id', s.motif || 'adinkra');
     window.__firstFrame = null;
     window.addEventListener('flutter-first-frame', () => {
@@ -138,8 +141,11 @@ async function ouvrir(browser, scenario) {
     });
   }, scenario);
   const debut = Date.now();
+  const url = process.env.APERCU_MODE !== 'historique' && !scenario.entree
+    ? `${BASE}#/pointage`
+    : BASE;
   try {
-    await page.goto(BASE, { waitUntil: 'load', timeout: 60000 });
+    await page.goto(url, { waitUntil: 'load', timeout: 60000 });
   } catch (e) {
     throw new Error(`Chargement PWA: ${e}; requêtes bloquées: ${externes.join(', ')}`);
   }
@@ -165,13 +171,10 @@ async function ouvrir(browser, scenario) {
     if (!calme) await sleep(400);
   }
   if (process.env.APERCU_MODE !== 'historique' && !scenario.entree) {
-    // Sur l'app configurée, le premier écran est désormais le départ public.
-    // On poursuit jusqu'à l'accueil interne pour les autres scénarios.
-    // Sur 360×640, le logo et le slogan s'empilent : le bouton descend plus
-    // bas que sur 412×869. Viser son tiers inférieur évite de manquer le tap.
-    const hauteurBouton = scenario.h <= 700 ? 0.76 : 0.62;
-    await page.mouse.click(scenario.w * 0.5, scenario.h * hauteurBouton);
-    await sleep(1100);
+    // Les captures d'accueil entrent directement dans Pointage par la
+    // persistance fictive; le sélecteur a une capture dédiée et n'est pas
+    // cliqué, tandis que les scénarios « entree » couvrent l'écran Commencer.
+    await sleep(1200);
     calme = false;
     stable = 0;
     precedent = -1;
@@ -246,7 +249,18 @@ async function ouvrir(browser, scenario) {
     bodyWidth: document.body ? document.body.scrollWidth : 0,
     bodyHeight: document.body ? document.body.scrollHeight : 0,
   }));
-  return { page, premierFrameMs, attenteMs: Date.now() - debut, calme, externes, erreurs, mesure };
+  const diagnostic = await page.evaluate(() => ({
+    hash: location.hash,
+    prefs: Object.fromEntries([
+      'enterprise_id',
+      'public_start_utilise_v1_11111111-2222-3333-4444-555555555555',
+      'module_qr_scanner',
+      'module_reconnaissance_faciale',
+    ].map((key) => [key, localStorage.getItem(`flutter.${key}`)])),
+    semantiques: [...document.querySelectorAll('flt-semantics[aria-label]')]
+      .map((element) => element.getAttribute('aria-label')).slice(0, 12),
+  }));
+  return { page, premierFrameMs, attenteMs: Date.now() - debut, calme, externes, erreurs, mesure, diagnostic };
 }
 
 (async () => {
@@ -319,6 +333,9 @@ async function ouvrir(browser, scenario) {
           requetesExternesBloquees: [...new Set(r.externes)].sort(),
         });
         console.log(`calme=${r.calme}, débordement DOM=${debordement}px, erreurs JS=${r.erreurs.length}`);
+        if (['selection-modes-412x869-clair', 'reference-412x869-clair', 'telephone-390x844-clair'].includes(scenario.nom)) {
+          console.log(`Diagnostic ${scenario.nom}: ${JSON.stringify(r.diagnostic)}`);
+        }
         await r.page.close();
       } catch (e) {
         // Une taille en échec ne doit pas priver toutes les autres de rapport.
