@@ -172,6 +172,12 @@ async function ouvrir(browser, scenario) {
     const hauteurBouton = scenario.h <= 700 ? 0.76 : 0.62;
     await page.mouse.click(scenario.w * 0.5, scenario.h * hauteurBouton);
     await sleep(1100);
+    // Avec plusieurs méthodes de pointage, choisir le premier mode sur l'écran
+    // d'entrée (QR dans cette recette) avant de capturer l'accueil.
+    if (!scenario.sansAutresModes) {
+      await page.mouse.click(scenario.w * 0.5, Math.min(280, scenario.h * 0.45));
+      await sleep(500);
+    }
     calme = false;
     stable = 0;
     precedent = -1;
