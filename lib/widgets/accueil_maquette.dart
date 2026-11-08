@@ -217,43 +217,34 @@ class _Disposition {
     };
 
     double somme() => h.values.fold(0.0, (a, b) => a + b);
-    final enteteMin = math.max(120.0, 104.0 + 16.0 * texte);
-    final cible = math.min(
-      360.0 * e,
-      math.max(150.0, hauteur * 0.353 +
-          (avecAnnonces ? 0.0 : 30.0) +
-          (avecModes ? 0.0 : 20.0)),
-    );
-
-    var entete = 0.0;
-    if (hauteur - somme() >= cible) {
-      entete = cible;
-      final surplus = hauteur - somme() - cible;
-      entete += surplus * 0.45;
+    // Le média garde un cadre 16:9, quel que soit le nombre d'annonces.
+    // La frise culturelle de 40 px est séparée sous ce cadre.
+    final marge = largeur <= 420 ? 20.0 : 24.0;
+    final largeurInterne = math.max(1.0, largeur - marge * 2).toDouble();
+    final entete = (largeurInterne * 9 / 16 + 40.0).toDouble();
+    final surplus = hauteur - somme() - entete;
+    if (surplus > 0) {
       const respirations = [
         'haut', 'gSalut', 'gAlerte', 'gJour', 'gAutres', 'gAnnonces', 'gNav',
       ];
       final totalGaps = respirations.fold(0.0, (s, k) => s + h[k]!);
       if (totalGaps > 0) {
         for (final k in respirations) {
-          h[k] = h[k]! + surplus * 0.55 * h[k]! / totalGaps;
+          h[k] = h[k]! + surplus * h[k]! / totalGaps;
         }
       }
     } else {
-      final deficit = somme() + enteteMin - hauteur;
-      if (deficit > 0) {
-        final marges = <String, double>{
-          for (final k in h.keys) k: math.max(0.0, h[k]! - min[k]!),
-        };
-        final totalMarges = marges.values.fold(0.0, (a, b) => a + b);
-        final facteur = totalMarges <= 0
-            ? 0.0
-            : math.min(1.0, deficit / totalMarges);
-        for (final k in h.keys) {
-          h[k] = h[k]! - marges[k]! * facteur;
-        }
+      final deficit = -surplus;
+      final marges = <String, double>{
+        for (final k in h.keys) k: math.max(0.0, h[k]! - min[k]!),
+      };
+      final totalMarges = marges.values.fold(0.0, (a, b) => a + b);
+      final facteur = totalMarges <= 0
+          ? 0.0
+          : math.min(1.0, deficit / totalMarges);
+      for (final k in h.keys) {
+        h[k] = h[k]! - marges[k]! * facteur;
       }
-      entete = math.max(enteteMin, hauteur - somme());
     }
 
     final total = somme() + entete;
@@ -261,6 +252,6 @@ class _Disposition {
         ? math.max(0.1, hauteur / total)
         : 1.0;
     h['entete'] = entete;
-    return _Disposition._(h, largeur <= 420 ? 20.0 : 24.0, total, reduction);
+    return _Disposition._(h, marge, total, reduction);
   }
 }

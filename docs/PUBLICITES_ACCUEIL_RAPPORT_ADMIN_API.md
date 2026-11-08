@@ -2,11 +2,13 @@
 
 **Date de l’audit : 6 novembre 2026**  
 **Périmètre : application de pointage Android et PWA**  
-**Statut : spécification à implémenter par l’équipe Admin/API ; aucune évolution de schéma ou de RPC n’est incluse dans la PR visuelle.**
+**Statut du présent audit : photographie historique du 6 novembre 2026.**
 
-## 1. Constat vérifiable
+> **Mise à jour du 8 novembre 2026 :** l'équipe En-Check Admin a depuis livré la RPC `encheck_accueil_publicites` et le bucket public `annonces-accueil`. Le contrat actuel, les exemples de réponses et les règles d'affichage sont documentés dans le [rapport d'intégration partagé par l'équipe Admin](https://docs.google.com/document/d/1KmJCfCBj0f4fwkIoNpeb0XncOyDxTDYKQDl3n-2LUhw/view) ; il prévaut sur les constats ci-dessous. Cette note conserve le périmètre et les recommandations de l'audit initial.
 
-La fonctionnalité publicitaire n’existe pas encore dans le socle consulté :
+## 1. Constat vérifiable au 6 novembre 2026
+
+À la date de l'audit, la fonctionnalité publicitaire n’existait pas encore dans le socle consulté :
 
 - aucune table de campagnes ou de publicités ;
 - aucune RPC fournissant des médias publicitaires pour l’accueil ;
