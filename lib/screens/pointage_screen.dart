@@ -313,6 +313,10 @@ class _PointageScreenState extends State<PointageScreen> {
       await _chargerConfigRecoFacialeEnLigne();
     }
 
+    // Le choix initial ne doit attendre ni le coffre sécurisé de la borne,
+    // ni le chargement de son personnel.
+    await _preparerChoixModeAccueil();
+
     // 🖥️ CONTRAT ÉTAPE 3 — une tablette DÉJÀ provisionnée est une borne,
     //    même si la config serveur est injoignable ou exige un jeton employé :
     //    le bail `bk1_` en coffre sécurisé est la preuve, pas le réglage distant.
@@ -323,8 +327,6 @@ class _PointageScreenState extends State<PointageScreen> {
     } catch (_) {
       // Le choix de méthode ne doit pas rester bloqué par l'état de la borne.
     }
-
-    await _preparerChoixModeAccueil();
   }
 
   String _cleDernierModeAccueil(String? entrepriseId) =>
