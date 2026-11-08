@@ -28,6 +28,9 @@ import '../widgets/bandes_motifs.dart';
 import '../widgets/ma_journee_dialog.dart';
 import '../widgets/web_camera_widget_provider.dart';
 import '../services/supabase_service.dart';
+import '../services/annonces_accueil_service.dart';
+import '../widgets/carrousel_annonces_accueil.dart';
+import '../widgets/carte_annonces_accueil.dart';
 import '../services/appareil_service.dart';
 import '../services/borne_service.dart';
 import '../services/local_database.dart';
@@ -228,6 +231,12 @@ class _PointageScreenState extends State<PointageScreen> {
 
   // 📊 Données
   Map<String, dynamic>? entrepriseSelectionnee;
+  List<AnnonceAccueil> _annoncesAccueil = [];
+  String? _annoncesEntrepriseId;
+  int _generationAnnoncesAccueil = 0;
+  Timer? _timerAnnoncesAccueil;
+  final AnnoncesAccueilService _annoncesAccueilService =
+      AnnoncesAccueilService();
   Map<String, dynamic>? _employeeSchedule;
   Map<String, dynamic>? _pendingEmployee;
   Map<String, dynamic>? _dernierEmployePointe;
@@ -266,6 +275,8 @@ class _PointageScreenState extends State<PointageScreen> {
   void dispose() {
     _timer?.cancel();
     _timerPauses?.cancel();
+    _timerAnnoncesAccueil?.cancel();
+    _generationAnnoncesAccueil++;
     _matriculeNouveauCtrl.dispose();
     super.dispose();
   }
@@ -490,13 +501,78 @@ class _PointageScreenState extends State<PointageScreen> {
         };
         chargementEntreprises = false;
       });
+      _activerAnnoncesAccueil(id);
       // Le souhait vient du pays : si la session est ancienne (pays pas
       // encore mémorisé), on le récupère automatiquement au premier
       // lancement en ligne.
       if (pays == null) _completerPaysEntreprise(id);
     } else {
       setState(() => chargementEntreprises = false);
+      _arreterAnnoncesAccueil();
     }
+  }
+
+  void _arreterAnnoncesAccueil() {
+    _timerAnnoncesAccueil?.cancel();
+    _timerAnnoncesAccueil = null;
+    _annoncesEntrepriseId = null;
+    _generationAnnoncesAccueil++;
+    if (mounted && _annoncesAccueil.isNotEmpty) {
+      setState(() => _annoncesAccueil = []);
+    }
+  }
+
+  void _activerAnnoncesAccueil(String entrepriseId) {
+    final id = entrepriseId.trim();
+    _timerAnnoncesAccueil?.cancel();
+    if (id.isEmpty) {
+      _arreterAnnoncesAccueil();
+      return;
+    }
+
+    _annoncesEntrepriseId = id;
+    final generation = ++_generationAnnoncesAccueil;
+    if (mounted) setState(() => _annoncesAccueil = []);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_annoncesGenerationValide(id, generation)) {
+        unawaited(_chargerAnnoncesAccueil(id, generation, chargerCache: true));
+      }
+    });
+    _timerAnnoncesAccueil = Timer.periodic(
+      const Duration(minutes: 30),
+      (_) {
+        if (_annoncesEntrepriseId != id) return;
+        final prochaineGeneration = ++_generationAnnoncesAccueil;
+        unawaited(_chargerAnnoncesAccueil(id, prochaineGeneration));
+      },
+    );
+  }
+
+  bool _annoncesGenerationValide(String id, int generation) {
+    final entrepriseCourante = entrepriseSelectionnee?['id']?.toString();
+    return mounted &&
+        generation == _generationAnnoncesAccueil &&
+        id == _annoncesEntrepriseId &&
+        id == entrepriseCourante;
+  }
+
+  Future<void> _chargerAnnoncesAccueil(
+    String id,
+    int generation, {
+    bool chargerCache = false,
+  }) async {
+    if (chargerCache) {
+      final cache = await _annoncesAccueilService.chargerCache(id);
+      if (cache != null && _annoncesGenerationValide(id, generation)) {
+        setState(() => _annoncesAccueil = cache);
+      }
+    }
+
+    final annonces = await _annoncesAccueilService.charger(id);
+    if (annonces == null || !_annoncesGenerationValide(id, generation)) return;
+
+    setState(() => _annoncesAccueil = annonces);
+    unawaited(_annoncesAccueilService.enregistrerCache(id, annonces));
   }
 
   Future<void> _completerPaysEntreprise(String entrepriseId) async {
@@ -2131,7 +2207,12 @@ class _PointageScreenState extends State<PointageScreen> {
                             modesVisibles ? _boutonAutresModes(palette) : null,
                         alerteBorne:
                             borneVisible ? _buildBandeauBorne() : null,
-                        // Décision 2 : sans annonce réelle, aucune carte vide.
+                        annonces: _annoncesAccueil.isEmpty
+                            ? null
+                            : CarteAnnoncesAccueil(
+                                nombre: _annoncesAccueil.length,
+                                palette: palette,
+                              ),
                         navigation: _buildBarreNavigation(palette),
                       ),
                     ),
@@ -3539,10 +3620,11 @@ class _PointageScreenState extends State<PointageScreen> {
         final hauteur = contraintes.maxHeight;
         final texte = MediaQuery.textScalerOf(context).scale(1.0);
         final dateTop = 16.0 + 29.8 * texte + 5.0;
-        final voileHauteur = math.min(
-          hauteur,
-          math.max(146.0, 105.0 * texte + 45.0),
-        );
+        final voileHauteur = math
+            .min(hauteur - 40.0, math.max(146.0, 105.0 * texte + 45.0))
+            .toDouble();
+        final entrepriseId = entrepriseSelectionnee?['id']?.toString() ?? '';
+
         return DecoratedBox(
           decoration: BoxDecoration(
             color: palette.carteDouce,
@@ -3557,167 +3639,160 @@ class _PointageScreenState extends State<PointageScreen> {
           ),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(16),
-            child: Stack(
+            child: Column(
               children: [
-                // Décision 1 : la vraie photo couvre TOUTE la carte, de haut
-                // en bas. Elle est décodée à la taille utile et isolée pour
-                // éviter de la repeindre à chaque minute de l'horloge.
-                Positioned.fill(
-                  child: RepaintBoundary(
-                    child: LayoutBuilder(
-                      builder: (context, c) {
-                        final dpr = MediaQuery.devicePixelRatioOf(context);
-                        final cacheW = (c.maxWidth * dpr)
-                            .round()
-                            .clamp(480, 1600)
-                            .toInt();
-                        return Image.asset(
-                          'assets/scenes/scene_pointage.jpg',
-                          fit: BoxFit.cover,
-                          alignment: const Alignment(0, -0.20),
-                          cacheWidth: cacheW,
-                          filterQuality: FilterQuality.medium,
-                          errorBuilder: (_, __, ___) =>
-                              Container(color: palette.primaire),
-                        );
-                      },
-                    ),
-                  ),
-                ),
-                // Option 1 validée : voile mat + texte blanc. Le haut reste
-                // assez opaque pour la date, y compris sur la photo claire.
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  top: 0,
-                  height: voileHauteur,
-                  child: IgnorePointer(
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: themeService.isDarkMode
-                              ? const [
-                                  Color(0xD1060808),
-                                  Color(0xC2060808),
-                                  Color(0x75060808),
-                                  Color(0x00060808),
-                                ]
-                              : const [
-                                  Color(0xC70A0E0E),
-                                  Color(0xB80A0E0E),
-                                  Color(0x6B0A0E0E),
-                                  Color(0x000A0E0E),
-                                ],
-                          stops: const [0.0, 0.45, 0.75, 1.0],
+                Expanded(
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      // Média 16:9, immédiatement remplacé par la campagne
+                      // lorsque la RPC répond. Le widget garde la photo locale
+                      // visible pendant le chargement et en cas d'échec.
+                      RepaintBoundary(
+                        child: CarrouselAnnoncesAccueil(
+                          entrepriseId: entrepriseId,
+                          annonces: _annoncesAccueil,
+                          fondParDefaut: palette.primaire,
                         ),
                       ),
-                    ),
-                  ),
-                ),
-                Positioned(
-                  left: 19,
-                  top: 22,
-                  width: largeur * 0.31,
-                  height: 28 * texte,
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerLeft,
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        // Le VRAI symbole En-Check, distinct du logo client.
-                        // Le titre et sa typographie restent inchangés.
-                        Image.asset(
-                          'assets/logo_encheck.png',
-                          key: Key('accueil-symbole-encheck'),
-                          width: 23,
-                          height: 23,
-                          fit: BoxFit.contain,
-                          cacheWidth: 96,
-                          cacheHeight: 96,
-                          filterQuality: FilterQuality.medium,
-                          semanticLabel: 'Symbole En-Check',
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        top: 0,
+                        height: voileHauteur,
+                        child: IgnorePointer(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: themeService.isDarkMode
+                                    ? const [
+                                        Color(0xD1060808),
+                                        Color(0xC2060808),
+                                        Color(0x75060808),
+                                        Color(0x00060808),
+                                      ]
+                                    : const [
+                                        Color(0xC70A0E0E),
+                                        Color(0xB80A0E0E),
+                                        Color(0x6B0A0E0E),
+                                        Color(0x000A0E0E),
+                                      ],
+                                stops: const [0.0, 0.45, 0.75, 1.0],
+                              ),
+                            ),
+                          ),
                         ),
-                        SizedBox(width: 6),
-                        Text(
-                          'En-Check',
-                          maxLines: 1,
-                          style: TextStyle(
-                            fontSize: 17,
-                            height: 1.24,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: -1.1,
-                            color: Colors.white,
-                            shadows: [
-                              Shadow(color: Color(0x59000000), blurRadius: 2),
+                      ),
+                      Positioned(
+                        left: 19,
+                        top: 22,
+                        width: largeur * 0.31,
+                        height: 28 * texte,
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              Image.asset(
+                                'assets/logo_encheck.png',
+                                key: const Key('accueil-symbole-encheck'),
+                                width: 23,
+                                height: 23,
+                                fit: BoxFit.contain,
+                                cacheWidth: 96,
+                                cacheHeight: 96,
+                                filterQuality: FilterQuality.medium,
+                                semanticLabel: 'Symbole En-Check',
+                              ),
+                              const SizedBox(width: 6),
+                              const Text(
+                                'En-Check',
+                                maxLines: 1,
+                                style: TextStyle(
+                                  fontSize: 17,
+                                  height: 1.24,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: -1.1,
+                                  color: Colors.white,
+                                  shadows: [
+                                    Shadow(
+                                      color: Color(0x59000000),
+                                      blurRadius: 2,
+                                    ),
+                                  ],
+                                ),
+                              ),
                             ],
                           ),
                         ),
-                      ],
-                    ),
-                  ),
-                ),
-                Positioned(
-                  left: largeur * 0.29,
-                  right: largeur * 0.29,
-                  top: 16,
-                  height: 32 * texte,
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(
-                      heureActuelle,
-                      maxLines: 1,
-                      style: const TextStyle(
-                        fontSize: 24,
-                        height: 1.24,
-                        fontWeight: FontWeight.w500,
-                        letterSpacing: 0.36,
-                        color: Colors.white,
-                        shadows: [
-                          Shadow(color: Color(0x59000000), blurRadius: 2),
-                        ],
                       ),
-                    ),
-                  ),
-                ),
-                Positioned(
-                  left: 70,
-                  right: 70,
-                  top: dateTop,
-                  height: 15 * texte,
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(
-                      dateActuelle.toUpperCase(),
-                      maxLines: 1,
-                      style: const TextStyle(
-                        fontSize: 10.5,
-                        height: 1.24,
-                        fontWeight: FontWeight.w400,
-                        letterSpacing: 0.5,
-                        color: Color(0xEBFFFFFF),
-                        shadows: [
-                          Shadow(color: Color(0x59000000), blurRadius: 2),
-                        ],
+                      Positioned(
+                        left: largeur * 0.29,
+                        right: largeur * 0.29,
+                        top: 16,
+                        height: 32 * texte,
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            heureActuelle,
+                            maxLines: 1,
+                            style: const TextStyle(
+                              fontSize: 24,
+                              height: 1.24,
+                              fontWeight: FontWeight.w500,
+                              letterSpacing: 0.36,
+                              color: Colors.white,
+                              shadows: [
+                                Shadow(
+                                  color: Color(0x59000000),
+                                  blurRadius: 2,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
                       ),
-                    ),
+                      Positioned(
+                        left: 70,
+                        right: 70,
+                        top: dateTop,
+                        height: 15 * texte,
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            dateActuelle.toUpperCase(),
+                            maxLines: 1,
+                            style: const TextStyle(
+                              fontSize: 10.5,
+                              height: 1.24,
+                              fontWeight: FontWeight.w400,
+                              letterSpacing: 0.5,
+                              color: Color(0xEBFFFFFF),
+                              shadows: [
+                                Shadow(
+                                  color: Color(0x59000000),
+                                  blurRadius: 2,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        top: 20,
+                        right: 18,
+                        child: _boutonLune(themeService),
+                      ),
+                    ],
                   ),
                 ),
-                Positioned(
-                  top: 20,
-                  right: 18,
-                  child: _boutonLune(themeService),
-                ),
-                // Interface séparée du média : une rangée de symboles au
-                // bon ratio, répétée sans ScrollView et sans les écraser.
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
+                SizedBox(
                   height: 40,
+                  width: double.infinity,
                   child: RepaintBoundary(
                     child: FriseMotif(
                       key: const Key('accueil-bandeau-motif'),
@@ -3736,6 +3811,7 @@ class _PointageScreenState extends State<PointageScreen> {
       },
     );
   }
+
   /// ⭐ MAQUETTE FINALE 5/11 : commande unique de thème — UN SEUL
   /// pictogramme (lune en clair, soleil en sombre), pastille ronde blanche
   /// sur la photo, choix mémorisé. Comportement inchangé.
