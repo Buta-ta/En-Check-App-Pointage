@@ -16,32 +16,10 @@ const CHROME = process.env.CHROME_PATH ||
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const LIMIT = Number(process.env.APERCU_LIMIT || 0);
 
-// Les contrôles visuels ne dépendent pas de la hauteur variable du texte :
-// activer l'arbre sémantique Flutter puis viser le bouton par son libellé.
-async function cliquerSemantique(page, fragments, timeout = 1500) {
-  const cible = await page.waitForFunction((mots) => {
-    const normaliser = (texte) => (texte || '').normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '').toLowerCase();
-    const elements = [...document.querySelectorAll('flt-semantics[aria-label]')];
-    return elements.find((element) => {
-      const label = normaliser(element.getAttribute('aria-label'));
-      return mots.some((mot) => label.includes(normaliser(mot)));
-    }) || null;
-  }, { timeout }, fragments).catch(() => null);
-  if (!cible) return false;
-  const point = await cible.evaluate((element) => {
-    const r = element.getBoundingClientRect();
-    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-  });
-  await cible.dispose();
-  if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return false;
-  await page.mouse.click(point.x, point.y);
-  return true;
-}
-
 const SCENARIOS_ACCUEIL = [
   { nom: 'entree-412x869-clair', w: 412, h: 869, dpr: 2, mobile: true, entree: true },
   { nom: 'entree-360x640-clair', w: 360, h: 640, dpr: 2, mobile: true, entree: true },
+  { nom: 'selection-modes-412x869-clair', w: 412, h: 869, dpr: 2, mobile: true, selectionModes: true },
   { nom: 'identification-pointage-412x869-clair', w: 412, h: 869, dpr: 2, mobile: true, ouvrirIdentification: true },
   { nom: 'identification-pointage-360x640-clair', w: 360, h: 640, dpr: 2, mobile: true, ouvrirIdentification: true },
   { nom: 'reference-412x869-clair', w: 412, h: 869, dpr: 2, mobile: true },
@@ -137,9 +115,11 @@ async function ouvrir(browser, scenario) {
     const S = (k, v) => localStorage.setItem('flutter.' + k, JSON.stringify(v));
     // Entreprise entièrement fictive : aucune donnée de l'équipe ou du fondateur.
     S('enterprise_id', '11111111-2222-3333-4444-555555555555');
-    // Isole chaque scénario : Commencer a la même persistance par entreprise
-    // que l'application, mais ne doit pas contaminer les captures suivantes.
-    S('public_start_utilise_v1_11111111-2222-3333-4444-555555555555', false);
+    // Les scénarios d'accueil ouvrent directement le pointage comme un appareil
+    // qui a déjà utilisé « Commencer » ; les deux scénarios d'entrée gardent
+    // cet écran. Le sélecteur est testé séparément dans selectionModes.
+    S('public_start_utilise_v1_11111111-2222-3333-4444-555555555555', !s.entree);
+    localStorage.removeItem('flutter.dernier_mode_pointage_11111111-2222-3333-4444-555555555555');
     S('enterprise_name', 'EN-NOUS');
     S('matricule_prefix', 'ENN');
     S('enterprise_pays', 'CG');
@@ -147,7 +127,7 @@ async function ouvrir(browser, scenario) {
     S('tutoriel_vue_v1', true);
     S('checklist_motif_choisi', !s.checklistIncomplete);
     S('checklist_premier_pointage', !s.checklistIncomplete);
-    S('module_qr_scanner', !s.sansAutresModes); // variante sans « Autres modes »
+    S('module_qr_scanner', !!s.selectionModes);
     S('motif_culturel_id', s.motif || 'adinkra');
     window.__firstFrame = null;
     window.addEventListener('flutter-first-frame', () => {
@@ -170,8 +150,6 @@ async function ouvrir(browser, scenario) {
   try {
     await page.waitForFunction(() => window.__firstFrame !== null, { timeout: 30000 });
     premierFrameMs = await page.evaluate(() => Math.round(window.__firstFrame));
-    const placeholder = await page.$('flt-semantics-placeholder');
-    if (placeholder) await placeholder.click().catch(() => {});
   } catch (e) {
     // On capture quand même : l'image doit montrer ce qui bloque, et le
     // rapport reste exploitable au lieu d'attendre deux minutes par taille.
@@ -190,30 +168,10 @@ async function ouvrir(browser, scenario) {
     if (!calme) await sleep(400);
   }
   if (process.env.APERCU_MODE !== 'historique' && !scenario.entree) {
-    // Sur l'app configurée, le premier écran est désormais le départ public.
-    // On poursuit jusqu'à l'accueil interne pour les autres scénarios.
-    // Sur 360×640, le logo et le slogan s'empilent : le bouton descend plus
-    // bas que sur 412×869. Viser son tiers inférieur évite de manquer le tap.
-    const hauteurBouton = scenario.h <= 700 ? 0.76 : 0.62;
-    const boutonCommencerClique = await cliquerSemantique(page, ['Commencer']);
-    if (!boutonCommencerClique) {
-      await page.mouse.click(scenario.w * 0.5, scenario.h * hauteurBouton);
-    }
-    await sleep(1100);
-    // Avec plusieurs méthodes de pointage, choisir le premier mode sur l'écran
-    // d'entrée (QR dans cette recette) avant de capturer l'accueil.
-    if (!scenario.sansAutresModes) {
-      const modeClique = await cliquerSemantique(
-        page,
-        ['Scanner un badge QR', 'Code PIN', 'Reconnaissance faciale'],
-        5000,
-      );
-      if (!modeClique) {
-        // Repli si le navigateur n'expose pas l'arbre sémantique Flutter.
-        await page.mouse.click(scenario.w * 0.5, Math.min(320, scenario.h * 0.48));
-      }
-      await sleep(500);
-    }
+    // Les captures d'accueil entrent directement dans Pointage par la
+    // persistance fictive; le sélecteur a une capture dédiée et n'est pas
+    // cliqué, tandis que les scénarios « entree » couvrent l'écran Commencer.
+    await sleep(1200);
     calme = false;
     stable = 0;
     precedent = -1;
