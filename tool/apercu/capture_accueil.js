@@ -334,7 +334,9 @@ async function ouvrir(browser, scenario) {
         });
         console.log(`calme=${r.calme}, débordement DOM=${debordement}px, erreurs JS=${r.erreurs.length}`);
         if (['selection-modes-412x869-clair', 'reference-412x869-clair', 'telephone-390x844-clair'].includes(scenario.nom)) {
-          console.log(`Diagnostic ${scenario.nom}: ${JSON.stringify(r.diagnostic)}`);
+          const diagnostic = JSON.stringify({ scenario: scenario.nom, ...r.diagnostic });
+          console.log(`Diagnostic ${scenario.nom}: ${diagnostic}`);
+          console.log(`::notice title=Diagnostic capture::${diagnostic}`);
         }
         await r.page.close();
       } catch (e) {
