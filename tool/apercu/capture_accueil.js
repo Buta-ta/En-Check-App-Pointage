@@ -249,18 +249,7 @@ async function ouvrir(browser, scenario) {
     bodyWidth: document.body ? document.body.scrollWidth : 0,
     bodyHeight: document.body ? document.body.scrollHeight : 0,
   }));
-  const diagnostic = await page.evaluate(() => ({
-    hash: location.hash,
-    prefs: Object.fromEntries([
-      'enterprise_id',
-      'public_start_utilise_v1_11111111-2222-3333-4444-555555555555',
-      'module_qr_scanner',
-      'module_reconnaissance_faciale',
-    ].map((key) => [key, localStorage.getItem(`flutter.${key}`)])),
-    semantiques: [...document.querySelectorAll('flt-semantics[aria-label]')]
-      .map((element) => element.getAttribute('aria-label')).slice(0, 12),
-  }));
-  return { page, premierFrameMs, attenteMs: Date.now() - debut, calme, externes, erreurs, mesure, diagnostic };
+  return { page, premierFrameMs, attenteMs: Date.now() - debut, calme, externes, erreurs, mesure };
 }
 
 (async () => {
@@ -333,19 +322,6 @@ async function ouvrir(browser, scenario) {
           requetesExternesBloquees: [...new Set(r.externes)].sort(),
         });
         console.log(`calme=${r.calme}, débordement DOM=${debordement}px, erreurs JS=${r.erreurs.length}`);
-        if (['selection-modes-412x869-clair', 'reference-412x869-clair', 'telephone-390x844-clair'].includes(scenario.nom)) {
-          const diagnostic = JSON.stringify({ scenario: scenario.nom, ...r.diagnostic });
-          console.log(`Diagnostic ${scenario.nom}: ${diagnostic}`);
-          console.log(`::notice title=Diagnostic capture::${diagnostic}`);
-          if (scenario.w === 412) {
-            const extrait = await r.page.screenshot({
-              type: 'jpeg',
-              quality: 55,
-              clip: { x: 0, y: 0, width: 412, height: 220 },
-            });
-            console.log(`::notice title=Capture diagnostic ${scenario.nom}::${extrait.toString('base64')}`);
-          }
-        }
         await r.page.close();
       } catch (e) {
         // Une taille en échec ne doit pas priver toutes les autres de rapport.
