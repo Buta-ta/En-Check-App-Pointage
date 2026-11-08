@@ -141,8 +141,11 @@ async function ouvrir(browser, scenario) {
     });
   }, scenario);
   const debut = Date.now();
+  const url = process.env.APERCU_MODE !== 'historique' && !scenario.entree
+    ? `${BASE}#/pointage`
+    : BASE;
   try {
-    await page.goto(BASE, { waitUntil: 'load', timeout: 60000 });
+    await page.goto(url, { waitUntil: 'load', timeout: 60000 });
   } catch (e) {
     throw new Error(`Chargement PWA: ${e}; requêtes bloquées: ${externes.join(', ')}`);
   }
