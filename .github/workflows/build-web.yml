@@ -141,6 +141,19 @@ jobs:
             exit "$status"
           fi
 
+      - name: Enregistrer pubspec.lock (lancement manuel uniquement)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pubspec.lock
+          if git diff --cached --quiet; then
+            echo "pubspec.lock est déjà à jour."
+            exit 0
+          fi
+          git commit -m "build: update Flutter dependency lockfile"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
       # ── 5. Enregistrer le résultat ──────────────────────────────────────
       # Deux lettres à comprendre sur la ligne « git add » :
       #
