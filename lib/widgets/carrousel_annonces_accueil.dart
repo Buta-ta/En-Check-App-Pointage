@@ -158,8 +158,8 @@ class _CarrouselAnnoncesAccueilState extends State<CarrouselAnnoncesAccueil> {
               child: SizedBox.expand(
                 key: ValueKey(
                   widget.annonces.isEmpty
-                      ? 'photo-locale-accueil'
-                      : '${widget.entrepriseId}:${widget.annonces[_index].signature}',
+                      ? 'media-slot-photo-locale'
+                      : 'media-slot-${widget.entrepriseId}:${widget.annonces[_index].signature}',
                 ),
                 child: _mediaCourant(context),
               ),
