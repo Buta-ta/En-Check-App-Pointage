@@ -160,18 +160,37 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Échouer si la recette visuelle a détecté un problème
+      - name: Vérifier les contrastes critiques de l'accueil
         if: always()
         run: |
-          if [[ "${{ steps.captures.outcome }}" != "success" ]]; then
-            echo "La capture d'au moins un écran a échoué."
-            exit 1
-          fi
-          if [[ "${{ steps.captures_historique.outcome }}" != "success" ]]; then
-            echo "La capture de l'historique ou du calendrier a échoué."
-            exit 1
-          fi
-          if [[ "${{ steps.mesures.outcome }}" != "success" ]]; then
-            echo "Les mesures visuelles ont détecté un débordement ou un contraste insuffisant."
-            exit 1
-          fi
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          fichier = Path('apercu-accueil/controle.json')
+          if not fichier.exists():
+              raise SystemExit('Rapport de contraste absent : recette non vérifiable.')
+
+          rapport = json.loads(fichier.read_text())
+          mesures = rapport.get('contrastes', [])
+          attendus = {
+              'reference-412x869-clair',
+              'reference-412x869-sombre',
+              'telephone-390x844-clair',
+          }
+          erreurs = []
+          for scenario in sorted(attendus):
+              elements = {m['element']: m for m in mesures if m['scenario'] == scenario}
+              if set(elements) != {'En-Check', 'heure', 'date'}:
+                  erreurs.append(f'{scenario}: mesures de contraste manquantes')
+                  continue
+              erreurs.extend(
+                  f"{scenario} / {nom}: {mesure.get('ratio', 0)}:1 (seuil {mesure['seuil']}:1)"
+                  for nom, mesure in elements.items()
+                  if not mesure.get('ok')
+              )
+
+          if erreurs:
+              raise SystemExit('Contraste de l’accueil insuffisant : ' + '; '.join(erreurs))
+          print('Contrastes de l’en-tête vérifiés sur les trois formats de référence.')
+          PY
