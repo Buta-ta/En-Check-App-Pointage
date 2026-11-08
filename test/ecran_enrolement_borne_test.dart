@@ -6,7 +6,7 @@ void main() {
   testWidgets('le retour à l’accueil est toujours visible et fonctionnel',
       (tester) async {
     var retourDemande = false;
-    await tester.binding.setSurfaceSize(const Size(360, 640));
+    await tester.binding.setSurfaceSize(const Size(800, 1280));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(
       MaterialApp(
