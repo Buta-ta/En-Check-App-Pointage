@@ -16,6 +16,29 @@ const CHROME = process.env.CHROME_PATH ||
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const LIMIT = Number(process.env.APERCU_LIMIT || 0);
 
+// Les contrôles visuels ne dépendent pas de la hauteur variable du texte :
+// activer l'arbre sémantique Flutter puis viser le bouton par son libellé.
+async function cliquerSemantique(page, fragments, timeout = 1500) {
+  const cible = await page.waitForFunction((mots) => {
+    const normaliser = (texte) => (texte || '').normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const elements = [...document.querySelectorAll('flt-semantics[aria-label]')];
+    return elements.find((element) => {
+      const label = normaliser(element.getAttribute('aria-label'));
+      return mots.some((mot) => label.includes(normaliser(mot)));
+    }) || null;
+  }, { timeout }, fragments).catch(() => null);
+  if (!cible) return false;
+  const point = await cible.evaluate((element) => {
+    const r = element.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  });
+  await cible.dispose();
+  if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return false;
+  await page.mouse.click(point.x, point.y);
+  return true;
+}
+
 const SCENARIOS_ACCUEIL = [
   { nom: 'entree-412x869-clair', w: 412, h: 869, dpr: 2, mobile: true, entree: true },
   { nom: 'entree-360x640-clair', w: 360, h: 640, dpr: 2, mobile: true, entree: true },
@@ -147,6 +170,8 @@ async function ouvrir(browser, scenario) {
   try {
     await page.waitForFunction(() => window.__firstFrame !== null, { timeout: 30000 });
     premierFrameMs = await page.evaluate(() => Math.round(window.__firstFrame));
+    const placeholder = await page.$('flt-semantics-placeholder');
+    if (placeholder) await placeholder.click().catch(() => {});
   } catch (e) {
     // On capture quand même : l'image doit montrer ce qui bloque, et le
     // rapport reste exploitable au lieu d'attendre deux minutes par taille.
@@ -170,15 +195,23 @@ async function ouvrir(browser, scenario) {
     // Sur 360×640, le logo et le slogan s'empilent : le bouton descend plus
     // bas que sur 412×869. Viser son tiers inférieur évite de manquer le tap.
     const hauteurBouton = scenario.h <= 700 ? 0.76 : 0.62;
-    await page.mouse.click(scenario.w * 0.5, scenario.h * hauteurBouton);
+    const boutonCommencerClique = await cliquerSemantique(page, ['Commencer']);
+    if (!boutonCommencerClique) {
+      await page.mouse.click(scenario.w * 0.5, scenario.h * hauteurBouton);
+    }
     await sleep(1100);
     // Avec plusieurs méthodes de pointage, choisir le premier mode sur l'écran
     // d'entrée (QR dans cette recette) avant de capturer l'accueil.
     if (!scenario.sansAutresModes) {
-      // Le premier mode commence sous le titre et le sous-titre, qui peuvent
-      // s'étendre sur deux lignes sur mobile. Viser le milieu de la carte
-      // évite de cliquer dans son espace supérieur sur les petits écrans.
-      await page.mouse.click(scenario.w * 0.5, Math.min(320, scenario.h * 0.48));
+      const modeClique = await cliquerSemantique(
+        page,
+        ['Scanner un badge QR', 'Code PIN', 'Reconnaissance faciale'],
+        5000,
+      );
+      if (!modeClique) {
+        // Repli si le navigateur n'expose pas l'arbre sémantique Flutter.
+        await page.mouse.click(scenario.w * 0.5, Math.min(320, scenario.h * 0.48));
+      }
       await sleep(500);
     }
     calme = false;
