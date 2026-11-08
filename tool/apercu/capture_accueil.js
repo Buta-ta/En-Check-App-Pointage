@@ -337,6 +337,14 @@ async function ouvrir(browser, scenario) {
           const diagnostic = JSON.stringify({ scenario: scenario.nom, ...r.diagnostic });
           console.log(`Diagnostic ${scenario.nom}: ${diagnostic}`);
           console.log(`::notice title=Diagnostic capture::${diagnostic}`);
+          if (scenario.w === 412) {
+            const extrait = await r.page.screenshot({
+              type: 'jpeg',
+              quality: 55,
+              clip: { x: 0, y: 0, width: 412, height: 220 },
+            });
+            console.log(`::notice title=Capture diagnostic ${scenario.nom}::${extrait.toString('base64')}`);
+          }
         }
         await r.page.close();
       } catch (e) {
