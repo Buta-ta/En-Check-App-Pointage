@@ -31,6 +31,7 @@ import '../services/supabase_service.dart';
 import '../services/annonces_accueil_service.dart';
 import '../widgets/carrousel_annonces_accueil.dart';
 import '../widgets/carte_annonces_accueil.dart';
+import '../widgets/selection_mode_pointage.dart';
 import '../services/appareil_service.dart';
 import '../services/borne_service.dart';
 import '../services/local_database.dart';
@@ -124,6 +125,10 @@ class _BlocSalutState extends State<_BlocSalut>
 
 class _PointageScreenState extends State<PointageScreen> {
   String? _modeSelectionne;
+  MethodePointage? _modeAccueilChoisi;
+  MethodePointage? _dernierModeAccueil;
+  bool _preparationModeAccueilTerminee = false;
+  bool _annoncesModalOuverte = false;
   String _sensActionQR = 'arrivee';
 
   // ⏸ VISIBILITÉ DES PAUSES (17/10/2026)
@@ -177,11 +182,13 @@ class _PointageScreenState extends State<PointageScreen> {
   bool _moduleGeofencingActif = false;
   bool _moduleRecoFacialeActif = false;
 
-  List<MethodePointage> get _modesSecondaires =>
-      ModePointagePolicy.autresModes(
+  List<MethodePointage> get _modesAccueilDisponibles =>
+      ModePointagePolicy.modesDisponibles(
         qrActif: _moduleQRActif,
         reconnaissanceFacialeActive: _moduleRecoFacialeActif,
-        borneActive: _kioskMode,
+        modeFacial: _faceConfig['pointage_mode']?.toString(),
+        repliFacialAutorise:
+            _faceConfig['fallback_allowed'] as bool? ?? true,
       );
 
   // 🤖 Mode personnel
@@ -309,8 +316,68 @@ class _PointageScreenState extends State<PointageScreen> {
     // 🖥️ CONTRAT ÉTAPE 3 — une tablette DÉJÀ provisionnée est une borne,
     //    même si la config serveur est injoignable ou exige un jeton employé :
     //    le bail `bk1_` en coffre sécurisé est la preuve, pas le réglage distant.
-    if (await BorneService.aUnBailValide()) {
-      if (mounted) setState(() => _kioskMode = true);
+    try {
+      if (await BorneService.aUnBailValide()) {
+        if (mounted) setState(() => _kioskMode = true);
+      }
+    } catch (_) {
+      // Le choix de méthode ne doit pas rester bloqué par l'état de la borne.
+    }
+
+    await _preparerChoixModeAccueil();
+  }
+
+  String _cleDernierModeAccueil(String? entrepriseId) =>
+      'dernier_mode_pointage_${entrepriseId ?? 'sans_entreprise'}';
+
+  Future<void> _preparerChoixModeAccueil() async {
+    final modes = _modesAccueilDisponibles;
+    final entrepriseId = entrepriseSelectionnee?['id']?.toString();
+    final modeUnique = modes.length == 1 ? modes.single : null;
+    MethodePointage? dernier;
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      final valeurMemorisee =
+          preferences.getString(_cleDernierModeAccueil(entrepriseId));
+      for (final mode in MethodePointage.values) {
+        if (mode.name == valeurMemorisee) {
+          dernier = mode;
+          break;
+        }
+      }
+      if (modeUnique != null) {
+        await preferences.setString(
+          _cleDernierModeAccueil(entrepriseId),
+          modeUnique.name,
+        );
+      }
+    } catch (_) {
+      // Le choix reste utilisable même si le stockage local est indisponible.
+    }
+    if (!mounted) return;
+    setState(() {
+      _dernierModeAccueil = modes.contains(dernier) ? dernier : modeUnique;
+      // Plusieurs modes : aucun choix implicite, même si l'ancien choix est
+      // rappelé dans l'écran. Un seul mode : l'écran de choix est inutile.
+      _modeAccueilChoisi = modeUnique;
+      _preparationModeAccueilTerminee = true;
+    });
+  }
+
+  Future<void> _choisirModeAccueil(MethodePointage mode) async {
+    if (!_modesAccueilDisponibles.contains(mode)) return;
+    setState(() {
+      _dernierModeAccueil = mode;
+      _modeAccueilChoisi = mode;
+    });
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      await preferences.setString(
+        _cleDernierModeAccueil(entrepriseSelectionnee?['id']?.toString()),
+        mode.name,
+      );
+    } catch (_) {
+      // Le choix courant fonctionne même si le dernier mode ne peut être sauvé.
     }
   }
 
@@ -575,6 +642,107 @@ class _PointageScreenState extends State<PointageScreen> {
     unawaited(_annoncesAccueilService.enregistrerCache(id, annonces));
   }
 
+  Future<void> _ouvrirAnnonces(AccueilPalette palette) async {
+    if (_annoncesAccueil.isEmpty || _annoncesModalOuverte) return;
+    final entrepriseId = entrepriseSelectionnee?['id']?.toString() ?? '';
+    final annonces = List<AnnonceAccueil>.unmodifiable(_annoncesAccueil);
+    setState(() => _annoncesModalOuverte = true);
+    try {
+      await showModalBottomSheet<void>(
+        context: context,
+        backgroundColor: Colors.transparent,
+        isScrollControlled: true,
+        builder: (sheetContext) {
+          return SafeArea(
+            top: false,
+            child: Center(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: 620,
+                  maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.85,
+                ),
+                child: SingleChildScrollView(
+                  child: Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                    padding: const EdgeInsets.fromLTRB(18, 12, 18, 18),
+                    decoration: BoxDecoration(
+                      color: palette.surface,
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Annonces',
+                                    style: TextStyle(
+                                      color: palette.texteFort,
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    '${annonces.length} ${annonces.length == 1 ? 'annonce active' : 'annonces actives'}',
+                                    style: TextStyle(
+                                      color: palette.texteSecondaire,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: 'Fermer les annonces',
+                              onPressed: () =>
+                                  Navigator.of(sheetContext).pop(),
+                              icon: Icon(Icons.close,
+                                  color: palette.texteSecondaire),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        AspectRatio(
+                          aspectRatio: 16 / 9,
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(14),
+                            child: CarrouselAnnoncesAccueil(
+                              entrepriseId: entrepriseId,
+                              annonces: annonces,
+                              fondParDefaut: palette.primaire,
+                            ),
+                          ),
+                        ),
+                        if (annonces.length > 1) ...[
+                          const SizedBox(height: 10),
+                          Text(
+                            'Les annonces défilent automatiquement',
+                            style: TextStyle(
+                              color: palette.texteSecondaire,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      );
+    } finally {
+      if (mounted) setState(() => _annoncesModalOuverte = false);
+    }
+  }
+
   Future<void> _completerPaysEntreprise(String entrepriseId) async {
     if (!ConnectivityService.isOnline) return;
     try {
@@ -820,8 +988,7 @@ class _PointageScreenState extends State<PointageScreen> {
         return;
       }
     }
-    // Sinon, le parcours PIN par défaut reste disponible à l'écran ; les
-    // options secondaires s'ouvrent depuis « Autres modes ».
+    // Sinon, le parcours PIN est la méthode de repli de cette borne.
   }
 
   void _annulerFluxPause() {
@@ -1970,6 +2137,34 @@ class _PointageScreenState extends State<PointageScreen> {
       return _buildKioskEnrolementScreen();
     }
 
+    if (!_preparationModeAccueilTerminee || chargementEntreprises) {
+      final themeService = Provider.of<ThemeService>(context);
+      final palette = AccueilPalette.pour(
+        MotifService.actif.value,
+        themeService.isDarkMode,
+      );
+      return Scaffold(
+        backgroundColor: palette.fond,
+        body: Center(
+          child: CircularProgressIndicator(color: palette.primaire),
+        ),
+      );
+    }
+
+    if (_modeAccueilChoisi == null && _modesAccueilDisponibles.length > 1) {
+      final themeService = Provider.of<ThemeService>(context);
+      final palette = AccueilPalette.pour(
+        MotifService.actif.value,
+        themeService.isDarkMode,
+      );
+      return SelectionModePointage(
+        modes: _modesAccueilDisponibles,
+        dernierMode: _dernierModeAccueil,
+        palette: palette,
+        onSelection: _choisirModeAccueil,
+      );
+    }
+
     // ── Écran reco faciale ──
     if (_showFacePointage && _employeeEnAttente != null) {
       return FacePointageScreen(
@@ -2180,7 +2375,6 @@ class _PointageScreenState extends State<PointageScreen> {
       valueListenable: MotifService.actif,
       builder: (context, motif, _) {
         final palette = AccueilPalette.pour(motif, themeService.isDarkMode);
-        final modesVisibles = _modesSecondaires.isNotEmpty;
         final borneVisible =
             (_moduleRecoFacialeActif || _kioskMode) && !_bornePrete;
 
@@ -2203,16 +2397,11 @@ class _PointageScreenState extends State<PointageScreen> {
                         salutation: _buildSalutation(palette),
                         cartesAction: _buildCartesAction(palette),
                         aujourdhui: _buildBarreAujourdhui(palette),
-                        autresModes:
-                            modesVisibles ? _boutonAutresModes(palette) : null,
                         alerteBorne:
                             borneVisible ? _buildBandeauBorne() : null,
-                        annonces: _annoncesAccueil.isEmpty
-                            ? null
-                            : CarteAnnoncesAccueil(
-                                nombre: _annoncesAccueil.length,
-                                palette: palette,
-                              ),
+                        actionBorne: _kioskMode
+                            ? _buildBoutonEnrolerNouvelEmploye()
+                            : null,
                         navigation: _buildBarreNavigation(palette),
                       ),
                     ),
@@ -2411,123 +2600,6 @@ class _PointageScreenState extends State<PointageScreen> {
                     fontSize: 12,
                     color: Theme.of(context).textTheme.bodyMedium?.color),
               ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  /// ⭐ MAQUETTE FINALE 5/11 : pilule fine « Autres modes › » (mêmes
-  /// actions qu'avant — comportement inchangé).
-  Widget _boutonAutresModes(AccueilPalette palette) {
-    return Semantics(
-      button: true,
-      label: 'Autres modes',
-      child: GestureDetector(
-        onTap: _ouvrirFeuilleModes,
-        behavior: HitTestBehavior.opaque,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: palette.bordure),
-          ),
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              Text(
-                'Autres modes',
-                maxLines: 1,
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w400,
-                  color: palette.texte,
-                ),
-              ),
-              Align(
-                alignment: Alignment.centerRight,
-                child: Icon(
-                  Icons.chevron_right,
-                  size: 22,
-                  color: palette.texteSecondaire,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-  /// « Autres modes » : les mêmes actions que la carte AUTRES MODES de la
-  /// tablette, regroupées derrière un bouton nommé (fiche affichage mobile).
-  Future<void> _ouvrirFeuilleModes() async {
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (sheetContext) {
-        return Container(
-          decoration: BoxDecoration(
-            color: Theme.of(context).cardColor,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-          ),
-          padding: const EdgeInsets.fromLTRB(22, 12, 22, 28),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text('Autres modes',
-                        style: TextStyle(
-                            fontSize: 21,
-                            fontWeight: FontWeight.w800,
-                            color: Theme.of(context)
-                                    .textTheme
-                                    .titleLarge
-                                    ?.color ??
-                                EnCheckColors.brunProfond)),
-                  ),
-                  IconButton(
-                    onPressed: () => Navigator.pop(sheetContext),
-                    icon: const Icon(Icons.close, color: EnCheckColors.gris),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              if (_modesSecondaires.contains(MethodePointage.codePin)) ...[
-                const Text(
-                  'Le lecteur QR est le mode principal. Le PIN reste disponible en repli.',
-                  style: TextStyle(fontSize: 12, color: EnCheckColors.gris),
-                ),
-                const SizedBox(height: 8),
-                _boutonScene(
-                  label: 'Code PIN',
-                  icon: Icons.pin_outlined,
-                  rempli: false,
-                  onTap: () {
-                    Navigator.pop(sheetContext);
-                    _ouvrirValidationPointage('arrivee');
-                  },
-                ),
-                const SizedBox(height: 8),
-              ],
-              if (_modesSecondaires
-                  .contains(MethodePointage.reconnaissanceFaciale)) ...[
-                _boutonScene(
-                  label: 'Reconnaissance faciale',
-                  icon: Icons.face,
-                  rempli: false,
-                  onTap: () {
-                    Navigator.pop(sheetContext);
-                    _onBoutonFaceClique();
-                  },
-                ),
-                const SizedBox(height: 8),
-              ],
-              if (_kioskMode) _buildBoutonEnrolerNouvelEmploye(),
             ],
           ),
         );
@@ -3651,7 +3723,9 @@ class _PointageScreenState extends State<PointageScreen> {
                       RepaintBoundary(
                         child: CarrouselAnnoncesAccueil(
                           entrepriseId: entrepriseId,
-                          annonces: _annoncesAccueil,
+                          annonces: _annoncesModalOuverte
+                              ? const <AnnonceAccueil>[]
+                              : _annoncesAccueil,
                           fondParDefaut: palette.primaire,
                         ),
                       ),
@@ -3782,6 +3856,16 @@ class _PointageScreenState extends State<PointageScreen> {
                           ),
                         ),
                       ),
+                      if (_annoncesAccueil.isNotEmpty)
+                        Positioned(
+                          top: 0,
+                          right: 78,
+                          child: BoutonAnnoncesAccueil(
+                            nombre: _annoncesAccueil.length,
+                            palette: palette,
+                            onPressed: () => _ouvrirAnnonces(palette),
+                          ),
+                        ),
                       Positioned(
                         top: 20,
                         right: 18,
@@ -4450,52 +4534,6 @@ class _PointageScreenState extends State<PointageScreen> {
       ),
     );
   }
-  /// Modes de repli (PIN, visage, enrôlement borne).
-  Widget _buildCarteModules() {
-    final enfants = <Widget>[];
-    if (_modesSecondaires.contains(MethodePointage.codePin)) {
-      enfants.add(_boutonScene(
-        label: 'Code PIN',
-        icon: Icons.pin_outlined,
-        rempli: false,
-        onTap: () => _ouvrirValidationPointage('arrivee'),
-      ));
-    }
-    if (_moduleRecoFacialeActif) {
-      enfants.add(_boutonScene(
-        label: 'Reconnaissance faciale',
-        icon: Icons.face,
-        rempli: false,
-        onTap: _onBoutonFaceClique,
-      ));
-    }
-    if (_kioskMode) {
-      enfants.add(_buildBoutonEnrolerNouvelEmploye());
-    }
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text('AUTRES MODES',
-              style: TextStyle(
-                  fontFamily: 'JetBrainsMono',
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.8,
-                  color: EnCheckColors.gris)),
-          const SizedBox(height: 10),
-          for (final b in enfants) ...[b, const SizedBox(height: 8)],
-        ],
-      ),
-    );
-  }
-
   // NAVIGATION VERS LES PAGES (une page = une action)
 
   /// Le retour vers la configuration est volontaire et confirmé : le code
@@ -4605,10 +4643,15 @@ class _PointageScreenState extends State<PointageScreen> {
   /// Le QR devient le geste principal dès qu'il est activé pour l'entreprise.
   /// Sans QR, le code PIN reste le parcours par défaut.
   Future<void> _ouvrirActionPointage(String sens) async {
-    final mode = ModePointagePolicy.principal(qrActif: _moduleQRActif);
+    final mode = _modeAccueilChoisi ??
+        ModePointagePolicy.principal(qrActif: _moduleQRActif);
     if (mode == MethodePointage.qr) {
       _sensActionQR = sens;
       _ouvrirLecteurQR();
+      return;
+    }
+    if (mode == MethodePointage.reconnaissanceFaciale) {
+      await _onBoutonFaceClique();
       return;
     }
     await _ouvrirValidationPointage(sens);

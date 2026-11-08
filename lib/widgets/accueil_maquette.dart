@@ -16,9 +16,8 @@ class AccueilMaquette extends StatelessWidget {
     required this.cartesAction,
     required this.aujourdhui,
     required this.navigation,
-    this.autresModes,
-    this.annonces,
     this.alerteBorne,
+    this.actionBorne,
   });
 
   final Widget entete;
@@ -26,9 +25,8 @@ class AccueilMaquette extends StatelessWidget {
   final Widget cartesAction;
   final Widget aujourdhui;
   final Widget navigation;
-  final Widget? autresModes;
-  final Widget? annonces;
   final Widget? alerteBorne;
+  final Widget? actionBorne;
 
   @override
   Widget build(BuildContext context) {
@@ -85,9 +83,8 @@ class AccueilMaquette extends StatelessWidget {
       largeur: largeur,
       hauteur: hauteur,
       texte: texte,
-      avecModes: autresModes != null,
-      avecAnnonces: annonces != null,
       avecAlerte: alerteBorne != null,
+      avecActionBorne: actionBorne != null,
     );
 
     final pile = SizedBox(
@@ -102,10 +99,8 @@ class AccueilMaquette extends StatelessWidget {
             _bloc('accueil-alerte', d, 'alerte', alerteBorne!),
           _bloc('accueil-actions', d, 'cartes', cartesAction),
           _bloc('accueil-aujourdhui', d, 'jour', aujourdhui),
-          if (autresModes != null)
-            _bloc('accueil-autres', d, 'autres', autresModes!),
-          if (annonces != null)
-            _bloc('accueil-annonces', d, 'annonces', annonces!),
+          if (actionBorne != null)
+            _bloc('accueil-action-borne', d, 'actionBorne', actionBorne!),
         ],
       ),
     );
@@ -163,10 +158,8 @@ class _Disposition {
     'cartes',
     'gJour',
     'jour',
-    'gAutres',
-    'autres',
-    'gAnnonces',
-    'annonces',
+    'gActionBorne',
+    'actionBorne',
     'gNav',
   ];
 
@@ -174,9 +167,8 @@ class _Disposition {
     required double largeur,
     required double hauteur,
     required double texte,
-    required bool avecModes,
-    required bool avecAnnonces,
     required bool avecAlerte,
+    required bool avecActionBorne,
   }) {
     final e = (hauteur / 796.0).clamp(1.0, 1.22).toDouble();
     final plaque = math.max(37.0 * e, 34.0 * texte);
@@ -193,11 +185,9 @@ class _Disposition {
       'cartes': math.max(131.0 * e, 83.0 + 48.0 * texte),
       'gJour': 18.0 * e,
       'jour': math.max(90.0 * e, 25.0 + 65.0 * texte),
-      'gAutres': avecModes ? 17.0 * e : 0.0,
-      'autres': avecModes ? math.max(39.0 * e, 20.0 + 17.0 * texte) : 0.0,
-      'gAnnonces': avecAnnonces ? 14.5 * e : 0.0,
-      'annonces':
-          avecAnnonces ? math.max(71.5 * e, 31.5 + 40.0 * texte) : 0.0,
+      'gActionBorne': avecActionBorne ? 12.0 * e : 0.0,
+      'actionBorne':
+          avecActionBorne ? math.max(50.0 * e, 44.0 * texte) : 0.0,
       'gNav': 12.0 * e,
     };
     final min = <String, double>{
@@ -209,23 +199,21 @@ class _Disposition {
       'cartes': math.max(104.0, 62.0 + 48.0 * texte),
       'gJour': 10.0,
       'jour': 16.0 + 65.0 * texte,
-      'gAutres': avecModes ? 10.0 : 0.0,
-      'autres': avecModes ? 16.0 + 17.0 * texte : 0.0,
-      'gAnnonces': avecAnnonces ? 9.0 : 0.0,
-      'annonces': avecAnnonces ? 16.0 + 40.0 * texte : 0.0,
+      'gActionBorne': avecActionBorne ? 8.0 : 0.0,
+      'actionBorne':
+          avecActionBorne ? math.max(44.0, 44.0 * texte) : 0.0,
       'gNav': 8.0,
     };
 
     double somme() => h.values.fold(0.0, (a, b) => a + b);
-    // Le média garde un cadre 16:9, quel que soit le nombre d'annonces.
-    // La frise culturelle de 40 px est séparée sous ce cadre.
+    // Le média reste en 16:9 ; la frise culturelle de 40 px est séparée dessous.
     final marge = largeur <= 420 ? 20.0 : 24.0;
     final largeurInterne = math.max(1.0, largeur - marge * 2).toDouble();
     final entete = (largeurInterne * 9 / 16 + 40.0).toDouble();
     final surplus = hauteur - somme() - entete;
     if (surplus > 0) {
       const respirations = [
-        'haut', 'gSalut', 'gAlerte', 'gJour', 'gAutres', 'gAnnonces', 'gNav',
+        'haut', 'gSalut', 'gAlerte', 'gJour', 'gActionBorne', 'gNav',
       ];
       final totalGaps = respirations.fold(0.0, (s, k) => s + h[k]!);
       if (totalGaps > 0) {
