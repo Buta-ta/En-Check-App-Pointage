@@ -31,6 +31,7 @@ import '../services/supabase_service.dart';
 import '../services/annonces_accueil_service.dart';
 import '../widgets/carrousel_annonces_accueil.dart';
 import '../widgets/carte_annonces_accueil.dart';
+import '../widgets/ecran_enrolement_borne.dart';
 import '../widgets/selection_mode_pointage.dart';
 import '../services/appareil_service.dart';
 import '../services/borne_service.dart';
@@ -1407,6 +1408,41 @@ class _PointageScreenState extends State<PointageScreen> {
     });
   }
 
+  Future<void> _retourAccueilDepuisEnrolementKiosk() async {
+    if (_showFaceEnrollment) {
+      final quitter = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Quitter l’enrôlement ?'),
+          content: const Text(
+            'Les captures en cours ne seront pas conservées. '
+            'Vous pourrez reprendre l’enrôlement depuis l’accueil.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Continuer l’enrôlement'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Retour à l’accueil'),
+            ),
+          ],
+        ),
+      );
+      if (quitter != true) return;
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _kioskPhase = 'pointage';
+      _showFaceEnrollment = false;
+      _employeeEnAttente = null;
+      _modeSelectionne = null;
+      _intention = 'pointage';
+    });
+  }
+
   void _lancerEnrolementKioskSuivant() {
     if (_kioskEnrolementIndex >= _kioskEmployeesNonEnroles.length) {
       setState(() => _kioskPhase = 'pointage');
@@ -2273,6 +2309,11 @@ class _PointageScreenState extends State<PointageScreen> {
             _modeSelectionne = null;
           });
         },
+        onReturnHome: _kioskMode
+            ? () {
+                _retourAccueilDepuisEnrolementKiosk();
+              }
+            : null,
       );
     }
 
@@ -2394,17 +2435,37 @@ class _PointageScreenState extends State<PointageScreen> {
                       child: CircularProgressIndicator(color: palette.primaire),
                     )
                   : SansEtirement(
-                      child: AccueilMaquette(
-                        entete: _buildScenePointage(themeService, palette),
-                        salutation: _buildSalutation(palette),
-                        cartesAction: _buildCartesAction(palette),
-                        aujourdhui: _buildBarreAujourdhui(palette),
-                        alerteBorne:
-                            borneVisible ? _buildBandeauBorne() : null,
-                        actionBorne: _kioskMode
-                            ? _buildBoutonEnrolerNouvelEmploye()
-                            : null,
-                        navigation: _buildBarreNavigation(palette),
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          AccueilMaquette(
+                            entete: _buildScenePointage(themeService, palette),
+                            salutation: _buildSalutation(palette),
+                            cartesAction: _buildCartesAction(palette),
+                            aujourdhui: _buildBarreAujourdhui(palette),
+                            alerteBorne:
+                                borneVisible ? _buildBandeauBorne() : null,
+                            actionBorne: _kioskMode
+                                ? _buildBoutonEnrolerNouvelEmploye()
+                                : null,
+                            navigation: _buildBarreNavigation(palette),
+                          ),
+                          if (_annoncesAccueil.isNotEmpty)
+                            Positioned(
+                              top: 20,
+                              right: 16,
+                              child: BoutonAnnoncesAccueil(
+                                nombre: _annoncesAccueil.length,
+                                palette: palette,
+                                onPressed: () => _ouvrirAnnonces(palette),
+                              ),
+                            ),
+                          Positioned(
+                            top: 27,
+                            right: 72,
+                            child: _boutonLune(themeService),
+                          ),
+                        ],
                       ),
                     ),
             ),
@@ -2614,131 +2675,24 @@ class _PointageScreenState extends State<PointageScreen> {
 
   Widget _buildKioskEnrolementScreen() {
     final total = _kioskEmployeesNonEnroles.length;
-    final restants = total - _kioskEnrolementIndex;
     final employee = _kioskEnrolementIndex < total
         ? _kioskEmployeesNonEnroles[_kioskEnrolementIndex]
         : null;
 
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: SafeArea(
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(30),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  width: 80,
-                  height: 80,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: EnCheckColors.terreChaude.withOpacity(0.15),
-                    border:
-                    Border.all(color: EnCheckColors.terreChaude, width: 2),
-                  ),
-                  child: const Icon(Icons.tablet_android,
-                      color: EnCheckColors.terreChaude, size: 40),
-                ),
-                const SizedBox(height: 24),
-                const Text(
-                  'MODE TABLETTE',
-                  style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 2),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Phase d\'enrôlement : $restants employé${restants > 1 ? 's' : ''} restant${restants > 1 ? 's' : ''}',
-                  style:
-                  const TextStyle(color: EnCheckColors.gris, fontSize: 14),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 30),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
-                  child: LinearProgressIndicator(
-                    value: total > 0 ? _kioskEnrolementIndex / total : 0,
-                    backgroundColor:
-                    EnCheckColors.terreChaude.withOpacity(0.1),
-                    valueColor: const AlwaysStoppedAnimation<Color>(
-                        EnCheckColors.terreChaude),
-                    minHeight: 8,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  '$_kioskEnrolementIndex / $total enrôlé${_kioskEnrolementIndex > 1 ? 's' : ''}',
-                  style:
-                  const TextStyle(color: EnCheckColors.gris, fontSize: 12),
-                ),
-                const SizedBox(height: 40),
-                if (employee != null) ...[
-                  Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).cardColor,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                          color: EnCheckColors.terreChaude.withOpacity(0.2)),
-                    ),
-                    child: Column(
-                      children: [
-                        const Text('Employé suivant à enrôler :',
-                            style: TextStyle(
-                                color: EnCheckColors.gris, fontSize: 13)),
-                        const SizedBox(height: 8),
-                        Text(
-                          '${employee['first_name']} ${employee['last_name']}',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color:
-                            Theme.of(context).textTheme.bodyLarge?.color,
-                          ),
-                        ),
-                        Text(employee['matricule'] ?? '',
-                            style: const TextStyle(
-                                color: EnCheckColors.gris, fontSize: 13)),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: _lancerEnrolementKioskSuivant,
-                      icon: const Icon(Icons.face_retouching_natural),
-                      label: const Text('Enrôler cet employé',
-                          style: TextStyle(
-                              fontSize: 16, fontWeight: FontWeight.bold)),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: EnCheckColors.terreChaude,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16)),
-                      ),
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 16),
-                if (_kioskEnrolementIndex > 0)
-                  TextButton(
-                    onPressed: () =>
-                        setState(() => _kioskPhase = 'pointage'),
-                    child: const Text(
-                      'Passer au pointage (enrôlement partiel)',
-                      style: TextStyle(
-                          color: EnCheckColors.gris, fontSize: 14),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ),
-      ),
+    return EcranEnrolementBorne(
+      nomEmploye: employee == null
+          ? ''
+          : '${employee['first_name']} ${employee['last_name']}'.trim(),
+      matricule: employee?['matricule']?.toString() ?? '',
+      index: _kioskEnrolementIndex,
+      total: total,
+      onRetourAccueil: () {
+        _retourAccueilDepuisEnrolementKiosk();
+      },
+      onCommencer: _lancerEnrolementKioskSuivant,
+      onPasser: _kioskEnrolementIndex > 0
+          ? () => setState(() => _kioskPhase = 'pointage')
+          : null,
     );
   }
 
@@ -3692,8 +3646,13 @@ class _PointageScreenState extends State<PointageScreen> {
       builder: (context, contraintes) {
         final largeur = contraintes.maxWidth;
         final hauteur = contraintes.maxHeight;
+        final largeurEcran = MediaQuery.sizeOf(context).width;
         final texte = MediaQuery.textScalerOf(context).scale(1.0);
         final dateTop = 16.0 + 29.8 * texte + 5.0;
+        final margeDroiteHeure = largeurEcran <= 620
+            ? math.max(largeur * 0.29, 110.0)
+            : largeur * 0.29;
+        final margeDroiteDate = largeurEcran <= 620 ? 110.0 : 70.0;
         final voileHauteur = math
             .min(hauteur - 40.0, math.max(146.0, 105.0 * texte + 45.0))
             .toDouble();
@@ -3808,7 +3767,7 @@ class _PointageScreenState extends State<PointageScreen> {
                       ),
                       Positioned(
                         left: largeur * 0.29,
-                        right: largeur * 0.29,
+                        right: margeDroiteHeure,
                         top: 16,
                         height: 32 * texte,
                         child: FittedBox(
@@ -3834,7 +3793,7 @@ class _PointageScreenState extends State<PointageScreen> {
                       ),
                       Positioned(
                         left: 70,
-                        right: 70,
+                        right: margeDroiteDate,
                         top: dateTop,
                         height: 15 * texte,
                         child: FittedBox(
@@ -3857,21 +3816,6 @@ class _PointageScreenState extends State<PointageScreen> {
                             ),
                           ),
                         ),
-                      ),
-                      if (_annoncesAccueil.isNotEmpty)
-                        Positioned(
-                          top: 0,
-                          right: 78,
-                          child: BoutonAnnoncesAccueil(
-                            nombre: _annoncesAccueil.length,
-                            palette: palette,
-                            onPressed: () => _ouvrirAnnonces(palette),
-                          ),
-                        ),
-                      Positioned(
-                        top: 20,
-                        right: 18,
-                        child: _boutonLune(themeService),
                       ),
                     ],
                   ),
