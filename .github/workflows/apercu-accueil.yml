@@ -75,9 +75,9 @@ jobs:
             python3 - <<'PY'
           from pathlib import Path
           lignes = Path('/tmp/apercu-tests.log').read_text(errors='replace').splitlines()
-          # Les journaux complets ne sont pas toujours téléchargeables : les
-          # 160 dernières lignes sont donc aussi une annotation de la vérification.
-          texte = '\n'.join(lignes[-160:])
+          # Les annotations GitHub sont limitées en taille : privilégier la
+          # fin du journal pour montrer l'assertion et la trace de l'échec.
+          texte = '\n'.join(lignes[-60:])[-3000:]
           texte = texte.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
           print('::error::Détail des tests Flutter :%0A' + texte)
           PY
