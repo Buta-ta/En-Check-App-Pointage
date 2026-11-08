@@ -21,7 +21,8 @@ void main() {
       ),
     );
 
-    expect(tester.takeException(), isNull);
+    final erreurRendu = tester.takeException();
+    expect(erreurRendu, isNull, reason: 'Erreur pendant le rendu: $erreurRendu');
     expect(find.text('Accueil'), findsOneWidget);
     expect(find.text('Enrôler un employé'), findsOneWidget);
     expect(find.text('Aminata Kone'), findsOneWidget);
