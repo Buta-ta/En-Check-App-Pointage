@@ -175,7 +175,10 @@ async function ouvrir(browser, scenario) {
     // Avec plusieurs méthodes de pointage, choisir le premier mode sur l'écran
     // d'entrée (QR dans cette recette) avant de capturer l'accueil.
     if (!scenario.sansAutresModes) {
-      await page.mouse.click(scenario.w * 0.5, Math.min(280, scenario.h * 0.45));
+      // Le premier mode commence sous le titre et le sous-titre, qui peuvent
+      // s'étendre sur deux lignes sur mobile. Viser le milieu de la carte
+      // évite de cliquer dans son espace supérieur sur les petits écrans.
+      await page.mouse.click(scenario.w * 0.5, Math.min(320, scenario.h * 0.48));
       await sleep(500);
     }
     calme = false;
