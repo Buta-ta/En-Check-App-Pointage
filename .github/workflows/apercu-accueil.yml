@@ -159,34 +159,3 @@ jobs:
           path: apercu-accueil/
           if-no-files-found: warn
           retention-days: 14
-
-  # Mise à jour unique du lockfile pour cette PR. Le job est borné à la
-  # branche de travail et sera retiré dès que pubspec.lock est poussé.
-  resolve-lockfile-once:
-    if: github.event_name == 'pull_request' && github.head_ref == 'arena/81e0df9a-en-check-app-pointage'
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout de la branche de travail
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref }}
-      - name: Installer Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          flutter-version: '3.44.9'
-          cache: true
-      - name: Résoudre et enregistrer pubspec.lock
-        run: |
-          flutter pub get
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add pubspec.lock
-          if git diff --cached --quiet; then
-            echo "pubspec.lock est déjà à jour."
-            exit 0
-          fi
-          git commit -m "build: update Flutter dependency lockfile"
-          git push origin "HEAD:${GITHUB_HEAD_REF}"
