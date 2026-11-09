@@ -113,17 +113,42 @@ void main() {
     );
   });
 
-  test('les modes faciaux obligatoires ou exclusifs ne sont pas contournés', () {
+  test(
+      'face_required respecte le repli autorisé, face_exclusive reste seul',
+      () {
+    expect(
+      ModePointagePolicy.modesDisponibles(
+        qrActif: true,
+        reconnaissanceFacialeActive: true,
+        modeFacial: 'face_required',
+        repliFacialAutorise: true,
+      ),
+      [
+        MethodePointage.qr,
+        MethodePointage.codePin,
+        MethodePointage.reconnaissanceFaciale,
+      ],
+    );
     for (final mode in ['face_required', 'face_exclusive']) {
       expect(
         ModePointagePolicy.modesDisponibles(
           qrActif: true,
           reconnaissanceFacialeActive: true,
           modeFacial: mode,
+          repliFacialAutorise: false,
         ),
         [MethodePointage.reconnaissanceFaciale],
       );
     }
+    expect(
+      ModePointagePolicy.modesDisponibles(
+        qrActif: true,
+        reconnaissanceFacialeActive: true,
+        modeFacial: 'face_exclusive',
+        repliFacialAutorise: true,
+      ),
+      [MethodePointage.reconnaissanceFaciale],
+    );
   });
 
   test('un réglage facial sans repli garde la reconnaissance comme seul choix',
