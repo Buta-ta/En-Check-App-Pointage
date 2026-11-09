@@ -2,6 +2,53 @@ import 'package:en_check/services/mode_pointage_policy.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('restaure un mode mémorisé uniquement s’il reste disponible', () {
+    final disponibles = [
+      MethodePointage.codePin,
+      MethodePointage.reconnaissanceFaciale,
+    ];
+
+    expect(
+      ModePointagePolicy.choixMemorise(
+        modesDisponibles: disponibles,
+        valeurMemorisee: 'reconnaissanceFaciale',
+      ),
+      MethodePointage.reconnaissanceFaciale,
+    );
+    expect(
+      ModePointagePolicy.choixMemorise(
+        modesDisponibles: disponibles,
+        valeurMemorisee: 'qr',
+      ),
+      isNull,
+    );
+  });
+
+  test('le bouton d’enrôlement borne exige une borne et le mode facial choisi',
+      () {
+    expect(
+      ModePointagePolicy.afficherActionEnrolement(
+        borneActive: true,
+        modeChoisi: MethodePointage.reconnaissanceFaciale,
+      ),
+      isTrue,
+    );
+    expect(
+      ModePointagePolicy.afficherActionEnrolement(
+        borneActive: true,
+        modeChoisi: MethodePointage.codePin,
+      ),
+      isFalse,
+    );
+    expect(
+      ModePointagePolicy.afficherActionEnrolement(
+        borneActive: false,
+        modeChoisi: MethodePointage.reconnaissanceFaciale,
+      ),
+      isFalse,
+    );
+  });
+
   test('le PIN reste principal par défaut, le QR devient principal s’il est actif',
       () {
     expect(

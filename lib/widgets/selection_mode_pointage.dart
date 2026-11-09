@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 import '../services/mode_pointage_policy.dart';
 import '../theme/accueil_palette.dart';
 
-/// Choix explicite du mode avant l'affichage de l'accueil Pointage.
-/// Le dernier mode est rappelé, mais n'est jamais sélectionné automatiquement.
+/// Choix du mode avant l'affichage de l'accueil Pointage.
+/// Le dernier choix autorisé est restauré automatiquement par l'écran parent.
 class SelectionModePointage extends StatelessWidget {
   const SelectionModePointage({
     super.key,
@@ -45,7 +45,7 @@ class SelectionModePointage extends StatelessWidget {
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  'Sélectionnez le mode à utiliser pour cette session.',
+                  'Votre dernier choix autorisé est mémorisé pour cette entreprise.',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: palette.texteSecondaire,

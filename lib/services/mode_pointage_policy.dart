@@ -9,6 +9,27 @@ enum MethodePointage {
 class ModePointagePolicy {
   const ModePointagePolicy._();
 
+  /// Restaure seulement un mode mémorisé qui est encore autorisé.
+  /// La préférence reste attachée à l'entreprise (clé gérée par l'écran) ;
+  /// une option désactivée ne peut ainsi contourner la configuration courante.
+  static MethodePointage? choixMemorise({
+    required List<MethodePointage> modesDisponibles,
+    required String? valeurMemorisee,
+  }) {
+    for (final mode in modesDisponibles) {
+      if (mode.name == valeurMemorisee) return mode;
+    }
+    return null;
+  }
+
+  /// L'enrôlement n'est pertinent que sur une borne où la reconnaissance
+  /// faciale a réellement été choisie comme mode actif.
+  static bool afficherActionEnrolement({
+    required bool borneActive,
+    required MethodePointage? modeChoisi,
+  }) =>
+      borneActive && modeChoisi == MethodePointage.reconnaissanceFaciale;
+
   /// Le QR devient le geste principal lorsqu'il est activé ; sinon, le PIN
   /// demeure le mode principal par défaut.
   static MethodePointage principal({required bool qrActif}) =>
