@@ -10596,7 +10596,7 @@ bcz(a,b){var s,r,q
 for(s=a.length,r=0;r<s;++r){q=a[r]
 if(q.b===b)return q}return null},
 bcA(a,b,c,d){var s
-if(c)s=a==="face_exclusive"||a==="face_required"||!d
+if(c)s=a==="face_exclusive"||!d
 else s=!1
 if(s)return A.b([B.jH],t.mh)
 s=A.b([],t.mh)
