@@ -64,9 +64,9 @@ class _EcranDemarrageState extends State<EcranDemarrage>
     final accent = const Color(0xFF3A686D);
 
     return IgnorePointer(
-      ignoring: superpose,
+      ignoring: widget.superpose,
       child: Scaffold(
-        backgroundColor: superpose ? Colors.transparent : background,
+        backgroundColor: widget.superpose ? Colors.transparent : background,
         body: SafeArea(
           child: Center(
           child: LayoutBuilder(builder: (context, constraints) {
@@ -76,7 +76,7 @@ class _EcranDemarrageState extends State<EcranDemarrage>
             return AnimatedBuilder(
               animation: _controller,
               builder: (context, _) {
-                final t = reduceMotion || statique ? 1.0 : _controller.value;
+                final t = reduceMotion || widget.statique ? 1.0 : _controller.value;
                 final meet = Curves.easeInOutCubic.transform(
                     ((t - .08) / .55).clamp(0.0, 1.0).toDouble());
                 final reveal = reduceMotion
@@ -86,7 +86,9 @@ class _EcranDemarrageState extends State<EcranDemarrage>
                     ? 0.0
                     : (1 - Curves.easeIn.transform(((t - .72) / .24).clamp(0.0, 1.0).toDouble()));
                 final contact = reduceMotion ? 0.0 : ((t - .56) / .12).clamp(0.0, 1.0).toDouble();
-                final sortie = superpose && !reduceMotion && !statique
+                final sortie = widget.superpose &&
+                    !reduceMotion &&
+                    !widget.statique
                     ? (1 - ((t - .78) / .22).clamp(0.0, 1.0)).toDouble()
                     : 1.0;
                 return Opacity(
