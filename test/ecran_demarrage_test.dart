@@ -27,6 +27,27 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('le splash superposé ne bloque pas l’action de l’application', (tester) async {
+    var pressed = false;
+    await tester.pumpWidget(MaterialApp(
+      home: Stack(
+        fit: StackFit.expand,
+        children: [
+          Center(
+            child: ElevatedButton(
+              onPressed: () => pressed = true,
+              child: const Text('Action accueil'),
+            ),
+          ),
+          const EcranDemarrage(superpose: true),
+        ],
+      ),
+    ));
+
+    await tester.tap(find.text('Action accueil'));
+    expect(pressed, isTrue);
+  });
+
   testWidgets('s adapte à une fenêtre étroite', (tester) async {
     tester.view.physicalSize = const Size(320, 640);
     tester.view.devicePixelRatio = 1;

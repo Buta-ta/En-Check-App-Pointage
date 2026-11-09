@@ -213,6 +213,7 @@ class _PointageScreenState extends State<PointageScreen> {
   /// valide) ? Le personnel se synchronise alors par `encheck_borne_personnel`.
   bool _bornePrete = false;
   String _kioskPhase = 'pointage';
+  bool _enrolementBorneEnCours = false;
   List<Map<String, dynamic>> _kioskEmployeesNonEnroles = [];
   int _kioskEnrolementIndex = 0;
 
@@ -2770,53 +2771,78 @@ class _PointageScreenState extends State<PointageScreen> {
     return _buildModePINSimple();
   }
 
-  Widget _buildBoutonEnrolerNouvelEmploye() {
-    return GestureDetector(
-      onTap: () async {
-        await _detecterEmployesNonEnroles();
-        if (_kioskEmployeesNonEnroles.isEmpty) {
-          // CONTRAT ÉTAPE 3 : message honnête selon l'état du cache borne.
-          if (!await BorneService.cacheValide()) {
-            _afficherErreur(
-                'Personnel de la borne non disponible sur cette tablette.\n'
-                'Synchronisez la borne (bouton « 🖥 Borne ») — une autorisation '
-                'de borne est fournie par le superadmin.\n'
-                'En attendant : un employé peut s\'enrôler en s\'identifiant '
-                'avec son matricule et son PIN.');
-          } else {
-            _afficherErreur(
-                'Tous les employés actifs de cette borne sont déjà enrôlés.');
-          }
-          return;
+  Future<void> _ouvrirFileEnrolementBorne() async {
+    if (_enrolementBorneEnCours) return;
+    setState(() => _enrolementBorneEnCours = true);
+    try {
+      await _detecterEmployesNonEnroles();
+      if (!mounted) return;
+      if (_kioskEmployeesNonEnroles.isEmpty) {
+        // CONTRAT ÉTAPE 3 : message honnête selon l'état du cache borne.
+        if (!await BorneService.cacheValide()) {
+          _afficherErreur(
+              'Personnel de la borne non disponible sur cette tablette.\n'
+              'Synchronisez la borne (bouton « 🖥 Borne ») — une autorisation '
+              'de borne est fournie par le superadmin.\n'
+              'En attendant : un employé peut s\'enrôler en s\'identifiant '
+              'avec son matricule et son PIN.');
+        } else {
+          _afficherErreur(
+              'Tous les employés actifs de cette borne sont déjà enrôlés.');
         }
-        setState(() {
-          _kioskPhase = 'enrolling';
-          _kioskEnrolementIndex = 0;
-        });
-      },
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
-        decoration: BoxDecoration(
-          color: Colors.indigo.withOpacity(0.08),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.indigo.withOpacity(0.3)),
+        return;
+      }
+      setState(() {
+        _kioskPhase = 'enrolling';
+        _kioskEnrolementIndex = 0;
+      });
+    } catch (error) {
+      if (mounted) {
+        _afficherErreur('Impossible de charger la liste des employés : $error');
+      }
+    } finally {
+      if (mounted) setState(() => _enrolementBorneEnCours = false);
+    }
+  }
+
+  Widget _buildBoutonEnrolerNouvelEmploye() {
+    final themeService = Provider.of<ThemeService>(context, listen: false);
+    final palette = AccueilPalette.pour(
+      MotifService.actif.value,
+      themeService.isDarkMode,
+    );
+
+    return SizedBox(
+      width: double.infinity,
+      height: 58,
+      child: ElevatedButton.icon(
+        key: const Key('bouton-enroler-nouvel-employe'),
+        onPressed:
+            _enrolementBorneEnCours ? null : _ouvrirFileEnrolementBorne,
+        icon: _enrolementBorneEnCours
+            ? const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
+              )
+            : const Icon(Icons.person_add_alt_1_outlined),
+        label: const Text(
+          'Enrôler un nouvel employé',
+          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
         ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.person_add_outlined,
-                color: Colors.indigo.shade300, size: 22),
-            const SizedBox(width: 10),
-            Text(
-              'Enrôler un nouvel employé',
-              style: TextStyle(
-                color: Colors.indigo.shade300,
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
+        style: ElevatedButton.styleFrom(
+          backgroundColor: palette.primaire,
+          foregroundColor: palette.surPrimaire,
+          disabledBackgroundColor: palette.primaire.withOpacity(.65),
+          disabledForegroundColor: palette.surPrimaire,
+          elevation: 0,
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
         ),
       ),
     );

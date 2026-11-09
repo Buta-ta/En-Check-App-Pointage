@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -57,25 +59,48 @@ class _BootstrapApp extends StatefulWidget {
 
 class _BootstrapAppState extends State<_BootstrapApp> {
   late Future<void> _services;
+  final GlobalKey _splashKey = GlobalKey();
   bool _chargementLong = false;
+  bool _animationTerminee = false;
+  Timer? _timerDemarrage;
 
   @override
   void initState() {
     super.initState();
     _services = _initialiserServices();
-    Future<void>.delayed(const Duration(seconds: 1), () {
-      if (mounted && !_servicesEstPret) setState(() => _chargementLong = true);
-    });
+    _programmerIndicateurChargement();
   }
 
   bool _servicesEstPret = false;
+
+  void _programmerIndicateurChargement() {
+    _timerDemarrage?.cancel();
+    _timerDemarrage = Timer(const Duration(seconds: 1), () {
+      if (mounted && !_servicesEstPret) {
+        setState(() => _chargementLong = true);
+      }
+    });
+  }
 
   void _relancer() {
     setState(() {
       _servicesEstPret = false;
       _chargementLong = false;
+      _animationTerminee = false;
       _services = _initialiserServices();
     });
+    _programmerIndicateurChargement();
+  }
+
+  @override
+  void dispose() {
+    _timerDemarrage?.cancel();
+    super.dispose();
+  }
+
+  void _terminerAnimationDemarrage() {
+    if (!mounted || _animationTerminee) return;
+    setState(() => _animationTerminee = true);
   }
 
   @override
@@ -92,11 +117,12 @@ class _BootstrapAppState extends State<_BootstrapApp> {
           if (snapshot.hasError) {
             return _ErreurDemarrage(onRetry: _relancer);
           }
-          if (snapshot.connectionState != ConnectionState.done) {
-            return EcranDemarrage(chargementLong: _chargementLong);
-          }
-          if (!_servicesEstPret) {
+
+          final servicesPrets =
+              snapshot.connectionState == ConnectionState.done;
+          if (servicesPrets && !_servicesEstPret) {
             _servicesEstPret = true;
+            _timerDemarrage?.cancel();
             // Ces traitements restent non bloquants et le pointage apparaît
             // dès que les services locaux essentiels sont initialisés.
             FaceRecognitionService.initialiser().then((success) {
@@ -111,7 +137,23 @@ class _BootstrapAppState extends State<_BootstrapApp> {
               print('❌ Synchronisation de démarrage échouée: $e');
             });
           }
-          return const EnCheckApp();
+
+          if (servicesPrets && _animationTerminee) {
+            return const EnCheckApp();
+          }
+
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              if (servicesPrets) const EnCheckApp(),
+              EcranDemarrage(
+                key: _splashKey,
+                chargementLong: _chargementLong && !servicesPrets,
+                superpose: servicesPrets,
+                onAnimationComplete: _terminerAnimationDemarrage,
+              ),
+            ],
+          );
         },
       ),
     );
@@ -183,7 +225,7 @@ class _EnCheckAppState extends State<EnCheckApp> {
         theme: ThemeData.light(),
         darkTheme: ThemeData.dark(),
         themeMode: themeService.isDarkMode ? ThemeMode.dark : ThemeMode.light,
-        home: const EcranDemarrage(chargementLong: true),
+        home: const EcranDemarrage(chargementLong: true, statique: true),
       );
     }
 
