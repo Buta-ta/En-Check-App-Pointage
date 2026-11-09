@@ -331,8 +331,10 @@ class _PointageScreenState extends State<PointageScreen> {
     }
   }
 
-  String _cleDernierModeAccueil(String? entrepriseId) =>
-      'dernier_mode_pointage_${entrepriseId ?? 'sans_entreprise'}';
+  /// Préférence explicite par entreprise, distincte de l'ancienne clé qui
+  /// pouvait mémoriser automatiquement un mode unique sans choix utilisateur.
+  String _cleModePointageChoisi(String? entrepriseId) =>
+      'mode_pointage_installe_v1_${entrepriseId ?? 'sans_entreprise'}';
 
   Future<void> _preparerChoixModeAccueil() async {
     final modes = _modesAccueilDisponibles;
@@ -342,27 +344,21 @@ class _PointageScreenState extends State<PointageScreen> {
     try {
       final preferences = await SharedPreferences.getInstance();
       final valeurMemorisee =
-          preferences.getString(_cleDernierModeAccueil(entrepriseId));
+          preferences.getString(_cleModePointageChoisi(entrepriseId));
       dernier = ModePointagePolicy.choixMemorise(
         modesDisponibles: modes,
         valeurMemorisee: valeurMemorisee,
       );
-      if (modeUnique != null) {
-        await preferences.setString(
-          _cleDernierModeAccueil(entrepriseId),
-          modeUnique.name,
-        );
-      }
     } catch (_) {
       // Le choix reste utilisable même si le stockage local est indisponible.
     }
     if (!mounted) return;
     setState(() {
-      _dernierModeAccueil = modes.contains(dernier) ? dernier : modeUnique;
-      // Avec plusieurs méthodes, ne pas lancer automatiquement le dernier
-      // choix au rechargement : l'utilisateur doit le confirmer, notamment
-      // pour éviter de démarrer le scan facial sans l'avoir choisi.
-      _modeAccueilChoisi = modeUnique;
+      _dernierModeAccueil = modes.contains(dernier) ? dernier : null;
+      // Un mode explicite est restauré au rechargement. Sans préférence
+      // explicite, on ne sélectionne automatiquement que l'unique mode
+      // disponible; plusieurs modes imposent un premier choix.
+      _modeAccueilChoisi = modeUnique ?? dernier;
       _preparationModeAccueilTerminee = true;
     });
   }
@@ -376,7 +372,7 @@ class _PointageScreenState extends State<PointageScreen> {
     try {
       final preferences = await SharedPreferences.getInstance();
       await preferences.setString(
-        _cleDernierModeAccueil(entrepriseSelectionnee?['id']?.toString()),
+        _cleModePointageChoisi(entrepriseSelectionnee?['id']?.toString()),
         mode.name,
       );
     } catch (_) {
