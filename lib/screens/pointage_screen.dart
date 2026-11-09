@@ -2206,6 +2206,7 @@ class _PointageScreenState extends State<PointageScreen> {
         dernierMode: _dernierModeAccueil,
         palette: palette,
         onSelection: _choisirModeAccueil,
+        onAccueil: _confirmerRetourIdentificationEntreprise,
       );
     }
 
@@ -4522,26 +4523,48 @@ class _PointageScreenState extends State<PointageScreen> {
   // NAVIGATION VERS LES PAGES (une page = une action)
 
   /// Depuis l'accueil, permet de changer de mode sans quitter l'entreprise.
-  /// S'il n'y a qu'un mode autorisé, conserve le comportement actuel et revient
-  /// à l'identification de l'entreprise.
+  /// La confirmation évite une sortie accidentelle de l'écran de pointage.
+  /// S'il n'y a qu'un mode autorisé, le bouton Accueil revient à l'identification.
   Future<void> _gererActionAccueilPointage() async {
-    if (_modesAccueilDisponibles.length > 1) {
-      setState(() {
-        _modeAccueilChoisi = null;
-        _modeSelectionne = null;
-        numeroMatricule = '';
-        codePin = '';
-        afficherPin = false;
-        _intention = 'pointage';
-        _gpsVerifie = false;
-        _currentPosition = null;
-        _verificationZone = null;
-      });
-      FocusManager.instance.primaryFocus?.unfocus();
+    if (_modesAccueilDisponibles.length <= 1) {
+      await _confirmerRetourIdentificationEntreprise();
       return;
     }
 
-    await _confirmerRetourIdentificationEntreprise();
+    final confirmer = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Changer de mode de pointage ?'),
+        content: const Text(
+          'Vous allez revenir au choix du mode. Les pointages déjà enregistrés ne seront pas supprimés.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('ANNULER'),
+          ),
+          FilledButton(
+            key: const Key('pointage-confirmer-changement-mode'),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('CONTINUER'),
+          ),
+        ],
+      ),
+    );
+    if (confirmer != true || !mounted) return;
+
+    setState(() {
+      _modeAccueilChoisi = null;
+      _modeSelectionne = null;
+      numeroMatricule = '';
+      codePin = '';
+      afficherPin = false;
+      _intention = 'pointage';
+      _gpsVerifie = false;
+      _currentPosition = null;
+      _verificationZone = null;
+    });
+    FocusManager.instance.primaryFocus?.unfocus();
   }
 
   /// Le retour vers la configuration est volontaire et confirmé : le code

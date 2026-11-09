@@ -9,6 +9,7 @@ void main() {
   testWidgets('rappelle le dernier mode sans le sélectionner à la place',
       (tester) async {
     MethodePointage? selection;
+    var accueilAppuye = false;
     await tester.pumpWidget(
       MaterialApp(
         home: SelectionModePointage(
@@ -16,6 +17,7 @@ void main() {
           dernierMode: MethodePointage.codePin,
           palette: AccueilPalette.pour(MotifCulturel.adinkra, false),
           onSelection: (mode) => selection = mode,
+          onAccueil: () => accueilAppuye = true,
         ),
       ),
     );
@@ -28,5 +30,8 @@ void main() {
 
     await tester.tap(find.text('Scanner un badge QR'));
     expect(selection, MethodePointage.qr);
+
+    await tester.tap(find.byKey(const Key('selection-mode-accueil')));
+    expect(accueilAppuye, isTrue);
   });
 }
