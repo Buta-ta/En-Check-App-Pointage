@@ -13,68 +13,130 @@ import 'services/theme_service.dart';
 import 'services/face_recognition_service_provider.dart';
 import 'services/trusted_punch_service.dart';
 import 'widgets/cadre_motif.dart';
+import 'widgets/ecran_demarrage.dart';
 
-void main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
-
-  // ✅ INIT HIVE
-  await Hive.initFlutter();
-
-  // Boîtes existantes
-  await Hive.openBox('pointages_pending');
-  await Hive.openBox('employees_cache');
-  await Hive.openBox('enterprises_cache');
-  await Hive.openBox('employee_schedules_cache');
-
-  // 🤖 Nouvelles boîtes reconnaissance faciale
-  await Hive.openBox('face_embeddings');
-  await Hive.openBox('face_config');
-  await Hive.openBox('face_enrollment_status');
-
-  // 🕐 LIVRAISON 09 : horloge de confiance (identifiant d'appareil + ancrage)
-  await TrustedPunchService.initialiser();
-
-  await SupabaseService.initialize();
-
-  await ConnectivityService.initialize();
-
-  // Initialiser le service de reconnaissance faciale en arrière-plan
-  FaceRecognitionService.initialiser().then((success) {
-    if (success) {
-      print('✅ FaceRecognitionService prêt');
-    } else {
-      print('⚠️ FaceRecognitionService non disponible');
-    }
-  });
-
-  // 🕐 LIVRAISON 09 : prendre l'heure du serveur dès qu'on le peut.
-  //    Plus l'ancrage est frais, plus les pointages hors-ligne sont datés juste.
-  TrustedPunchService.contacterServeur();
-
-  // L'interface démarre TOUT DE SUITE.
-  //
-  // La synchronisation passait ici, avec un `await`, avant runApp() : le
-  // premier pixel n'apparaissait donc qu'après le téléchargement de toutes
-  // les entreprises actives puis de tous leurs employés. Sur une tablette de
-  // pharmacie en 4G, c'était un écran blanc de plusieurs secondes — d'autant
-  // que ce volume ne concerne pas l'appareil, qui n'a besoin que de sa propre
-  // entreprise.
-  //
-  // On affiche d'abord, on synchronise ensuite. EnCheckApp a déjà son propre
-  // état de chargement, et chaque écran recharge ses données de son côté :
-  // rien n'attend la fin de la synchronisation pour s'afficher.
+  // Le premier rendu Flutter arrive avant Hive, Supabase et Connectivity :
+  // aucune initialisation asynchrone ne laisse désormais l'écran système blanc.
   runApp(
     ChangeNotifierProvider(
       create: (_) => ThemeService(),
-      child: const EnCheckApp(),
+      child: const _BootstrapApp(),
     ),
   );
+}
 
-  // Synchronisation automatique au démarrage — en arrière-plan.
-  // `.catchError` parce qu'une Future non attendue qui lève perd son erreur.
-  SyncService.synchroniserAutomatique().catchError((Object e) {
-    print('❌ Synchronisation de démarrage échouée: $e');
-  });
+Future<void> _initialiserServices() async {
+  await Hive.initFlutter();
+  for (final box in <String>[
+    'pointages_pending', 'employees_cache', 'enterprises_cache',
+    'employee_schedules_cache', 'face_embeddings', 'face_config',
+    'face_enrollment_status',
+  ]) {
+    await Hive.openBox(box);
+  }
+
+  await TrustedPunchService.initialiser();
+  await SupabaseService.initialize();
+  try {
+    await ConnectivityService.initialize();
+  } catch (error) {
+    // Le plugin de connectivité est indicatif : son indisponibilité ne doit
+    // pas empêcher le pointage, qui peut fonctionner hors-ligne.
+    print('⚠️ État réseau non disponible au démarrage: $error');
+  }
+}
+
+class _BootstrapApp extends StatefulWidget {
+  const _BootstrapApp();
+
+  @override
+  State<_BootstrapApp> createState() => _BootstrapAppState();
+}
+
+class _BootstrapAppState extends State<_BootstrapApp> {
+  late Future<void> _services;
+  bool _chargementLong = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _services = _initialiserServices();
+    Future<void>.delayed(const Duration(seconds: 1), () {
+      if (mounted && !_servicesEstPret) setState(() => _chargementLong = true);
+    });
+  }
+
+  bool _servicesEstPret = false;
+
+  void _relancer() {
+    setState(() {
+      _servicesEstPret = false;
+      _chargementLong = false;
+      _services = _initialiserServices();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Provider.of<ThemeService>(context);
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData.light(),
+      darkTheme: ThemeData.dark(),
+      themeMode: theme.isDarkMode ? ThemeMode.dark : ThemeMode.light,
+      home: FutureBuilder<void>(
+        future: _services,
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return _ErreurDemarrage(onRetry: _relancer);
+          }
+          if (snapshot.connectionState != ConnectionState.done) {
+            return EcranDemarrage(chargementLong: _chargementLong);
+          }
+          if (!_servicesEstPret) {
+            _servicesEstPret = true;
+            // Ces traitements restent non bloquants et le pointage apparaît
+            // dès que les services locaux essentiels sont initialisés.
+            FaceRecognitionService.initialiser().then((success) {
+              print(success
+                  ? '✅ FaceRecognitionService prêt'
+                  : '⚠️ FaceRecognitionService non disponible');
+            }).catchError((Object e) {
+              print('⚠️ FaceRecognitionService non disponible: $e');
+            });
+            TrustedPunchService.contacterServeur();
+            SyncService.synchroniserAutomatique().catchError((Object e) {
+              print('❌ Synchronisation de démarrage échouée: $e');
+            });
+          }
+          return const EnCheckApp();
+        },
+      ),
+    );
+  }
+}
+
+class _ErreurDemarrage extends StatelessWidget {
+  const _ErreurDemarrage({required this.onRetry});
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    body: Center(
+      child: Padding(
+        padding: const EdgeInsets.all(28),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Image.asset('assets/logo_encheck.png', width: 100, height: 100),
+          const SizedBox(height: 20),
+          const Text('Le démarrage a rencontré un problème.', textAlign: TextAlign.center),
+          const SizedBox(height: 14),
+          FilledButton(onPressed: onRetry, child: const Text('Réessayer')),
+        ]),
+      ),
+    ),
+  );
 }
 
 class EnCheckApp extends StatefulWidget {
@@ -121,11 +183,7 @@ class _EnCheckAppState extends State<EnCheckApp> {
         theme: ThemeData.light(),
         darkTheme: ThemeData.dark(),
         themeMode: themeService.isDarkMode ? ThemeMode.dark : ThemeMode.light,
-        home: const Scaffold(
-          body: Center(
-            child: CircularProgressIndicator(color: Color(0xFFD4AF37)),
-          ),
-        ),
+        home: const EcranDemarrage(chargementLong: true),
       );
     }
 
