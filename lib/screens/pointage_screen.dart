@@ -4408,7 +4408,7 @@ class _PointageScreenState extends State<PointageScreen> {
               icon: Icons.home_filled,
               label: 'Accueil',
               actif: true,
-              onTap: _confirmerRetourIdentificationEntreprise,
+              onTap: _gererActionAccueilPointage,
             ),
           ),
           Expanded(
@@ -4524,6 +4524,29 @@ class _PointageScreenState extends State<PointageScreen> {
     );
   }
   // NAVIGATION VERS LES PAGES (une page = une action)
+
+  /// Depuis l'accueil, permet de changer de mode sans quitter l'entreprise.
+  /// S'il n'y a qu'un mode autorisé, conserve le comportement actuel et revient
+  /// à l'identification de l'entreprise.
+  Future<void> _gererActionAccueilPointage() async {
+    if (_modesAccueilDisponibles.length > 1) {
+      setState(() {
+        _modeAccueilChoisi = null;
+        _modeSelectionne = null;
+        numeroMatricule = '';
+        codePin = '';
+        afficherPin = false;
+        _intention = 'pointage';
+        _gpsVerifie = false;
+        _currentPosition = null;
+        _verificationZone = null;
+      });
+      FocusManager.instance.primaryFocus?.unfocus();
+      return;
+    }
+
+    await _confirmerRetourIdentificationEntreprise();
+  }
 
   /// Le retour vers la configuration est volontaire et confirmé : le code
   /// entreprise existant sera redemandé par l'écran Welcome.
