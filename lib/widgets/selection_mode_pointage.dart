@@ -11,6 +11,7 @@ class SelectionModePointage extends StatelessWidget {
     required this.modes,
     required this.palette,
     required this.onSelection,
+    required this.onAccueil,
     this.dernierMode,
   });
 
@@ -18,6 +19,7 @@ class SelectionModePointage extends StatelessWidget {
   final AccueilPalette palette;
   final MethodePointage? dernierMode;
   final ValueChanged<MethodePointage> onSelection;
+  final VoidCallback onAccueil;
 
   @override
   Widget build(BuildContext context) {
@@ -62,6 +64,18 @@ class SelectionModePointage extends StatelessWidget {
                   ),
                   const SizedBox(height: 12),
                 ],
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  key: const Key('selection-mode-accueil'),
+                  onPressed: onAccueil,
+                  icon: const Icon(Icons.home_outlined),
+                  label: const Text('Accueil'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: palette.navActif,
+                    side: BorderSide(color: palette.bordure),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                ),
               ],
             ),
           ),
