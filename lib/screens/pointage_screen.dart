@@ -337,7 +337,7 @@ class _PointageScreenState extends State<PointageScreen> {
   Future<void> _preparerChoixModeAccueil() async {
     final modes = _modesAccueilDisponibles;
     final entrepriseId = entrepriseSelectionnee?['id']?.toString();
-    final modeUnique = modes.length == 1 ? modes.single : null;
+    final modeUnique = ModePointagePolicy.modeAutoSelectionne(modes);
     MethodePointage? dernier;
     try {
       final preferences = await SharedPreferences.getInstance();
@@ -358,11 +358,11 @@ class _PointageScreenState extends State<PointageScreen> {
     }
     if (!mounted) return;
     setState(() {
-      final modeRestaure = modeUnique ?? dernier;
-      _dernierModeAccueil = modeRestaure;
-      // Le choix de l'utilisateur est restauré tant qu'il reste autorisé.
-      // À défaut de préférence valide, plusieurs modes imposent un choix.
-      _modeAccueilChoisi = modeRestaure;
+      _dernierModeAccueil = modes.contains(dernier) ? dernier : modeUnique;
+      // Avec plusieurs méthodes, ne pas lancer automatiquement le dernier
+      // choix au rechargement : l'utilisateur doit le confirmer, notamment
+      // pour éviter de démarrer le scan facial sans l'avoir choisi.
+      _modeAccueilChoisi = modeUnique;
       _preparationModeAccueilTerminee = true;
     });
   }

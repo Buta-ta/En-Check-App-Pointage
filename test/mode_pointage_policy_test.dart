@@ -2,6 +2,23 @@ import 'package:en_check/services/mode_pointage_policy.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('ne sélectionne automatiquement un mode que s’il est le seul autorisé',
+      () {
+    expect(
+      ModePointagePolicy.modeAutoSelectionne(
+        [MethodePointage.reconnaissanceFaciale],
+      ),
+      MethodePointage.reconnaissanceFaciale,
+    );
+    expect(
+      ModePointagePolicy.modeAutoSelectionne([
+        MethodePointage.codePin,
+        MethodePointage.reconnaissanceFaciale,
+      ]),
+      isNull,
+    );
+  });
+
   test('restaure un mode mémorisé uniquement s’il reste disponible', () {
     final disponibles = [
       MethodePointage.codePin,
