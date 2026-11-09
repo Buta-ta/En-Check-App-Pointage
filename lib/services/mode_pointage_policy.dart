@@ -37,9 +37,10 @@ class ModePointagePolicy {
 
   /// Modes de pointage réellement sélectionnables avant l'accueil.
   ///
-  /// Un mode facial `required` ou `exclusive` reste seul au sélecteur : les
-  /// éventuels replis autorisés restent proposés par le parcours facial lui-
-  /// même, conformément à la configuration Admin. Le mode d'enrôlement borne
+  /// Le mode facial `exclusive` reste seul au sélecteur. Un mode `required`
+  /// peut proposer le PIN/QR si la configuration autorise le repli : le visage
+  /// reste le choix recommandé, mais l'absence de profils enrôlés ne bloque
+  /// pas les autres méthodes explicitement permises. Le mode d'enrôlement borne
   /// n'est pas une méthode de pointage et n'est donc jamais listé ici.
   static List<MethodePointage> modesDisponibles({
     required bool qrActif,
@@ -48,9 +49,7 @@ class ModePointagePolicy {
     bool repliFacialAutorise = true,
   }) {
     if (reconnaissanceFacialeActive &&
-        (modeFacial == 'face_exclusive' ||
-            modeFacial == 'face_required' ||
-            !repliFacialAutorise)) {
+        (modeFacial == 'face_exclusive' || !repliFacialAutorise)) {
       return [MethodePointage.reconnaissanceFaciale];
     }
 
