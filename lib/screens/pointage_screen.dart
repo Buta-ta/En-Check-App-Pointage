@@ -343,12 +343,10 @@ class _PointageScreenState extends State<PointageScreen> {
       final preferences = await SharedPreferences.getInstance();
       final valeurMemorisee =
           preferences.getString(_cleDernierModeAccueil(entrepriseId));
-      for (final mode in MethodePointage.values) {
-        if (mode.name == valeurMemorisee) {
-          dernier = mode;
-          break;
-        }
-      }
+      dernier = ModePointagePolicy.choixMemorise(
+        modesDisponibles: modes,
+        valeurMemorisee: valeurMemorisee,
+      );
       if (modeUnique != null) {
         await preferences.setString(
           _cleDernierModeAccueil(entrepriseId),
@@ -360,10 +358,11 @@ class _PointageScreenState extends State<PointageScreen> {
     }
     if (!mounted) return;
     setState(() {
-      _dernierModeAccueil = modes.contains(dernier) ? dernier : modeUnique;
-      // Plusieurs modes : aucun choix implicite, même si l'ancien choix est
-      // rappelé dans l'écran. Un seul mode : l'écran de choix est inutile.
-      _modeAccueilChoisi = modeUnique;
+      final modeRestaure = modeUnique ?? dernier;
+      _dernierModeAccueil = modeRestaure;
+      // Le choix de l'utilisateur est restauré tant qu'il reste autorisé.
+      // À défaut de préférence valide, plusieurs modes imposent un choix.
+      _modeAccueilChoisi = modeRestaure;
       _preparationModeAccueilTerminee = true;
     });
   }
@@ -2431,6 +2430,11 @@ class _PointageScreenState extends State<PointageScreen> {
         final palette = AccueilPalette.pour(motif, themeService.isDarkMode);
         final borneVisible =
             (_moduleRecoFacialeActif || _kioskMode) && !_bornePrete;
+        final afficherActionEnrolement =
+            ModePointagePolicy.afficherActionEnrolement(
+          borneActive: _kioskMode,
+          modeChoisi: _modeAccueilChoisi,
+        );
 
         return Scaffold(
           backgroundColor: palette.fond,
@@ -2456,7 +2460,7 @@ class _PointageScreenState extends State<PointageScreen> {
                             aujourdhui: _buildBarreAujourdhui(palette),
                             alerteBorne:
                                 borneVisible ? _buildBandeauBorne() : null,
-                            actionBorne: _kioskMode
+                            actionBorne: afficherActionEnrolement
                                 ? _buildBoutonEnrolerNouvelEmploye()
                                 : null,
                             navigation: _buildBarreNavigation(palette),
@@ -2766,7 +2770,10 @@ class _PointageScreenState extends State<PointageScreen> {
             onTap: () => setState(() => _modeSelectionne = 'qr'),
           ),
         ],
-        if (_kioskMode) ...[
+        if (ModePointagePolicy.afficherActionEnrolement(
+          borneActive: _kioskMode,
+          modeChoisi: _modeAccueilChoisi,
+        )) ...[
           const SizedBox(height: 20),
           _buildBoutonEnrolerNouvelEmploye(),
         ],
