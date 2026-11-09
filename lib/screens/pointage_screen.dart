@@ -1770,6 +1770,22 @@ class _PointageScreenState extends State<PointageScreen> {
     );
   }
 
+  /// Ferme la modale de succès puis ouvre l'historique dans le Navigator
+  /// propre à Pointage. showDialog utilise le Navigator racine par défaut;
+  /// pousser depuis le contexte de la modale contournait le cadre/tablette.
+  void _ouvrirHistoriqueDepuisModale(
+    BuildContext dialogueContext,
+    Map<String, dynamic> employee,
+  ) {
+    final navigateurPointage = Navigator.of(this.context);
+    Navigator.of(dialogueContext).pop();
+    navigateurPointage.push(
+      MaterialPageRoute(
+        builder: (_) => HistoriqueScreen(employee: employee),
+      ),
+    );
+  }
+
   // ═══════════════════════════════════════════════════════════
   // ✅ SUCCÈS FACIAL
   // ═══════════════════════════════════════════════════════════
@@ -1927,16 +1943,10 @@ class _PointageScreenState extends State<PointageScreen> {
         actions: [
           if (_dernierEmployePointe != null)
             TextButton(
-              onPressed: () {
-                Navigator.pop(ctx);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) =>
-                        HistoriqueScreen(employee: _dernierEmployePointe!),
-                  ),
-                );
-              },
+              onPressed: () => _ouvrirHistoriqueDepuisModale(
+                ctx,
+                _dernierEmployePointe!,
+              ),
               child: Text('HISTORIQUE',
                   style: TextStyle(
                       color: Theme.of(context).textTheme.bodyLarge?.color,
@@ -5826,15 +5836,7 @@ class _PointageScreenState extends State<PointageScreen> {
                       color: EnCheckColors.terreChaude, letterSpacing: 2)),
             ),
           TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                    builder: (context) =>
-                        HistoriqueScreen(employee: employee)),
-              );
-            },
+            onPressed: () => _ouvrirHistoriqueDepuisModale(context, employee),
             child: Text('HISTORIQUE',
                 style: TextStyle(
                     color: Theme.of(context).textTheme.bodyLarge?.color,
