@@ -15,124 +15,50 @@
   <link rel="icon" type="image/png" href="icons/favicon.png">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="styles.css">
-
-  <!--
-    AUCUNE initialisation Supabase ici, et volontairement.
-    Le client Supabase est construit côté Dart, dans
-    lib/services/supabase_service.dart. Une seule copie des clés, pas deux.
-  -->
 </head>
 <body>
   <!--
-    ÉCRAN DE CHARGEMENT.
-
-    Il est là parce que le délai entre l'ouverture de la page et le premier
-    pixel Flutter était un écran blanc : main.dart.js pèse 3 Mo, puis Dart
-    ouvre plusieurs boîtes Hive, initialise Supabase et contacte le serveur.
-
-    Pur HTML + CSS, donc peint immédiatement, sans attendre aucun script.
-
-    La barre de progression n'est PAS une fausse animation : chaque palier
-    correspond à un événement réel du navigateur.
+    Fallback HTML affiché pendant le téléchargement du moteur Flutter.
+    Il n'affiche volontairement aucune progression en pourcentage : la vraie
+    animation de démarrage (high-five + logo) prend le relais dès le premier
+    rendu Flutter.
   -->
-  <div id="encheck-splash">
-    <div class="encheck-splash-marque">EN-CHECK</div>
+  <div id="encheck-splash" role="status" aria-label="Démarrage de l’application">
+    <img
+      class="encheck-splash-logo"
+      src="assets/assets/logo_encheck.png"
+      alt=""
+      aria-hidden="true"
+    >
+    <div class="encheck-splash-marque">En-Check</div>
     <div class="encheck-splash-soustitre">Pointage</div>
-
-    <div class="encheck-splash-piste">
-      <div class="encheck-splash-barre" id="encheck-splash-barre"></div>
+    <div class="encheck-splash-chargement" aria-hidden="true">
+      <span></span><span></span><span></span>
     </div>
-
-    <div class="encheck-splash-pourcent" id="encheck-splash-pourcent">0 %</div>
+    <div class="encheck-splash-message">Démarrage…</div>
   </div>
 
   <script>
-    /*
-      PILOTAGE DE LA BARRE DE PROGRESSION
-      ---------------------------------------------------------------
-      Quatre paliers, tous déclenchés par un événement RÉEL :
-
-        10 %  page ouverte, le HTML est là
-        40 %  DOMContentLoaded : la page est entièrement analysée
-        80 %  window load      : main.dart.js (3 Mo) est téléchargé
-       100 %  flutter-first-frame : Flutter a peint son premier pixel
-
-      Entre deux paliers, la barre continue d'avancer très lentement
-      (elle n'avance JAMAIS au-delà du palier suivant, donc elle ne ment
-      pas sur ce qui est réellement terminé) : c'est ce qui évite
-      l'impression de blocage sur une connexion lente.
-    */
     (function () {
       var splash = document.getElementById('encheck-splash');
       if (!splash) return;
 
-      var barre  = document.getElementById('encheck-splash-barre');
-      var texte  = document.getElementById('encheck-splash-pourcent');
-
-      var cible = 10;      // palier atteint
-      var affiche = 0;     // valeur réellement peinte (suit `cible`)
-      var fini = false;    // Flutter a-t-il peint ?
-      var retire = false;  // écran déjà retiré ?
-
-      function peindre() {
-        if (barre) barre.style.width = affiche.toFixed(1) + '%';
-        if (texte) texte.textContent = Math.floor(affiche) + ' %';
-      }
-
-      function avance() {
-        // Plafond : le palier suivant, ou 100 % quand Flutter a fini.
-        var plafond = fini ? 100 : Math.min(cible + 8, 96);
-
-        if (affiche < cible) {
-          // Rattrapage rapide du palier.
-          affiche += Math.max((cible - affiche) * 0.12, 0.2);
-        } else if (affiche < plafond) {
-          // Frémissement : montre que l'application travaille toujours.
-          affiche += 0.06;
-        }
-
-        if (affiche > plafond) affiche = plafond;
-        peindre();
-
-        if (!fini) window.requestAnimationFrame(avance);
-      }
-
-      function versPalier(valeur) {
-        if (valeur > cible) cible = valeur;
-      }
-
+      var retire = false;
       function masquer() {
         if (retire) return;
         retire = true;
-        fini = true;
         splash.classList.add('encheck-splash-sortie');
         window.setTimeout(function () {
-          if (splash && splash.parentNode) splash.parentNode.removeChild(splash);
+          if (splash.parentNode) splash.parentNode.removeChild(splash);
         }, 500);
       }
 
-      peindre();
-      window.requestAnimationFrame(avance);
-
-      document.addEventListener('DOMContentLoaded', function () {
-        versPalier(40);
-      });
-
-      window.addEventListener('load', function () {
-        versPalier(80);
-      });
-
-      // `flutter-first-frame` est dispatché sur window par le moteur Flutter
-      // dès qu'il a peint quelque chose. On laisse la barre finir sa course
-      // (700 ms) plutôt que de couper brutalement : c'est plus agréable.
+      // Le widget Flutter animé est déjà peint derrière ce fallback.
       window.addEventListener('flutter-first-frame', function () {
-        versPalier(100);
-        fini = true;
-        window.setTimeout(masquer, 700);
+        window.setTimeout(masquer, 120);
       }, { once: true });
 
-      // Filet de sécurité : si le moteur ne démarrait jamais (réseau coupé,
-      // fichier corrompu), l'utilisateur ne reste pas devant un rideau.
+      // Filet de sécurité si Flutter ne démarre jamais.
       window.setTimeout(masquer, 20000);
     })();
   </script>
