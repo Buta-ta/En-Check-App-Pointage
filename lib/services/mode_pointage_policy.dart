@@ -62,6 +62,14 @@ class ModePointagePolicy {
     ];
   }
 
+  /// Sélectionne automatiquement une méthode seulement si une seule est
+  /// autorisée. S'il y en a plusieurs, un choix explicite est requis à chaque
+  /// démarrage, même si un dernier choix est mémorisé.
+  static MethodePointage? modeAutoSelectionne(
+    List<MethodePointage> modesDisponibles,
+  ) =>
+      modesDisponibles.length == 1 ? modesDisponibles.single : null;
+
   /// Le mode principal n'est jamais répété dans « Autres modes ».
   /// Le PIN reste accessible en repli lorsque le QR est le mode principal.
   static List<MethodePointage> autresModes({
