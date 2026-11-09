@@ -4,9 +4,20 @@ import 'package:flutter/material.dart';
 
 /// Splash Flutter léger : un seul mouvement, sans dépendance ni attente imposée.
 class EcranDemarrage extends StatefulWidget {
-  const EcranDemarrage({super.key, this.chargementLong = false});
+  const EcranDemarrage({
+    super.key,
+    this.chargementLong = false,
+    this.superpose = false,
+    this.statique = false,
+    this.onAnimationComplete,
+  });
 
   final bool chargementLong;
+  /// Quand l'app est prête, le splash devient une surimpression non bloquante.
+  final bool superpose;
+  /// Écran d'attente avec logo seul, utilisé après l'animation de démarrage.
+  final bool statique;
+  final VoidCallback? onAnimationComplete;
 
   @override
   State<EcranDemarrage> createState() => _EcranDemarrageState();
@@ -22,7 +33,20 @@ class _EcranDemarrageState extends State<EcranDemarrage>
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1050),
-    )..forward();
+    );
+    if (widget.statique) {
+      _controller.value = 1;
+    } else {
+      _controller
+        ..addStatusListener(_onAnimationStatus)
+        ..forward();
+    }
+  }
+
+  void _onAnimationStatus(AnimationStatus status) {
+    if (status == AnimationStatus.completed) {
+      widget.onAnimationComplete?.call();
+    }
   }
 
   @override
@@ -39,10 +63,12 @@ class _EcranDemarrageState extends State<EcranDemarrage>
     final ink = dark ? const Color(0xFFEEEBE4) : const Color(0xFF1D1C1B);
     final accent = const Color(0xFF3A686D);
 
-    return Scaffold(
-      backgroundColor: background,
-      body: SafeArea(
-        child: Center(
+    return IgnorePointer(
+      ignoring: superpose,
+      child: Scaffold(
+        backgroundColor: superpose ? Colors.transparent : background,
+        body: SafeArea(
+          child: Center(
           child: LayoutBuilder(builder: (context, constraints) {
             final compact = constraints.maxWidth < 360 || constraints.maxHeight < 560;
             final logoSize = math.min(compact ? 112.0 : 138.0,
@@ -50,7 +76,7 @@ class _EcranDemarrageState extends State<EcranDemarrage>
             return AnimatedBuilder(
               animation: _controller,
               builder: (context, _) {
-                final t = reduceMotion ? 1.0 : _controller.value;
+                final t = reduceMotion || statique ? 1.0 : _controller.value;
                 final meet = Curves.easeInOutCubic.transform(
                     ((t - .08) / .55).clamp(0.0, 1.0).toDouble());
                 final reveal = reduceMotion
@@ -60,8 +86,13 @@ class _EcranDemarrageState extends State<EcranDemarrage>
                     ? 0.0
                     : (1 - Curves.easeIn.transform(((t - .72) / .24).clamp(0.0, 1.0).toDouble()));
                 final contact = reduceMotion ? 0.0 : ((t - .56) / .12).clamp(0.0, 1.0).toDouble();
-                return Column(
-                  mainAxisSize: MainAxisSize.min,
+                final sortie = superpose && !reduceMotion && !statique
+                    ? (1 - ((t - .78) / .22).clamp(0.0, 1.0)).toDouble()
+                    : 1.0;
+                return Opacity(
+                  opacity: sortie,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
                   children: [
                     SizedBox(
                       width: math.min(310.0, constraints.maxWidth - 32).toDouble(),
@@ -128,10 +159,12 @@ class _EcranDemarrageState extends State<EcranDemarrage>
                       )),
                     ),
                   ],
+                  ),
                 );
               },
             );
           }),
+          ),
         ),
       ),
     );
