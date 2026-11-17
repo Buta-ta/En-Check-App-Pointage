@@ -13,6 +13,7 @@ import '../services/motif_service.dart';
 import '../services/historique_periode.dart';
 import '../theme/accueil_palette.dart';
 import '../widgets/sans_etirement.dart';
+import '../widgets/historique_date_picker_dialog.dart';
 
 class HistoriqueScreen extends StatefulWidget {
   final Map<String, dynamic> employee;
@@ -1020,51 +1021,20 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
     final palette = _palette;
     final surfaceCalendrier =
         _estSombre ? palette.surface : EnCheckColors.cremePapier;
-    final choisi = await showDatePicker(
+    final datesAvecHistorique = pointages
+        .map(HeurePointage.jourDePointage)
+        .where((cle) => RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(cle))
+        .toSet();
+    final choisi = await showDialog<DateTime>(
       context: context,
-      initialDate: _dateSelectionnee,
-      firstDate: HistoriquePeriode.premierJourAutorise(maintenant),
-      lastDate: HistoriquePeriode.jour(maintenant),
-      selectableDayPredicate: (date) =>
-          HistoriquePeriode.autorise(date, maintenant),
-      helpText: 'Consulter les pointages du jour',
-      cancelText: 'ANNULER',
-      confirmText: 'CHOISIR',
-      builder: (context, child) {
-        final theme = Theme.of(context);
-        final couleurs = theme.colorScheme.copyWith(
-          primary: palette.primaire,
-          onPrimary: palette.surPrimaire,
-          secondary: palette.lien,
-          surface: surfaceCalendrier,
-          onSurface: palette.texte,
-          onSurfaceVariant: palette.texteSecondaire,
-          surfaceContainerLowest: surfaceCalendrier,
-          surfaceContainerLow: surfaceCalendrier,
-          surfaceContainer: surfaceCalendrier,
-          surfaceContainerHigh: surfaceCalendrier,
-          surfaceContainerHighest: surfaceCalendrier,
-        );
-        return Theme(
-          data: theme.copyWith(
-            colorScheme: couleurs,
-            textButtonTheme: TextButtonThemeData(
-              style: TextButton.styleFrom(foregroundColor: palette.lien),
-            ),
-            datePickerTheme: theme.datePickerTheme.copyWith(
-              backgroundColor: surfaceCalendrier,
-              headerBackgroundColor: palette.primaire,
-              headerForegroundColor: palette.surPrimaire,
-              dividerColor: palette.filet,
-              cancelButtonStyle:
-                  TextButton.styleFrom(foregroundColor: palette.lien),
-              confirmButtonStyle:
-                  TextButton.styleFrom(foregroundColor: palette.lien),
-            ),
-          ),
-          child: child!,
-        );
-      },
+      builder: (_) => HistoriqueDatePickerDialog(
+        initialDate: _dateSelectionnee,
+        firstDate: HistoriquePeriode.premierJourAutorise(maintenant),
+        lastDate: HistoriquePeriode.jour(maintenant),
+        datesAvecHistorique: datesAvecHistorique,
+        palette: palette,
+        surfaceCalendrier: surfaceCalendrier,
+      ),
     );
     if (choisi == null || !mounted) return;
     setState(() => _dateSelectionnee = HistoriquePeriode.jour(choisi));
