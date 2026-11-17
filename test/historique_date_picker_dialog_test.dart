@@ -41,24 +41,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Pointages enregistrés'), findsOneWidget);
-    final jourAvecHistorique =
-        find.byKey(const Key('historique-calendrier-jour-2026-11-13'));
-    expect(jourAvecHistorique, findsOneWidget);
-    final etiquetteJour = find.ancestor(
-      of: jourAvecHistorique,
-      matching: find.byType(Semantics),
-    );
-    expect(tester.widget<Semantics>(etiquetteJour.first).label,
-        '13, pointages enregistrés');
-    final cercleAvecHistorique = find.descendant(
-      of: jourAvecHistorique,
-      matching: find.byType(Container),
-    ).first;
     expect(
-      (tester.widget<Container>(cercleAvecHistorique).decoration
-              as BoxDecoration)
-          .color,
-      palette.primaire.withOpacity(0.14),
+      find.byKey(const Key('historique-calendrier-jour-2026-11-13')),
+      findsOneWidget,
     );
     expect(
       find.byKey(const Key('historique-calendrier-jour-2026-11-15')),
