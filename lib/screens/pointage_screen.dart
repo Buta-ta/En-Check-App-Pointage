@@ -5888,11 +5888,13 @@ class _PointageScreenState extends State<PointageScreen> {
     final travaille =
         await _travailleDuJour(pause['employee_id'] as String, maintenant);
 
-    final texte = 'Vous êtes en pause depuis $depuis'
-        '${prevue == null ? '' : ' (prévue ${_dureeHM(Duration(minutes: prevue)})')}. '
+    final dureePrevue = prevue == null
+        ? ''
+        : ' (prévue ${_dureeHM(Duration(minutes: prevue))})';
+    final bilan = travaille == null ? '' : ' — Travaillé $travaille';
+    final texte = 'Vous êtes en pause depuis $depuis$dureePrevue. '
         'Terminer votre journée ? '
-        'Pause clôturée à $cloture'
-        '${travaille == null ? '' : ' — Travaillé $travaille'}.';
+        'Pause clôturée à $cloture$bilan.';
 
     return showDialog<String>(
       context: context,
