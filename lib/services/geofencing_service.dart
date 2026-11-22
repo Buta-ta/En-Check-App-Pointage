@@ -312,6 +312,7 @@ class GeofencingService {
     required String method,
     Position? position,
     Map<String, dynamic>? verificationZone,
+    String? clientRef,
   }) async {
     try {
       // ⭐ LIVRAISON 09 : le SERVEUR fixe l'heure, plus le téléphone
@@ -320,6 +321,10 @@ class GeofencingService {
         enterpriseId:   enterpriseId,
         checkType:      checkType,
         method:         method,
+        // ⭐ Jeton d'intention (conception pauses, 22/11) : fourni quand le
+        //    pointage accompagne la fermeture d'une pause. `null` = le
+        //    service génère une référence comme avant.
+        clientRef:      clientRef,
         latitude:       position?.latitude,
         longitude:      position?.longitude,
         gpsAccuracy:    position?.accuracy,

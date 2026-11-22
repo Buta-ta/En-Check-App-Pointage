@@ -8,7 +8,16 @@
 //  (migration admin 20261016000004_pauses_intelligentes.sql) :
 //
 //      encheck_pause_ouvrir(p_employee, p_debut, p_motif)
-//      encheck_pause_fermer(p_employee, p_fin)
+//      encheck_pause_fermer(p_employee, p_fin [, p_motif_fermeture])
+//
+//  ⭐ LIVRAISON ADMIN VALIDÉE LE 22/11/2026 (décision du fondateur) :
+//     `encheck_pause_fermer` gagne un paramètre OPTIONNEL
+//     `p_motif_fermeture` (défaut 'reprise') — l'app envoie 'sortie' quand
+//     c'est la fin de journée qui ferme la pause (jamais `sans_reprise` si
+//     dépointage : décision ① de la conception pauses). Tant que le serveur
+//     n'a pas la livraison, l'app retente SANS le paramètre (ancien
+//     comportement) — une pause n'est jamais bloquée par une livraison
+//     en attente.
 //
 //  ⚠️ RÈGLE D'OR (leçon MADEDE) : l'app n'écrit JAMAIS dans `attendances`
 //     ni dans `encheck_pauses`. Elle passe UNIQUEMENT par ces 2 RPC.
@@ -116,6 +125,17 @@ class PauseService {
     final etats = await _boiteEtat();
     final debut = instantDeConfiance();
 
+    // ⭐ La durée prévue (grille) est lue À L'OUVERTURE et mémorisée avec la
+    //    pause : les dialogues afficheront « (prévue 1:30) » et « reprise
+    //    prévue à 17:12 » même après une coupure réseau. En ligne seulement
+    //    (la grille est calculée par la base) ; jamais de valeur inventée.
+    int? prevueMinutes;
+    final prevue =
+        await pausePrevue(employeeId: employeeId, enterpriseId: enterpriseId);
+    if (prevue['trouvee'] == true) {
+      prevueMinutes = (prevue['minutes'] as num?)?.toInt();
+    }
+
     final etat = {
       'employee_id': employeeId,
       'enterprise_id': enterpriseId,
@@ -125,6 +145,7 @@ class PauseService {
       'motif': motif,
       'pause_id': null,
       'rappel_le': null,
+      'prevue_minutes': prevueMinutes,
     };
 
     // 1. La file d'attente d'abord (c'est elle la vérité à renvoyer)…
@@ -145,9 +166,21 @@ class PauseService {
   }
 
   /// « ▶ Je reprends » — fonctionne avec ET sans réseau.
+  ///
+  /// ⭐ CONCEPTION PAUSES VALIDÉE 22/11 : la fermeture porte un MOTIF.
+  ///   • [motifFermeture] 'reprise' (défaut) = l'employé reprend le service ;
+  ///   • [motifFermeture] 'sortie'  = c'est la fin de journée qui ferme la
+  ///     pause (double écriture confirmée avec le pointage de départ).
+  ///   • [intention] = jeton d'intention (UUID, décision validée) : le MÊME
+  ///     jeton est porté par le pointage qui accompagne cette fermeture et
+  ///     par le geste de fermeture — les deux écritures d'une même décision
+  ///     restent liées et rejouables sans doublon (la base déduplique déjà
+  ///     sur « même employé, même instant » et sur `client_ref`).
   static Future<void> reprendre({
     required String employeeId,
     required String? enterpriseId,
+    String motifFermeture = 'reprise',
+    String? intention,
   }) async {
     final file = await _boiteFile();
     final etats = await _boiteEtat();
@@ -159,15 +192,25 @@ class PauseService {
       'enterprise_id': enterpriseId,
       'instant': fin.toIso8601String(),
       'motif': null,
+      'motif_fermeture': motifFermeture,
+      'intention': intention,
     });
 
     // La pause locale est refermée : l'écran retourne à « Service en cours ».
     final brut = etats.get('etat:$employeeId');
     if (brut != null) {
       final etat = Map<String, dynamic>.from(brut as Map);
+      final debutIso = etat['debut'] as String?;
       etat['debut'] = null;
       etat['fin'] = fin.toIso8601String();
       await etats.put('etat:$employeeId', etat);
+      await _journaliserFermeture(
+        employeeId: employeeId,
+        debutIso: debutIso,
+        finIso: fin.toIso8601String(),
+        motifFermeture: motifFermeture,
+        intention: intention,
+      );
     }
 
     if (ConnectivityService.isOnline) {
@@ -277,6 +320,7 @@ class PauseService {
           final res = await _rpcFermer(
             employeeId: geste['employee_id'] as String,
             fin: geste['instant'] as String,
+            motifFermeture: geste['motif_fermeture'] as String?,
           );
 
           // « aucune pause ouverte » = le geste a déjà été fait (rejeu) :
@@ -328,19 +372,66 @@ class PauseService {
   static Future<Map<String, dynamic>> _rpcFermer({
     required String employeeId,
     required String fin,
+    String? motifFermeture,
   }) async {
+    // ⭐ LIVRAISON ADMIN VALIDÉE 22/11 : `p_motif_fermeture` ('reprise' par
+    //    défaut côté serveur, 'sortie' quand la fin de journée ferme la
+    //    pause). Tant que le serveur n'a pas la livraison, l'app retente SANS
+    //    le paramètre et mémorise que le serveur n'est pas équipé — la file
+    //    hors-ligne reste compatible dans les deux sens.
+    final avecMotif =
+        motifFermeture != null && await _motifFermetureSupporte();
     try {
       final res = await _sb.rpc('encheck_pause_fermer', params: {
         'p_employee': employeeId,
         'p_fin': fin,
+        if (avecMotif) 'p_motif_fermeture': motifFermeture,
       });
+      if (avecMotif) await _memoriserCapMotifFermeture(true);
       return res is Map
           ? Map<String, dynamic>.from(res)
           : {'ok': false, 'erreur': 'reponse_inattendue'};
+    } on PostgrestException catch (e) {
+      // PGRST202 : aucune fonction ne correspond à cette signature — le
+      // serveur n'a pas encore la livraison « motif_fermeture ». On rejoue
+      // exactement comme avant (sans le paramètre) : jamais de pause bloquée.
+      if (avecMotif &&
+          (e.code == 'PGRST202' ||
+              e.message.contains('encheck_pause_fermer'))) {
+        await _memoriserCapMotifFermeture(false);
+        print('ℹ️ encheck_pause_fermer sans p_motif_fermeture — livraison '
+            'admin pas encore en production, la fermeture passe sans le motif.');
+        return _rpcFermer(employeeId: employeeId, fin: fin);
+      }
+      print('❌ encheck_pause_fermer : ${e.message} (code ${e.code})');
+      return {'ok': false, 'reseau': true, 'erreur': e.toString()};
     } catch (e) {
       print('❌ encheck_pause_fermer (réseau/serveur) : $e');
       return {'ok': false, 'reseau': true, 'erreur': e.toString()};
     }
+  }
+
+  /// Le serveur accepte-t-il `p_motif_fermeture` ? `null` = pas encore essayé.
+  static bool? _capMotifFermeture;
+
+  static Future<bool> _motifFermetureSupporte() async {
+    if (_capMotifFermeture != null) return _capMotifFermeture!;
+    try {
+      final box = await _boiteEtat();
+      final lu = box.get('cap:motif_fermeture') as bool?;
+      _capMotifFermeture = lu ?? true; // on tente tant qu'on ne sait pas
+    } catch (_) {
+      _capMotifFermeture = true;
+    }
+    return _capMotifFermeture!;
+  }
+
+  static Future<void> _memoriserCapMotifFermeture(bool supporte) async {
+    _capMotifFermeture = supporte;
+    try {
+      final box = await _boiteEtat();
+      await box.put('cap:motif_fermeture', supporte);
+    } catch (_) {}
   }
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -478,6 +569,113 @@ class PauseService {
       return da.compareTo(db);
     });
     return lignes;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  //  LE JOURNAL DU JOUR — les pauses fermées aujourd'hui (dialogues)
+  // ═══════════════════════════════════════════════════════════════════════
+  //
+  //  Les dialogues validés le 22/11 affichent « Travaillé 3:16 » =
+  //  présence − pauses. Les pauses ouvertes puis fermées SUR CETTE tablette
+  //  sont donc journalisées localement (boîte d'état, clé
+  //  « jour:<employé>:<date> »). Ce journal est LOCAL et honnête : une pause
+  //  prise sur un autre appareil n'y est pas — le décompte complet arrivera
+  //  avec la lecture scopée `encheck_pauses_mes_pauses` (lot 2). Tant qu'il
+  //  manque une donnée, les dialogues OMETTENT le décompte : aucune valeur
+  //  inventée, jamais.
+
+  static Future<void> _journaliserFermeture({
+    required String employeeId,
+    required String? debutIso,
+    required String finIso,
+    required String motifFermeture,
+    String? intention,
+  }) async {
+    try {
+      final box = await _boiteEtat();
+      final jour = HeurePointage.jourDePointage({'check_time': finIso});
+      final cle = 'jour:$employeeId:$jour';
+      final brut = box.get(cle);
+      final liste = <Map<String, dynamic>>[
+        if (brut is List)
+          ...brut.whereType<Map>().map((e) => Map<String, dynamic>.from(e)),
+      ];
+      liste.add({
+        'debut': debutIso,
+        'fin': finIso,
+        'motif_fermeture': motifFermeture,
+        'intention': intention,
+      });
+      await box.put(cle, liste);
+    } catch (e) {
+      print('⚠️ journal des pauses : $e');
+    }
+  }
+
+  /// Les pauses de l'employé pour LA JOURNÉE COURANTE : le journal local
+  /// (fermées sur cette tablette) plus la pause éventuellement encore ouverte.
+  /// Forme : `{debut: ISO, fin: ISO?}` — du début le plus ancien au plus
+  /// récent.
+  static Future<List<Map<String, dynamic>>> pausesDuJour(
+      String employeeId) async {
+    final sortie = <Map<String, dynamic>>[];
+    try {
+      final box = await _boiteEtat();
+      final jour = HeurePointage.jourDePointage(
+          {'check_time': instantDeConfiance().toIso8601String()});
+      final brut = box.get('jour:$employeeId:$jour');
+      if (brut is List) {
+        for (final e in brut.whereType<Map>()) {
+          final m = Map<String, dynamic>.from(e);
+          if (m['debut'] != null) {
+            sortie.add({'debut': m['debut'], 'fin': m['fin']});
+          }
+        }
+      }
+      final ouverte = await etatPause(employeeId);
+      if (ouverte != null && ouverte['debut'] != null) {
+        final debutOuverte = ouverte['debut'] as String?;
+        final dejaLa = sortie.any((p) => p['debut'] == debutOuverte);
+        if (!dejaLa) {
+          sortie.add({'debut': debutOuverte, 'fin': null});
+        }
+      }
+    } catch (e) {
+      print('⚠️ pausesDuJour : $e');
+    }
+    sortie.sort((a, b) => (a['debut'] as String).compareTo(b['debut'] as String));
+    return sortie;
+  }
+
+  // ── Le début de service du jour (pour « Travaillé ») ───────────────────
+  //   Mémorisé dès qu'on l'observe (le premier pointage « in » connu du
+  //   jour), pour rester disponible hors-ligne. Clé « debut:<employé>:<jour> ».
+
+  static Future<void> memoriserDebutService(
+      String employeeId, String isoUtc) async {
+    try {
+      final box = await _boiteEtat();
+      final jour = HeurePointage.jourDePointage({'check_time': isoUtc});
+      final cle = 'debut:$employeeId:$jour';
+      final existant = box.get(cle) as String?;
+      // On garde toujours le PLUS ANCIEN début connu de la journée.
+      if (existant == null || isoUtc.compareTo(existant) < 0) {
+        await box.put(cle, isoUtc);
+      }
+    } catch (e) {
+      print('⚠️ memoriserDebutService : $e');
+    }
+  }
+
+  static Future<DateTime?> lireDebutService(String employeeId) async {
+    try {
+      final box = await _boiteEtat();
+      final jour = HeurePointage.jourDePointage(
+          {'check_time': instantDeConfiance().toIso8601String()});
+      return HeurePointage.instantDe(box.get('debut:$employeeId:$jour'));
+    } catch (_) {
+      return null;
+    }
   }
 
   // ═══════════════════════════════════════════════════════════════════════
