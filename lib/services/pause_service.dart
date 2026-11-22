@@ -8,16 +8,18 @@
 //  (migration admin 20261016000004_pauses_intelligentes.sql) :
 //
 //      encheck_pause_ouvrir(p_employee, p_debut, p_motif)
-//      encheck_pause_fermer(p_employee, p_fin [, p_motif_fermeture])
+//      encheck_pause_fermer(p_employee, p_fin [, p_motif])
 //
 //  ⭐ LIVRAISON ADMIN VALIDÉE LE 22/11/2026 (décision du fondateur) :
-//     `encheck_pause_fermer` gagne un paramètre OPTIONNEL
-//     `p_motif_fermeture` (défaut 'reprise') — l'app envoie 'sortie' quand
-//     c'est la fin de journée qui ferme la pause (jamais `sans_reprise` si
-//     dépointage : décision ① de la conception pauses). Tant que le serveur
-//     n'a pas la livraison, l'app retente SANS le paramètre (ancien
-//     comportement) — une pause n'est jamais bloquée par une livraison
-//     en attente.
+//     `encheck_pause_fermer` porte un paramètre OPTIONNEL
+//     `p_motif` (défaut 'reprise') — l'app envoie 'sortie' quand c'est la
+//     fin de journée qui ferme la pause (jamais `sans_reprise` si dépointage :
+//     décision ① de la conception pauses). Le nom `p_motif` a été VÉRIFIÉ
+//     sur la signature de production (pg_get_functiondef, 22/11) : l'app
+//     envoyait `p_motif_fermeture`, que PostgREST ne connaît pas — le
+//     motif partait au repli et n'était jamais écrit. Corrigé ici. Si un
+//     ancien serveur ne connaît pas le paramètre (PGRST202), on retente
+//     SANS (ancien comportement) — une pause n'est jamais bloquée.
 //
 //  ⚠️ RÈGLE D'OR (leçon MADEDE) : l'app n'écrit JAMAIS dans `attendances`
 //     ni dans `encheck_pauses`. Elle passe UNIQUEMENT par ces 2 RPC.
@@ -176,15 +178,20 @@ class PauseService {
   ///     par le geste de fermeture — les deux écritures d'une même décision
   ///     restent liées et rejouables sans doublon (la base déduplique déjà
   ///     sur « même employé, même instant » et sur `client_ref`).
-  static Future<void> reprendre({
+  ///   • [finCorrigee] = « Ma pause a duré moins longtemps » (§3.7, cas
+  ///     suspect UNIQUEMENT) : la fin réelle choisie par l'employé, bornée
+  ///     entre le début de la pause et maintenant — tracée dans le journal
+  ///     (`correction: true`) et acceptée par la base dans les mêmes bornes.
+  static Future<Map<String, dynamic>> reprendre({
     required String employeeId,
     required String? enterpriseId,
     String motifFermeture = 'reprise',
     String? intention,
+    DateTime? finCorrigee,
   }) async {
     final file = await _boiteFile();
     final etats = await _boiteEtat();
-    final fin = instantDeConfiance();
+    final fin = finCorrigee ?? instantDeConfiance();
 
     await _enfiler(file, {
       'type': 'fermer',
@@ -210,12 +217,14 @@ class PauseService {
         finIso: fin.toIso8601String(),
         motifFermeture: motifFermeture,
         intention: intention,
+        correction: finCorrigee != null,
       );
     }
 
     if (ConnectivityService.isOnline) {
       await synchroniser();
     }
+    return {'ok': true, 'horsLigne': !ConnectivityService.isOnline};
   }
 
   /// Le motif est FACULTATIF et modifiable tant que la pause est ouverte.
@@ -374,18 +383,18 @@ class PauseService {
     required String fin,
     String? motifFermeture,
   }) async {
-    // ⭐ LIVRAISON ADMIN VALIDÉE 22/11 : `p_motif_fermeture` ('reprise' par
-    //    défaut côté serveur, 'sortie' quand la fin de journée ferme la
-    //    pause). Tant que le serveur n'a pas la livraison, l'app retente SANS
-    //    le paramètre et mémorise que le serveur n'est pas équipé — la file
-    //    hors-ligne reste compatible dans les deux sens.
+    // ⭐ LIVRAISON ADMIN VALIDÉE 22/11 : le paramètre s'appelle `p_motif`
+    //    ('reprise' par défaut côté serveur, 'sortie' quand la fin de
+    //    journée ferme la pause) — nom VÉRIFIÉ sur la production. Un serveur
+    //    qui ne le connaîtrait pas répond PGRST202 : on retente SANS le
+    //    paramètre (ancien comportement), jamais de pause bloquée.
     final avecMotif =
         motifFermeture != null && await _motifFermetureSupporte();
     try {
       final res = await _sb.rpc('encheck_pause_fermer', params: {
         'p_employee': employeeId,
         'p_fin': fin,
-        if (avecMotif) 'p_motif_fermeture': motifFermeture,
+        if (avecMotif) 'p_motif': motifFermeture,
       });
       if (avecMotif) await _memoriserCapMotifFermeture(true);
       return res is Map
@@ -393,14 +402,14 @@ class PauseService {
           : {'ok': false, 'erreur': 'reponse_inattendue'};
     } on PostgrestException catch (e) {
       // PGRST202 : aucune fonction ne correspond à cette signature — le
-      // serveur n'a pas encore la livraison « motif_fermeture ». On rejoue
-      // exactement comme avant (sans le paramètre) : jamais de pause bloquée.
+      // serveur ne connaît pas encore `p_motif`. On rejoue exactement comme
+      // avant (sans le paramètre) : jamais de pause bloquée.
       if (avecMotif &&
           (e.code == 'PGRST202' ||
               e.message.contains('encheck_pause_fermer'))) {
         await _memoriserCapMotifFermeture(false);
-        print('ℹ️ encheck_pause_fermer sans p_motif_fermeture — livraison '
-            'admin pas encore en production, la fermeture passe sans le motif.');
+        print('ℹ️ encheck_pause_fermer sans p_motif — ancien serveur, la '
+            'fermeture passe sans le motif.');
         return _rpcFermer(employeeId: employeeId, fin: fin);
       }
       print('❌ encheck_pause_fermer : ${e.message} (code ${e.code})');
@@ -455,12 +464,24 @@ class PauseService {
     try {
       final jour = HeurePointage.jourDePointage(
           {'check_time': instantDeConfiance().toIso8601String()});
+      // Le créneau du jour est mémorisé (clé « prevue:<emp>:<jour> ») : le
+      // bandeau se rafraîchit chaque minute, sans re-demander la grille à
+      // chaque fois (exigence énergie). Relu à chaque démarrage de l'app.
+      final box = await _boiteEtat();
+      final cle = 'prevue:$employeeId:$jour';
+      final cache = box.get(cle);
+      if (cache is Map) return Map<String, dynamic>.from(cache);
+
       final res = await _sb.rpc('encheck_pause_prevue', params: {
         'p_employee': employeeId,
         'p_enterprise': enterpriseId,
         'p_jour': jour,
       });
-      return res is Map ? Map<String, dynamic>.from(res) : {'trouvee': false};
+      final lu = res is Map ? Map<String, dynamic>.from(res) : {'trouvee': false};
+      try {
+        await box.put(cle, lu);
+      } catch (_) {}
+      return lu;
     } catch (e) {
       print('⚠️ encheck_pause_prevue : $e');
       return {'trouvee': false};
@@ -590,6 +611,7 @@ class PauseService {
     required String finIso,
     required String motifFermeture,
     String? intention,
+    bool correction = false,
   }) async {
     try {
       final box = await _boiteEtat();
@@ -605,6 +627,7 @@ class PauseService {
         'fin': finIso,
         'motif_fermeture': motifFermeture,
         'intention': intention,
+        if (correction) 'correction': true,
       });
       await box.put(cle, liste);
     } catch (e) {
@@ -692,5 +715,206 @@ class PauseService {
     final d = HeurePointage.instantDe(isoUtc);
     final h = HeurePointage.heureDe(d);
     return h.length >= 5 ? h.substring(0, 5) : h;
+  }
+
+  /// Rappel « sensé à la grille » (§3.3 du rapport validé) : avec un créneau
+  /// connu, le rappel devient le dépassement (durée − créneau STRICTEMENT >
+  /// tolérance) plutôt qu'un délai fixe ; sans créneau, l'ancien délai de
+  /// 75 min (LOT D) reste la seule règle honnête.
+  static bool rappelSensGrille({
+    required DateTime debutUtc,
+    int? prevueMinutes,
+    required int toleranceMinutes,
+  }) {
+    final duree = DateTime.now().toUtc().difference(debutUtc).inMinutes;
+    final prevue = prevueMinutes;
+    if (prevue != null && prevue > 0) {
+      return (duree - prevue) > toleranceMinutes;
+    }
+    return duree >= rappelMinutes;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  //  LES ZONES DE PAUSE (§3.2) — fonction PURE, le serveur reste le juge
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /// Zone d'une pause D'APRÈS LES RÈGLES PUBLIÉES (décisions validées 22/11,
+  /// identiques à celles du juge serveur `encheck_pause_juger`) :
+  ///  • `trop_longue` (suspecte) : durée > plafond ABSOLU (`pause_duree_max_
+  ///    minutes`, 120 par défaut) — prioritaire, même sans grille ;
+  ///  • `depassement` (longue) : durée − créneau STRICTEMENT > tolérance
+  ///    (`pause_tolerance_minutes`, 15 par défaut) ;
+  ///  • sans créneau (ou créneau nul) : rien à comparer → `normale` ;
+  ///  • `sans_reprise` (orpheline) ne se calcule PAS ici : une pause fermée
+  ///    par un dépointage n'est jamais orpheline (décision ①) — seule une
+  ///    pause restée ouverte « un jour de travail écoulé » l'est (§2.3).
+  ///
+  /// Testée dans `test/pauses_zones_test.dart`.
+  static String zonePause({
+    required int dureeMinutes,
+    int? prevueMinutes,
+    required int toleranceMinutes,
+    required int maxMinutes,
+  }) {
+    if (dureeMinutes > maxMinutes) return 'trop_longue';
+    final prevue = prevueMinutes;
+    if (prevue == null || prevue <= 0) return 'normale';
+    return (dureeMinutes - prevue) > toleranceMinutes
+        ? 'depassement'
+        : 'normale';
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  //  LES SEUILS DE L'ENTREPRISE — la base décide, l'app n'invente rien
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /// Lit un réglage numérique (`encheck_seuil`, table
+  /// `encheck_reglages_pointage`) : réglage de l'entreprise d'abord, puis
+  /// réglage global, puis le défaut fourni. Jamais d'exception : hors-ligne
+  /// ou erreur → le défaut, qui est DOCUMENTÉ (mêmes valeurs que celles du
+  /// serveur : tolérance 15 min, plafond 120 min, pause déduite = oui).
+  static final Map<String, num> _cacheSeuils = {};
+
+  static Future<num> seuil(String entrepriseId, String cle, num defaut) async {
+    final k = '$entrepriseId|$cle';
+    final cache = _cacheSeuils[k];
+    if (cache != null) return cache;
+    if (!ConnectivityService.isOnline) return defaut;
+    try {
+      final res = await _sb.rpc('encheck_seuil', params: {
+        'p_enterprise': entrepriseId,
+        'p_cle': cle,
+        'p_defaut': defaut,
+      });
+      final v = res is num ? res : num.tryParse('$res');
+      if (v != null) {
+        _cacheSeuils[k] = v;
+        return v;
+      }
+    } catch (e) {
+      print('⚠️ encheck_seuil($cle) : $e');
+    }
+    return defaut;
+  }
+
+  /// Tolérance du dépassement (§3.5) — défaut serveur : 15 min.
+  static Future<int> tolerancePause(String entrepriseId) async =>
+      (await seuil(entrepriseId, 'pause_tolerance_minutes', 15)).toInt();
+
+  /// Plafond de la durée d'une pause (§3.5) — défaut serveur : 120 min.
+  static Future<int> plafondPause(String entrepriseId) async =>
+      (await seuil(entrepriseId, 'pause_duree_max_minutes', 120)).toInt();
+
+  /// Réglage « pause déduite du temps travaillé » (§3.5, défaut OUI) : quand
+  /// il est « non », la carte affiche « Présence 4:54 (pause incluse) ».
+  /// La clé `pause_deduite` n'existe pas encore dans
+  /// `encheck_reglages_pointage` (§3.8 : « nouveau réglage ») : tant que
+  /// l'admin ne l'a pas posée, on applique le défaut validé (oui = déduite).
+  /// Valeur : 1 = déduite, 0 = non déduite.
+  static const String clePauseDeduite = 'pause_deduite';
+
+  static Future<bool> pauseDeduite(String entrepriseId) async =>
+      (await seuil(entrepriseId, clePauseDeduite, 1)) != 0;
+
+  // ═══════════════════════════════════════════════════════════════════════
+  //  « MES PAUSES » — lecture scopée par le jeton de session (lot 2)
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /// Les pauses de LA PERSONNE IDENTIFIÉE, lues PAR LA BASE avec son jeton
+  /// de session (`encheck_pauses_mes_pauses`, §7.1) — jamais un identifiant
+  /// passé par l'écran, jamais `encheck_pauses_lire` (réservé admin). Le
+  /// jeton vient de `encheck_employee_login` / `_qr` (TrustedPunchService).
+  ///
+  /// Renvoie `{'ok': true, 'pauses': [...]}` — chaque ligne porte `id, jour,
+  /// debut, fin, duree_minutes, statut, source, motif, anomalie, prevue_
+  /// minutes, ecart_minutes, tolerance_minutes, prevue_debut, prevue_fin,
+  /// ouverte`. Ou `{'ok': false, 'erreur': ...}` — 'session' quand le jeton
+  /// est invalide ou expiré (il faut se réidentifier), 'hors_ligne' sans
+  /// réseau. Jamais d'exception à l'écran.
+  static Future<Map<String, dynamic>> mesPauses({
+    required String jeton,
+    DateTime? du,
+    DateTime? au,
+  }) async {
+    if (!ConnectivityService.isOnline) {
+      return {'ok': false, 'erreur': 'hors_ligne'};
+    }
+    try {
+      final res = await _sb.rpc('encheck_pauses_mes_pauses', params: {
+        'p_jeton': jeton,
+        if (du != null) 'p_du': _isoDate(du),
+        if (au != null) 'p_au': _isoDate(au),
+      });
+      final pauses = <Map<String, dynamic>>[];
+      if (res is List) {
+        for (final row in res) {
+          pauses.add(Map<String, dynamic>.from(row as Map));
+        }
+      }
+      return {'ok': true, 'pauses': pauses};
+    } on PostgrestException catch (e) {
+      if (e.code == '42501' || e.message.contains('Session employ')) {
+        return {'ok': false, 'erreur': 'session'};
+      }
+      print('⚠️ encheck_pauses_mes_pauses : ${e.message}');
+      return {'ok': false, 'erreur': e.message};
+    } catch (e) {
+      print('⚠️ encheck_pauses_mes_pauses : $e');
+      return {'ok': false, 'erreur': e.toString()};
+    }
+  }
+
+  /// « 2026-11-05 » pour les paramètres `date` de la base.
+  static String _isoDate(DateTime d) {
+    final mm = d.month.toString().padLeft(2, '0');
+    final dd = d.day.toString().padLeft(2, '0');
+    return '${d.year}-$mm-$dd';
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  //  « À VÉRIFIER » (§2.6) — textes FIGÉS §3.9, source unique
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /// « 5/11 » — jour/mois, sans année.
+  static String dateCourte(String? jourIso) {
+    final d = jourIso == null ? null : DateTime.tryParse(jourIso);
+    if (d == null) return '—';
+    return '${d.day}/${d.month}';
+  }
+
+  /// « 2:05 » — durée lisible en h:mm (jamais négative).
+  static String dureeHM(int minutes) {
+    final m = minutes < 0 ? 0 : minutes;
+    return '${m ~/ 60}:${HeurePointage.deux(m % 60)}';
+  }
+
+  /// Les lignes « à vérifier » (§2.6) — AFFICHAGE NON BLOQUANT, jamais de
+  /// correction automatique : l'app signale, elle ne répare rien. Textes
+  /// FIGÉS (§3.9) :
+  ///   « Pause longue (2:05) le 5/11 — à vérifier »
+  ///   « Journée du 4/11 non terminée — à vérifier »
+  /// [rows] = lignes de `encheck_pauses_mes_pauses` ; [jourNow] = la journée
+  /// de pointage courante ('yyyy-MM-dd'). Durée inconnue → la ligne n'est
+  /// pas produite (aucun texte figé n'existe sans le chiffre).
+  static List<String> lignesAVerifier(
+      List<Map<String, dynamic>> rows, String jourNow) {
+    final lignes = <String>[];
+    for (final r in rows) {
+      final anomalie = r['anomalie']?.toString();
+      final ouverte = r['ouverte'] == true;
+      final jour = r['jour']?.toString();
+      final jourNorm = jour == null || jour.isEmpty ? null : jour.substring(0, 10);
+      final jourCourt = dateCourte(jourNorm);
+      if (anomalie == 'depassement' || anomalie == 'trop_longue') {
+        final duree = (r['duree_minutes'] as num?)?.toInt();
+        if (duree == null) continue;
+        lignes.add('Pause longue (${dureeHM(duree)}) '
+            'le $jourCourt — à vérifier');
+      } else if (anomalie == 'sans_reprise' ||
+          (ouverte && jourNorm != null && jourNorm.compareTo(jourNow) < 0)) {
+        lignes.add('Journée du $jourCourt non terminée — à vérifier');
+      }
+    }
+    return lignes;
   }
 }
