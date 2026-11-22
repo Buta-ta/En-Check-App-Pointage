@@ -2660,7 +2660,7 @@ class _PointageScreenState extends State<PointageScreen> {
 
       // Les pauses : la base (lecture scopée par le jeton) quand elle
       // répond — la vérité complète ; sinon le journal local (hors-ligne).
-      int? pausesMinutes;
+      int? pausesServeur;
       final jeton = TrustedPunchService.jeton;
       if (jeton != null && jeton.isNotEmpty) {
         final res = await PauseService.mesPauses(
@@ -2675,10 +2675,11 @@ class _PointageScreenState extends State<PointageScreen> {
             final min = f.difference(d).inMinutes;
             if (min > 0) total += min;
           }
-          pausesMinutes = total;
+          pausesServeur = total;
         }
       }
-      pausesMinutes ??= await _pauseMinutesLocalDuJour(employeId, fin);
+      final int pausesMinutes =
+          pausesServeur ?? await _pauseMinutesLocalDuJour(employeId, fin);
 
       final entrepriseId = _totauxEntrepriseId;
       final deduit = entrepriseId == null || entrepriseId.isEmpty
