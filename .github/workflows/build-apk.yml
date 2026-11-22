@@ -157,6 +157,7 @@ jobs:
             ASSET=en-check-pointage.apk
             NOTES="APK de l'application En-Check Pointage (compilation automatique). Téléchargez en-check-pointage.apk, puis installez-le sur la tablette Android (autorisez les sources inconnues). Signé avec la clé de débogage : suffisant pour la recette, pas pour la production."
           fi
+          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/$RELEASE_TAG/$ASSET"
           out=$({
             if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
               gh release create "$RELEASE_TAG" \
@@ -176,7 +177,7 @@ jobs:
             done
             exit "$status"
           fi
-          echo "::notice::APK publié : https://github.com/${{ github.repository }}/releases/download/apk-latest/en-check-pointage.apk"
+          echo "::notice::APK publié : $DOWNLOAD_URL"
 
       # ── 7bis. Secours : l'APK reste téléchargeable depuis la course ─────
       - name: Téléverser l'APK en artefact (secours)
@@ -196,4 +197,9 @@ jobs:
           echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
           echo "| \`$(ls en-check-pointage*.apk)\` | $(du -h en-check-pointage*.apk | cut -f1) |" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Téléchargement :** https://github.com/${{ github.repository }}/releases/download/apk-latest/en-check-pointage.apk" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/apk-test/en-check-pointage-test.apk"
+          else
+            DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/apk-latest/en-check-pointage.apk"
+          fi
+          echo "**Téléchargement :** $DOWNLOAD_URL" >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,196 @@
+name: Aperçu et contrôle de l'accueil
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+# Recettes de validation uniquement : aucune mise en production, publication
+# publique de captures ou écriture dans les références Git du dépôt.
+permissions:
+  contents: read
+
+concurrency:
+  group: apercu-accueil-v2-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  apercu:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+
+      - name: Installer Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.44.9'
+          cache: true
+
+      - name: Télécharger les bibliothèques
+        run: flutter pub get
+
+      - name: Analyser les sources Flutter
+        run: |
+          set +e
+          flutter analyze --no-fatal-infos \
+            lib/main.dart \
+            lib/screens/public_start_screen.dart \
+            lib/screens/welcome_screen.dart \
+            lib/screens/identification_slide_page.dart \
+            lib/services/public_start_service.dart \
+            lib/services/historique_periode.dart \
+            lib/services/motif_service.dart \
+            lib/widgets/cadre_motif.dart \
+            lib/widgets/checklist_demarrage.dart \
+            lib/widgets/ma_journee_dialog.dart \
+            lib/widgets/panneau_motif.dart \
+            test/public_start_screen_test.dart \
+            test/public_start_service_test.dart \
+            test/identification_slide_page_test.dart \
+            test/ma_journee_dialog_test.dart \
+            test/panneau_motif_test.dart \
+            2>&1 | tee /tmp/apercu-analyse.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            python3 - <<'PY'
+          from pathlib import Path
+          lignes = Path('/tmp/apercu-analyse.log').read_text(errors='replace').splitlines()
+          texte = chr(10).join(lignes[-160:])
+          texte = texte.replace('%', '%25').replace(chr(13), '%0D').replace(chr(10), '%0A')
+          print('::error::Détail de flutter analyze :%0A' + texte)
+          PY
+            exit "$status"
+          fi
+
+      - name: Tester la disposition et les contrastes
+        run: |
+          set +e
+          flutter test --reporter expanded 2>&1 | tee /tmp/apercu-tests.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            python3 - <<'PY'
+          from pathlib import Path
+          lignes = Path('/tmp/apercu-tests.log').read_text(errors='replace').splitlines()
+          # Les annotations GitHub sont limitées en taille : privilégier la
+          # fin du journal pour montrer l'assertion et la trace de l'échec.
+          texte = '\n'.join(lignes[-60:])[-3000:]
+          texte = texte.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+          print('::error::Détail des tests Flutter :%0A' + texte)
+          PY
+            exit "$status"
+          fi
+
+      - name: Compiler la PWA à contrôler
+        run: flutter build web --release
+
+      - name: Installer Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Installer le pilote Chrome
+        run: npm ci --prefix tool/apercu --no-audit --no-fund
+
+      - name: Servir la PWA localement
+        run: |
+          python3 -m http.server 8080 --bind 127.0.0.1 --directory build/web >/tmp/apercu-serveur.log 2>&1 &
+          echo $! >/tmp/apercu-serveur.pid
+          for i in {1..30}; do
+            if curl -sf http://127.0.0.1:8080/ >/dev/null; then exit 0; fi
+            sleep 0.5
+          done
+          cat /tmp/apercu-serveur.log
+          exit 1
+
+      - name: Capturer tous les écrans
+        id: captures
+        continue-on-error: true
+        run: |
+          set +e
+          node tool/apercu/capture_accueil.js build/web apercu-accueil 2>&1 | tee /tmp/apercu-captures.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then python3 tool/apercu/annoter_log.py /tmp/apercu-captures.log 'Captures'; fi
+          exit "$status"
+
+      - name: Compiler la page Historique avec données de recette fictives
+        run: flutter build web --release -t tool/apercu/main_historique.dart -o build/historique
+
+      - name: Servir la page Historique de recette
+        run: |
+          python3 -m http.server 8081 --bind 127.0.0.1 --directory build/historique >/tmp/apercu-historique-serveur.log 2>&1 &
+          for i in {1..30}; do
+            if curl -sf http://127.0.0.1:8081/ >/dev/null; then exit 0; fi
+            sleep 0.5
+          done
+          cat /tmp/apercu-historique-serveur.log
+          exit 1
+
+      - name: Capturer Historique et calendrier
+        id: captures_historique
+        continue-on-error: true
+        run: |
+          set +e
+          APERCU_MODE=historique APERCU_BASE_URL=http://127.0.0.1:8081/ node tool/apercu/capture_accueil.js build/historique apercu-accueil 2>&1 | tee /tmp/apercu-historique-captures.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then python3 tool/apercu/annoter_log.py /tmp/apercu-historique-captures.log 'Captures Historique'; fi
+          exit "$status"
+
+      - name: Mesurer débordements et contrastes
+        id: mesures
+        continue-on-error: true
+        run: |
+          python3 -m venv /tmp/apercu-venv
+          /tmp/apercu-venv/bin/pip install --quiet pillow numpy
+          set +e
+          /tmp/apercu-venv/bin/python tool/apercu/mesurer_captures.py apercu-accueil 2>&1 | tee /tmp/apercu-mesures.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then python3 tool/apercu/annoter_log.py /tmp/apercu-mesures.log 'Mesures'; fi
+          exit "$status"
+
+      - name: Joindre les captures PWA comme artefact de recette
+        if: always() && hashFiles('apercu-accueil/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: captures-pwa
+          path: apercu-accueil/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Vérifier les contrastes critiques de l'accueil
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          fichier = Path('apercu-accueil/controle.json')
+          if not fichier.exists():
+              raise SystemExit('Rapport de contraste absent : recette non vérifiable.')
+
+          rapport = json.loads(fichier.read_text())
+          mesures = rapport.get('contrastes', [])
+          attendus = {
+              'reference-412x869-clair',
+              'reference-412x869-sombre',
+              'telephone-390x844-clair',
+          }
+          erreurs = []
+          for scenario in sorted(attendus):
+              elements = {m['element']: m for m in mesures if m['scenario'] == scenario}
+              if set(elements) != {'En-Check', 'heure', 'date'}:
+                  erreurs.append(f'{scenario}: mesures de contraste manquantes')
+                  continue
+              erreurs.extend(
+                  f"{scenario} / {nom}: {mesure.get('ratio', 0)}:1 (seuil {mesure['seuil']}:1)"
+                  for nom, mesure in elements.items()
+                  if not mesure.get('ok')
+              )
+
+          if erreurs:
+              raise SystemExit('Contraste de l’accueil insuffisant : ' + '; '.join(erreurs))
+          print('Contrastes de l’en-tête vérifiés sur les trois formats de référence.')
+          PY

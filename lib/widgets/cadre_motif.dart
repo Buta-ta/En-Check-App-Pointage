@@ -4,10 +4,8 @@
 // ═══════════════════════════════════════════════════════════
 //
 //  Sur grand écran, l'app est présentée comme un SMARTPHONE posé
-//  sur le motif culturel actif (étoffe + vignette chaude).
-//
-//  - Gauche, en bas : « Motifs culturels du … — Peuple … »
-//    (UNIQUEMENT dans l'espace latéral, jamais dans l'app).
+//  sur le motif d'interface actif (étoffe + vignette chaude).
+//  Aucune provenance n'est affichée sans source vérifiée.
 //  - Droite, centré : le slogan d'En-Check.
 //
 //  Le cadre du téléphone s'amincit automatiquement quand la
@@ -17,6 +15,8 @@
 
 import 'dart:math';
 
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../services/motif_service.dart';
@@ -31,6 +31,15 @@ class CadreMotif extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Décision du 6/11 : une vraie tablette ou un téléphone utilise tout
+    // l'écran. La coque décorative est réservée à la PWA sur ordinateur ;
+    // elle ne doit jamais rétrécir l'interface sur un appareil tactile.
+    final bureauWeb = kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.macOS ||
+            defaultTargetPlatform == TargetPlatform.windows ||
+            defaultTargetPlatform == TargetPlatform.linux);
+    if (!bureauWeb) return child;
+
     return LayoutBuilder(
       builder: (context, constraints) {
         final largeur =
@@ -112,13 +121,13 @@ class CadreMotif extends StatelessWidget {
                   ),
                 ),
               ),
-              // Message culturel — SEULEMENT dans l'espace latéral gauche.
+              // Repère visuel neutre — sans attribution de provenance.
               if (cote >= 200)
                 Positioned(
                   left: 28,
                   bottom: 32,
                   width: cote - 56,
-                  child: const _MessageCulturel(),
+                  child: const _MessageMotif(),
                 ),
               // Slogan d'En-Check — dans l'espace latéral droit.
               if (cote >= 200)
@@ -286,9 +295,9 @@ class _BoutonCoque extends StatelessWidget {
   }
 }
 
-/// « Motifs culturels du Congo » + « Raphia — Peuple Kuba ».
-class _MessageCulturel extends StatelessWidget {
-  const _MessageCulturel();
+/// Nom du motif et repère culturel affichés dans le cadre d'accueil.
+class _MessageMotif extends StatelessWidget {
+  const _MessageMotif();
 
   @override
   Widget build(BuildContext context) {
@@ -303,7 +312,7 @@ class _MessageCulturel extends StatelessWidget {
             Container(width: 28, height: 2, color: motif.couleurAccent),
             const SizedBox(height: 10),
             Text(
-              titreMotifsCulturels(motif.pays),
+              motif.nom,
               style: const TextStyle(
                 fontFamily: 'Poppins',
                 fontSize: 12.5,
@@ -313,15 +322,17 @@ class _MessageCulturel extends StatelessWidget {
                 height: 1.35,
               ),
             ),
-            const SizedBox(height: 3),
+            const SizedBox(height: 2),
             Text(
-              '${motif.nom} — Peuple ${motif.peuple}',
+              '${motif.peuple} · ${motif.pays}',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                 fontFamily: 'Poppins',
-                fontSize: 11,
+                fontSize: 9.5,
                 fontWeight: FontWeight.w400,
-                color: Color(0xB8F4EFE2),
-                height: 1.35,
+                color: Color(0xFFE5DCC8),
+                height: 1.25,
               ),
             ),
           ],

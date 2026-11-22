@@ -3,6 +3,7 @@
 // 📱 PAGE POINTAGE
 // ═══════════════════════════════════════════════════════════
 
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -13,16 +14,25 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/app_theme.dart';
 import '../widgets/logo_empreinte.dart';
 import '../widgets/frise_motif.dart';
+import '../widgets/accueil_maquette.dart';
+import '../theme/accueil_palette.dart';
 import 'identification_slide_page.dart';
 import '../widgets/panneau_motif.dart';
 import '../services/motif_service.dart';
+import '../services/mode_pointage_policy.dart';
 import '../services/souhaits_service.dart';
 import '../widgets/qr_scanner_widget.dart';
 import '../widgets/qr_photo_scanner_widget.dart';
 import '../widgets/pin_photo_widget.dart';
 import '../widgets/bandes_motifs.dart';
+import '../widgets/ma_journee_dialog.dart';
 import '../widgets/web_camera_widget_provider.dart';
 import '../services/supabase_service.dart';
+import '../services/annonces_accueil_service.dart';
+import '../widgets/carrousel_annonces_accueil.dart';
+import '../widgets/carte_annonces_accueil.dart';
+import '../widgets/ecran_enrolement_borne.dart';
+import '../widgets/selection_mode_pointage.dart';
 import '../services/appareil_service.dart';
 import '../services/borne_service.dart';
 import '../services/local_database.dart';
@@ -39,7 +49,6 @@ import 'package:uuid/uuid.dart'; // ⭐ JETON D'INTENTION (conception pauses, 22
 import 'historique_screen.dart';
 import 'tutoriel_screen.dart';
 import '../services/checklist_service.dart';
-import '../widgets/checklist_demarrage.dart';
 import '../widgets/sans_etirement.dart';
 import 'face_enrollment_screen.dart';
 import 'face_pointage_screen.dart';
@@ -119,6 +128,11 @@ class _BlocSalutState extends State<_BlocSalut>
 
 class _PointageScreenState extends State<PointageScreen> {
   String? _modeSelectionne;
+  MethodePointage? _modeAccueilChoisi;
+  MethodePointage? _dernierModeAccueil;
+  bool _preparationModeAccueilTerminee = false;
+  bool _annoncesModalOuverte = false;
+  String _sensActionQR = 'arrivee';
 
   // ⏸ VISIBILITÉ DES PAUSES (17/10/2026)
   //    'pointage' → les gestes enregistrent un pointage (comme d'habitude).
@@ -171,6 +185,15 @@ class _PointageScreenState extends State<PointageScreen> {
   bool _moduleGeofencingActif = false;
   bool _moduleRecoFacialeActif = false;
 
+  List<MethodePointage> get _modesAccueilDisponibles =>
+      ModePointagePolicy.modesDisponibles(
+        qrActif: _moduleQRActif,
+        reconnaissanceFacialeActive: _moduleRecoFacialeActif,
+        modeFacial: _faceConfig['pointage_mode']?.toString(),
+        repliFacialAutorise:
+            _faceConfig['fallback_allowed'] as bool? ?? true,
+      );
+
   // 🤖 Mode personnel
   bool _faceEnrolled = false;
   bool _faceApproved = false;
@@ -192,6 +215,7 @@ class _PointageScreenState extends State<PointageScreen> {
   /// valide) ? Le personnel se synchronise alors par `encheck_borne_personnel`.
   bool _bornePrete = false;
   String _kioskPhase = 'pointage';
+  bool _enrolementBorneEnCours = false;
   List<Map<String, dynamic>> _kioskEmployeesNonEnroles = [];
   int _kioskEnrolementIndex = 0;
 
@@ -218,6 +242,12 @@ class _PointageScreenState extends State<PointageScreen> {
 
   // 📊 Données
   Map<String, dynamic>? entrepriseSelectionnee;
+  List<AnnonceAccueil> _annoncesAccueil = [];
+  String? _annoncesEntrepriseId;
+  int _generationAnnoncesAccueil = 0;
+  Timer? _timerAnnoncesAccueil;
+  final AnnoncesAccueilService _annoncesAccueilService =
+      AnnoncesAccueilService();
   Map<String, dynamic>? _employeeSchedule;
   Map<String, dynamic>? _pendingEmployee;
   Map<String, dynamic>? _dernierEmployePointe;
@@ -256,6 +286,8 @@ class _PointageScreenState extends State<PointageScreen> {
   void dispose() {
     _timer?.cancel();
     _timerPauses?.cancel();
+    _timerAnnoncesAccueil?.cancel();
+    _generationAnnoncesAccueil++;
     _matriculeNouveauCtrl.dispose();
     super.dispose();
   }
@@ -285,11 +317,68 @@ class _PointageScreenState extends State<PointageScreen> {
       await _chargerConfigRecoFacialeEnLigne();
     }
 
+    // Le choix initial ne doit attendre ni le coffre sécurisé de la borne,
+    // ni le chargement de son personnel.
+    await _preparerChoixModeAccueil();
+
     // 🖥️ CONTRAT ÉTAPE 3 — une tablette DÉJÀ provisionnée est une borne,
     //    même si la config serveur est injoignable ou exige un jeton employé :
     //    le bail `bk1_` en coffre sécurisé est la preuve, pas le réglage distant.
-    if (await BorneService.aUnBailValide()) {
-      if (mounted) setState(() => _kioskMode = true);
+    try {
+      if (await BorneService.aUnBailValide()) {
+        if (mounted) setState(() => _kioskMode = true);
+      }
+    } catch (_) {
+      // Le choix de méthode ne doit pas rester bloqué par l'état de la borne.
+    }
+  }
+
+  /// Préférence explicite par entreprise, distincte de l'ancienne clé qui
+  /// pouvait mémoriser automatiquement un mode unique sans choix utilisateur.
+  String _cleModePointageChoisi(String? entrepriseId) =>
+      'mode_pointage_installe_v1_${entrepriseId ?? 'sans_entreprise'}';
+
+  Future<void> _preparerChoixModeAccueil() async {
+    final modes = _modesAccueilDisponibles;
+    final entrepriseId = entrepriseSelectionnee?['id']?.toString();
+    final modeUnique = ModePointagePolicy.modeAutoSelectionne(modes);
+    MethodePointage? dernier;
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      final valeurMemorisee =
+          preferences.getString(_cleModePointageChoisi(entrepriseId));
+      dernier = ModePointagePolicy.choixMemorise(
+        modesDisponibles: modes,
+        valeurMemorisee: valeurMemorisee,
+      );
+    } catch (_) {
+      // Le choix reste utilisable même si le stockage local est indisponible.
+    }
+    if (!mounted) return;
+    setState(() {
+      _dernierModeAccueil = modes.contains(dernier) ? dernier : null;
+      // Un mode explicite est restauré au rechargement. Sans préférence
+      // explicite, on ne sélectionne automatiquement que l'unique mode
+      // disponible; plusieurs modes imposent un premier choix.
+      _modeAccueilChoisi = modeUnique ?? dernier;
+      _preparationModeAccueilTerminee = true;
+    });
+  }
+
+  Future<void> _choisirModeAccueil(MethodePointage mode) async {
+    if (!_modesAccueilDisponibles.contains(mode)) return;
+    setState(() {
+      _dernierModeAccueil = mode;
+      _modeAccueilChoisi = mode;
+    });
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      await preferences.setString(
+        _cleModePointageChoisi(entrepriseSelectionnee?['id']?.toString()),
+        mode.name,
+      );
+    } catch (_) {
+      // Le choix courant fonctionne même si le dernier mode ne peut être sauvé.
     }
   }
 
@@ -480,12 +569,178 @@ class _PointageScreenState extends State<PointageScreen> {
         };
         chargementEntreprises = false;
       });
+      _activerAnnoncesAccueil(id);
       // Le souhait vient du pays : si la session est ancienne (pays pas
       // encore mémorisé), on le récupère automatiquement au premier
       // lancement en ligne.
       if (pays == null) _completerPaysEntreprise(id);
     } else {
       setState(() => chargementEntreprises = false);
+      _arreterAnnoncesAccueil();
+    }
+  }
+
+  void _arreterAnnoncesAccueil() {
+    _timerAnnoncesAccueil?.cancel();
+    _timerAnnoncesAccueil = null;
+    _annoncesEntrepriseId = null;
+    _generationAnnoncesAccueil++;
+    if (mounted && _annoncesAccueil.isNotEmpty) {
+      setState(() => _annoncesAccueil = []);
+    }
+  }
+
+  void _activerAnnoncesAccueil(String entrepriseId) {
+    final id = entrepriseId.trim();
+    _timerAnnoncesAccueil?.cancel();
+    if (id.isEmpty) {
+      _arreterAnnoncesAccueil();
+      return;
+    }
+
+    _annoncesEntrepriseId = id;
+    final generation = ++_generationAnnoncesAccueil;
+    if (mounted) setState(() => _annoncesAccueil = []);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_annoncesGenerationValide(id, generation)) {
+        unawaited(_chargerAnnoncesAccueil(id, generation, chargerCache: true));
+      }
+    });
+    _timerAnnoncesAccueil = Timer.periodic(
+      const Duration(minutes: 30),
+      (_) {
+        if (_annoncesEntrepriseId != id) return;
+        final prochaineGeneration = ++_generationAnnoncesAccueil;
+        unawaited(_chargerAnnoncesAccueil(id, prochaineGeneration));
+      },
+    );
+  }
+
+  bool _annoncesGenerationValide(String id, int generation) {
+    final entrepriseCourante = entrepriseSelectionnee?['id']?.toString();
+    return mounted &&
+        generation == _generationAnnoncesAccueil &&
+        id == _annoncesEntrepriseId &&
+        id == entrepriseCourante;
+  }
+
+  Future<void> _chargerAnnoncesAccueil(
+    String id,
+    int generation, {
+    bool chargerCache = false,
+  }) async {
+    if (chargerCache) {
+      final cache = await _annoncesAccueilService.chargerCache(id);
+      if (cache != null && _annoncesGenerationValide(id, generation)) {
+        setState(() => _annoncesAccueil = cache);
+      }
+    }
+
+    final annonces = await _annoncesAccueilService.charger(id);
+    if (annonces == null || !_annoncesGenerationValide(id, generation)) return;
+
+    setState(() => _annoncesAccueil = annonces);
+    unawaited(_annoncesAccueilService.enregistrerCache(id, annonces));
+  }
+
+  Future<void> _ouvrirAnnonces(AccueilPalette palette) async {
+    if (_annoncesAccueil.isEmpty || _annoncesModalOuverte) return;
+    final entrepriseId = entrepriseSelectionnee?['id']?.toString() ?? '';
+    final annonces = List<AnnonceAccueil>.unmodifiable(_annoncesAccueil);
+    setState(() => _annoncesModalOuverte = true);
+    try {
+      await showModalBottomSheet<void>(
+        context: context,
+        backgroundColor: Colors.transparent,
+        isScrollControlled: true,
+        builder: (sheetContext) {
+          return SafeArea(
+            top: false,
+            child: Center(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: 620,
+                  maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.85,
+                ),
+                child: SingleChildScrollView(
+                  child: Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                    padding: const EdgeInsets.fromLTRB(18, 12, 18, 18),
+                    decoration: BoxDecoration(
+                      color: palette.surface,
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Annonces',
+                                    style: TextStyle(
+                                      color: palette.texteFort,
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    '${annonces.length} ${annonces.length == 1 ? 'annonce active' : 'annonces actives'}',
+                                    style: TextStyle(
+                                      color: palette.texteSecondaire,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: 'Fermer les annonces',
+                              onPressed: () =>
+                                  Navigator.of(sheetContext).pop(),
+                              icon: Icon(Icons.close,
+                                  color: palette.texteSecondaire),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        AspectRatio(
+                          aspectRatio: 16 / 9,
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(14),
+                            child: CarrouselAnnoncesAccueil(
+                              entrepriseId: entrepriseId,
+                              annonces: annonces,
+                              fondParDefaut: palette.primaire,
+                            ),
+                          ),
+                        ),
+                        if (annonces.length > 1) ...[
+                          const SizedBox(height: 10),
+                          Text(
+                            'Les annonces défilent automatiquement',
+                            style: TextStyle(
+                              color: palette.texteSecondaire,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      );
+    } finally {
+      if (mounted) setState(() => _annoncesModalOuverte = false);
     }
   }
 
@@ -712,6 +967,13 @@ class _PointageScreenState extends State<PointageScreen> {
     if (_intention == 'pause') return; // déjà en route (anti-double-tap)
     setState(() => _intention = 'pause');
 
+    // Le QR est lancé directement lorsqu'il est activé, y compris pour
+    // s'identifier avant une pause ou une reprise.
+    if (_moduleQRActif) {
+      _ouvrirLecteurQR();
+      return;
+    }
+
     // Mode visage exclusif / obligatoire : on lance tout de suite le scan
     // visage (reconnaissance SEULE — aucun pointage enregistré).
     if (_moduleRecoFacialeActif) {
@@ -727,8 +989,7 @@ class _PointageScreenState extends State<PointageScreen> {
         return;
       }
     }
-    // Sinon : les outils habituels (clavier PIN, scanner QR) sont déjà à
-    // l'écran — la ligne « MODE PAUSE » explique quoi faire.
+    // Sinon, le parcours PIN est la méthode de repli de cette borne.
   }
 
   void _annulerFluxPause() {
@@ -1163,6 +1424,41 @@ class _PointageScreenState extends State<PointageScreen> {
     });
   }
 
+  Future<void> _retourAccueilDepuisEnrolementKiosk() async {
+    if (_showFaceEnrollment) {
+      final quitter = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Quitter l’enrôlement ?'),
+          content: const Text(
+            'Les captures en cours ne seront pas conservées. '
+            'Vous pourrez reprendre l’enrôlement depuis l’accueil.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Continuer l’enrôlement'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Retour à l’accueil'),
+            ),
+          ],
+        ),
+      );
+      if (quitter != true) return;
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _kioskPhase = 'pointage';
+      _showFaceEnrollment = false;
+      _employeeEnAttente = null;
+      _modeSelectionne = null;
+      _intention = 'pointage';
+    });
+  }
+
   void _lancerEnrolementKioskSuivant() {
     if (_kioskEnrolementIndex >= _kioskEmployeesNonEnroles.length) {
       setState(() => _kioskPhase = 'pointage');
@@ -1489,6 +1785,22 @@ class _PointageScreenState extends State<PointageScreen> {
     );
   }
 
+  /// Ferme la modale de succès puis ouvre l'historique dans le Navigator
+  /// propre à Pointage. showDialog utilise le Navigator racine par défaut;
+  /// pousser depuis le contexte de la modale contournait le cadre/tablette.
+  void _ouvrirHistoriqueDepuisModale(
+    BuildContext dialogueContext,
+    Map<String, dynamic> employee,
+  ) {
+    final navigateurPointage = Navigator.of(this.context);
+    Navigator.of(dialogueContext).pop();
+    navigateurPointage.push(
+      MaterialPageRoute(
+        builder: (_) => HistoriqueScreen(employee: employee),
+      ),
+    );
+  }
+
   // ═══════════════════════════════════════════════════════════
   // ✅ SUCCÈS FACIAL
   // ═══════════════════════════════════════════════════════════
@@ -1646,16 +1958,10 @@ class _PointageScreenState extends State<PointageScreen> {
         actions: [
           if (_dernierEmployePointe != null)
             TextButton(
-              onPressed: () {
-                Navigator.pop(ctx);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) =>
-                        HistoriqueScreen(employee: _dernierEmployePointe!),
-                  ),
-                );
-              },
+              onPressed: () => _ouvrirHistoriqueDepuisModale(
+                ctx,
+                _dernierEmployePointe!,
+              ),
               child: Text('HISTORIQUE',
                   style: TextStyle(
                       color: Theme.of(context).textTheme.bodyLarge?.color,
@@ -1895,6 +2201,35 @@ class _PointageScreenState extends State<PointageScreen> {
       return _buildKioskEnrolementScreen();
     }
 
+    if (!_preparationModeAccueilTerminee || chargementEntreprises) {
+      final themeService = Provider.of<ThemeService>(context);
+      final palette = AccueilPalette.pour(
+        MotifService.actif.value,
+        themeService.isDarkMode,
+      );
+      return Scaffold(
+        backgroundColor: palette.fond,
+        body: Center(
+          child: CircularProgressIndicator(color: palette.primaire),
+        ),
+      );
+    }
+
+    if (_modeAccueilChoisi == null && _modesAccueilDisponibles.length > 1) {
+      final themeService = Provider.of<ThemeService>(context);
+      final palette = AccueilPalette.pour(
+        MotifService.actif.value,
+        themeService.isDarkMode,
+      );
+      return SelectionModePointage(
+        modes: _modesAccueilDisponibles,
+        dernierMode: _dernierModeAccueil,
+        palette: palette,
+        onSelection: _choisirModeAccueil,
+        onAccueil: _confirmerRetourIdentificationEntreprise,
+      );
+    }
+
     // ── Écran reco faciale ──
     if (_showFacePointage && _employeeEnAttente != null) {
       return FacePointageScreen(
@@ -2001,6 +2336,11 @@ class _PointageScreenState extends State<PointageScreen> {
             _modeSelectionne = null;
           });
         },
+        onReturnHome: _kioskMode
+            ? () {
+                _retourAccueilDepuisEnrolementKiosk();
+              }
+            : null,
       );
     }
 
@@ -2011,7 +2351,9 @@ class _PointageScreenState extends State<PointageScreen> {
         onClose: () => setState(() {
           _showScanner = false;
           _modeSelectionne = null;
+          if (_intention == 'pause') _intention = 'pointage';
         }),
+        onPinFallback: _intention == 'pause' ? null : _ouvrirPinDepuisQR,
       );
     }
 
@@ -2022,7 +2364,9 @@ class _PointageScreenState extends State<PointageScreen> {
         onClose: () => setState(() {
           _showPhotoScanner = false;
           _modeSelectionne = null;
+          if (_intention == 'pause') _intention = 'pointage';
         }),
+        onPinFallback: _intention == 'pause' ? null : _ouvrirPinDepuisQR,
       );
     }
 
@@ -2095,390 +2439,71 @@ class _PointageScreenState extends State<PointageScreen> {
       );
     }
 
-    final bool estEnLigne = ConnectivityService.isOnline;
     final themeService = Provider.of<ThemeService>(context);
-    // 📱 TÉLÉPHONE (fiche « Affichage mobile ») : petit appareil = largeur
-    // étroite OU fenêtre très courte (paysage). La tablette, l'ordinateur et
-    // le navigateur en taille normale gardent l'affichage existant.
-    final tailleFenetre = MediaQuery.sizeOf(context);
-    final bool estTelephone =
-        tailleFenetre.width < 620 || tailleFenetre.height < 520;
 
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      // CLAVIER PHYSIQUE (PWA sur ordinateur) : chiffres, Retour arriere,
-      // Entree et Echap fonctionnent sans toucher l'ecran.
-      body: Focus(
-        autofocus: true,
-        onKeyEvent: _gererClavierPhysique,
-        child: SafeArea(
-          // En téléphone, la photo d'en-tête passe derrière la barre d'état
-          // (le texte reste sous l'encoche : zones réservées respectées).
-          top: !estTelephone,
-          child: chargementEntreprises
-              ? const Center(
-                  child: CircularProgressIndicator(
-                      color: EnCheckColors.terreChaude))
-              : LayoutBuilder(
-                  builder: (context, constraints) {
-                    // ⭐ DIRECTIVE 5 nov : petit écran OU fenêtre basse →
-                    // composition de la maquette finale, tout tient sans
-                    // défilement ; défilement maîtrisé (avec indication) si la
-                    // hauteur réelle manque — jamais de coupe ni de masquage.
-                    if (estTelephone || constraints.maxHeight < 780) {
-                      return SansEtirement(
-                        child: _colonneTelephone(
-                            estEnLigne, themeService, constraints),
-                      );
-                    }
-                    final contenu = Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: _colonnePrincipale(
-                        estEnLigne,
-                        themeService,
-                        margeFlexible: true,
-                      ),
-                    );
-                    return Center(
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 620),
-                        child: contenu,
-                      ),
-                    );
-                  },
-                ),
-        ),
-      ),
-    );
-  }
-
-  /// [child] etendu sur la hauteur restante si [etendre] : un Expanded dans un
-  /// layout non borne (mode scroll) planterait, on le rend alors tel quel.
-  Widget _etenduSi(bool etendre, Widget child) =>
-      etendre ? Expanded(child: child) : child;
-
-  /// ⭐ MAQUETTE FINALE 5/11 : la composition de l'accueil est la MAQUETTE
-  /// choisie (photo + bande motif + salut centré + cartes + nav), sur toutes
-  /// les tailles d'écran. Aucun comportement métier n'est modifié.
-  Widget _colonnePrincipale(
-    bool estEnLigne,
-    ThemeService themeService, {
-    required bool margeFlexible,
-  }) {
-    return ListenableBuilder(
-      listenable: Listenable.merge(
-          [ChecklistService.motifChoisi, ChecklistService.premierPointage]),
-      builder: (context, _) {
-        // 🧭 Checklist visible tant qu'elle n'est pas terminée.
-        final checklistVisible = !ChecklistService.complete;
-        return LayoutBuilder(builder: (context, outer) {
-          final double hauteurPhoto =
-              (outer.maxHeight * 0.326).clamp(170.0, 300.0).toDouble();
-          return Column(
-            mainAxisSize: margeFlexible ? MainAxisSize.max : MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _buildScenePointage(estEnLigne, themeService,
-                  hauteur: hauteurPhoto),
-              ValueListenableBuilder<MotifCulturel>(
-                valueListenable: MotifService.actif,
-                builder: (context, motif, _) =>
-                    FriseMotif(motif: motif, hauteur: 34),
-              ),
-              _etenduSi(
-                margeFlexible,
-                LayoutBuilder(builder: (context, inner) {
-                  // ⭐ COMPLÉMENT 5 nov (revue V1) : le texte de version en bas
-                  // était ROGNÉ quand la hauteur manquait. Désormais, si le
-                  // contenu dépasse, défilement maîtrisé — plus jamais de coupe.
-                  final bool modulesActifs =
-                      _moduleQRActif || _moduleRecoFacialeActif || _kioskMode;
-                  final double hEstime = 520 +
-                      (checklistVisible ? 260 : 0) +
-                      (modulesActifs ? 120 : 0) +
-                      (_pausesOuvertes.isNotEmpty ? 60 : 0);
-                  final bool defilement =
-                      margeFlexible && inner.maxHeight < hEstime;
-                  final Widget contenu = Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 22),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        const SizedBox(height: 16),
-                        _buildSalutation(),
-                        const SizedBox(height: 17),
-                        // 🧭 Checklist « 3 étapes pour démarrer » — disparaît une
-                        // fois terminée (motif choisi + premier pointage).
-                        if (checklistVisible) ...[
-                          const ChecklistDemarrage(),
-                          const SizedBox(height: 12),
-                        ],
-                        // Le rappel d'activation disparaît dès que la borne est
-                        // déjà autorisée (bail validé).
-                        if ((_moduleRecoFacialeActif || _kioskMode) &&
-                            !_bornePrete) ...[
-                          _buildBandeauBorne(),
-                          const SizedBox(height: 12),
-                        ],
-                        _buildCartesAction(),
-                        const SizedBox(height: 19),
-                        _buildBarreAujourdhui(),
-                        if (modulesActifs) ...[
-                          const SizedBox(height: 22),
-                          _boutonAutresModes(),
-                        ],
-                        const SizedBox(height: 20),
-                        _carteAnnonces(),
-                        if (margeFlexible && !defilement) const Spacer(),
-                        const SizedBox(height: 12),
-                        _buildBarreNavigation(),
-                        const SizedBox(height: 8),
-                        const Text(
-                          'v1.0.0 • Chiffrement AES-256 • Serveur UE',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontFamily: 'JetBrainsMono',
-                            fontSize: 10,
-                            color: EnCheckColors.gris,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                      ],
-                    ),
-                  );
-                  if (!defilement) return contenu;
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Expanded(
-                        child: SingleChildScrollView(
-                          physics: const ClampingScrollPhysics(),
-                          child: contenu,
-                        ),
-                      ),
-                      _bandeDefilement(),
-                    ],
-                  );
-                }),
-              ),
-            ],
-          );
-        });
-      },
-    );
-  }
-
-  //  DIRECTIVE 5 nov 2026 : la maquette finale est UNIQUEMENT l'accueil.
-  //  Tout tient SANS DÉFILEMENT dans les cas normaux ; si la hauteur réelle
-  //  ne suffit pas, un défilement MAÎTRISÉ apparaît (avec indication
-  //  visible) — jamais de texte coupé, jamais de section masquée, jamais de
-  //  textes réduits. Les comportements (gestes, pause, borne, offline)
-  //  sont strictement inchangés.
-  // ═══════════════════════════════════════════════════════════
-
-  //  DIRECTIVE 5 nov 2026 : la maquette finale est UNIQUEMENT l'accueil.
-  //  Tout tient SANS DÉFILEMENT dans les cas normaux ; si la hauteur réelle
-  //  ne suffit pas, un défilement MAÎTRISÉ apparaît (avec indication
-  //  visible) — jamais de texte coupé, jamais de section masquée, jamais de
-  //  textes réduits. Les comportements (gestes, pause, borne, offline)
-  //  sont strictement inchangés.
-  // ═══════════════════════════════════════════════════════════
-
-  Widget _colonneTelephone(
-    bool estEnLigne,
-    ThemeService themeService,
-    BoxConstraints constraints,
-  ) {
-    final media = MediaQuery.of(context);
-    final checklistVisible = !ChecklistService.complete;
-    final double hauteurTotale = constraints.maxHeight;
-    final double echelleTexte = media.textScaler.scale(1.0);
-    // ⭐ MAQUETTE FINALE 5/11 : la photo occupe ~33 % de la hauteur (comme
-    // sur la maquette), la bande motif juste dessous, puis le contenu.
-    final double hauteurPhoto =
-        (hauteurTotale * (echelleTexte > 1.3 ? 0.26 : 0.326))
-            .clamp(170.0, 300.0)
-            .toDouble();
-    final double hauteurScene = media.viewPadding.top + hauteurPhoto;
-    final bool borneVisible =
-        (_moduleRecoFacialeActif || _kioskMode) && !_bornePrete;
-    final bool modesVisibles =
-        _moduleQRActif || _moduleRecoFacialeActif || _kioskMode;
-
-    final entete = _buildScenePointage(estEnLigne, themeService,
-        hauteur: hauteurScene, margeHaut: media.viewPadding.top);
-    final frise = ValueListenableBuilder<MotifCulturel>(
+    return ValueListenableBuilder<MotifCulturel>(
       valueListenable: MotifService.actif,
-      builder: (context, motif, _) => FriseMotif(motif: motif, hauteur: 34),
-    );
+      builder: (context, motif, _) {
+        final palette = AccueilPalette.pour(motif, themeService.isDarkMode);
+        final borneVisible =
+            (_moduleRecoFacialeActif || _kioskMode) && !_bornePrete;
+        final afficherActionEnrolement =
+            ModePointagePolicy.afficherActionEnrolement(
+          borneActive: _kioskMode,
+          modeChoisi: _modeAccueilChoisi,
+        );
 
-    final List<Widget> contenu = [
-      _buildSalutation(taille: echelleTexte > 1.3 ? 22 : 26),
-      // Le rappel d'activation reste une alerte VISIBLE (fonction existante).
-      if (borneVisible) ...[
-        const SizedBox(height: 10),
-        _buildBandeauBorne(),
-      ],
-      const SizedBox(height: 17),
-      _buildCartesAction(),
-      if (checklistVisible) ...[
-        const SizedBox(height: 10),
-        _ligneChecklist(),
-      ],
-      const SizedBox(height: 19),
-      _buildBarreAujourdhui(),
-      if (modesVisibles) ...[
-        const SizedBox(height: 22),
-        _boutonAutresModes(),
-      ],
-      const SizedBox(height: 20),
-      _carteAnnonces(),
-    ];
-
-    // Estimation LARGÉE (surestimée) : le défilement maîtrisé ne s'allume
-    // que si la hauteur réelle manque vraiment.
-    final double hContenuEstime = (echelleTexte > 1.3 ? 620 : 520) +
-        (checklistVisible ? 52 : 0) +
-        (borneVisible ? 68 : 0);
-    final double hFixe = hauteurScene + 34 + 70;
-    final bool defilement = (hauteurTotale - hFixe) < hContenuEstime;
-
-    Widget corps = Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const SizedBox(height: 14),
-          ...contenu,
-          if (!defilement) const Spacer(),
-          const SizedBox(height: 10),
-        ],
-      ),
-    );
-    if (defilement) {
-      final Widget contenuDefilable = corps;
-      corps = Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(
-            child: LayoutBuilder(
-              builder: (context, inner) => SingleChildScrollView(
-                physics: const ClampingScrollPhysics(),
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(minHeight: inner.maxHeight),
-                  child: contenuDefilable,
-                ),
-              ),
+        return Scaffold(
+          backgroundColor: palette.fond,
+          // Clavier physique (PWA) : chiffres, retour, entrée et Échap.
+          body: Focus(
+            autofocus: true,
+            onKeyEvent: _gererClavierPhysique,
+            child: SafeArea(
+              top: true,
+              bottom: false,
+              child: chargementEntreprises
+                  ? Center(
+                      child: CircularProgressIndicator(color: palette.primaire),
+                    )
+                  : SansEtirement(
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          AccueilMaquette(
+                            entete: _buildScenePointage(themeService, palette),
+                            salutation: _buildSalutation(palette),
+                            cartesAction: _buildCartesAction(palette),
+                            aujourdhui: _buildBarreAujourdhui(palette),
+                            alerteBorne:
+                                borneVisible ? _buildBandeauBorne() : null,
+                            actionBorne: afficherActionEnrolement
+                                ? _buildBoutonEnrolerNouvelEmploye()
+                                : null,
+                            navigation: _buildBarreNavigation(palette),
+                          ),
+                          if (_annoncesAccueil.isNotEmpty)
+                            Positioned(
+                              top: 20,
+                              right: 16,
+                              child: BoutonAnnoncesAccueil(
+                                nombre: _annoncesAccueil.length,
+                                palette: palette,
+                                onPressed: () => _ouvrirAnnonces(palette),
+                              ),
+                            ),
+                          Positioned(
+                            top: 27,
+                            right: 72,
+                            child: _boutonLune(themeService),
+                          ),
+                        ],
+                      ),
+                    ),
             ),
-          ),
-          _bandeDefilement(),
-        ],
-      );
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        entete,
-        frise,
-        Expanded(child: corps),
-        _buildBarreNavigation(pleineLargeur: true),
-      ],
-    );
-  }
-
-  /// Bande d'information affichée quand la configuration impose le
-  /// défilement (jamais en silence — fiche « Affichage mobile »).
-  Widget _bandeDefilement() {
-    final sombre = Theme.of(context).brightness == Brightness.dark;
-    return Container(
-      margin: const EdgeInsets.only(top: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: sombre ? const Color(0xFF2A3734) : const Color(0xFFCFDBD8),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.unfold_more,
-              size: 14,
-              color: sombre
-                  ? const Color(0xFF8FB8B2)
-                  : const Color(0xFF203F44)),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              "Contenu plus grand que l'écran : faites défiler.",
-              style: TextStyle(
-                  fontSize: 11.5,
-                  color: sombre
-                      ? const Color(0xFF8FB8B2)
-                      : const Color(0xFF203F44)),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 🧭 Liste de démarrage en téléphone : une ligne nommée qui ouvre les
-  /// MÊMES étapes (la liste, ses étapes et son fonctionnement sont
-  /// conservés ; seul l'espace occupé change sur petit écran).
-  Widget _ligneChecklist() {
-    final faites = 1 +
-        (ChecklistService.motifChoisi.value ? 1 : 0) +
-        (ChecklistService.premierPointage.value ? 1 : 0);
-    return GestureDetector(
-      onTap: () {
-        showDialog<void>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            backgroundColor: Theme.of(context).cardColor,
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20)),
-            title: const Text(
-              '3 étapes pour démarrer',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-            ),
-            content: const ChecklistDemarrage(),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Fermer'),
-              ),
-            ],
           ),
         );
       },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          color: Theme.of(context).cardColor,
-          borderRadius: BorderRadius.circular(14),
-          border:
-              Border.all(color: EnCheckColors.terreChaude.withOpacity(0.35)),
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.explore_outlined,
-                size: 16, color: EnCheckColors.gris),
-            const SizedBox(width: 8),
-            const Expanded(
-              child: Text('3 étapes pour démarrer',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
-            ),
-            Text('$faites/3',
-                style: const TextStyle(
-                    fontFamily: 'JetBrainsMono',
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: EnCheckColors.terreChaude)),
-            const SizedBox(width: 4),
-            const Icon(Icons.chevron_right,
-                size: 18, color: EnCheckColors.gris),
-          ],
-        ),
-      ),
     );
   }
 
@@ -2532,61 +2557,99 @@ class _PointageScreenState extends State<PointageScreen> {
   /// le bouton nommé « Voir ma journée » (mêmes données réelles).
   /// ⭐ MAQUETTE FINALE 5/11 : carte « AUJOURD'HUI » plate (filet fin,
   /// sans ombre), statut neutre, lien souligné « Voir ma journée ».
-  Widget _buildBarreAujourdhui() {
+  Widget _buildBarreAujourdhui(AccueilPalette palette) {
     final statut = _texteStatutJour();
-    final sombre = Theme.of(context).brightness == Brightness.dark;
-    final accent = sombre ? const Color(0xFF8FB8B2) : const Color(0xFF22474D);
-    return GestureDetector(
-      onTap: _ouvrirFeuilleJournee,
-      // ⏱ Diagnostic caché (lot 1 vitesse) : appui long = les mesures p50/p95
-      //    réelles du retour à l'accueil. Aucun changement visuel à la
-      //    maquette : le geste est invisible, seul son contenu est technique.
-      onLongPress: _afficherDiagnosticPerf,
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
-        decoration: BoxDecoration(
-          color: sombre ? const Color(0xFF1E2422) : const Color(0xFFF8F7F2),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-              color: sombre
-                  ? const Color(0xFF2C3431)
-                  : const Color(0xFFE9E6E0)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text("AUJOURD'HUI",
-                style: TextStyle(
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 1,
-                    color: sombre
-                        ? const Color(0xFFA29B92)
-                        : const Color(0xFF787570))),
-            const SizedBox(height: 8),
-            Text(statut,
-                style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    height: 1.2,
-                    color: sombre
-                        ? const Color(0xFFF5F1EA)
-                        : const Color(0xFF2D2B2B))),
-            const SizedBox(height: 8),
-            Text('Voir ma journée',
-                style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    decoration: TextDecoration.underline,
-                    decorationColor: accent,
-                    color: accent)),
-          ],
+    return Semantics(
+      button: true,
+      label: 'Voir ma journée',
+      child: GestureDetector(
+        onTap: _ouvrirFeuilleJournee,
+        // ⏱ Diagnostic caché (lot 1 vitesse) : appui long = les mesures
+        //    p50/p95 réelles du retour à l'accueil. Aucun changement
+        //    visuel : le geste est invisible, son contenu est technique.
+        onLongPress: _afficherDiagnosticPerf,
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 19),
+          decoration: BoxDecoration(
+            color: palette.surface,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x1A282214),
+                blurRadius: 10,
+                offset: Offset(0, 3),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      "AUJOURD'HUI",
+                      maxLines: 1,
+                      style: TextStyle(
+                        fontSize: 12,
+                        height: 15 / 12,
+                        fontWeight: FontWeight.w400,
+                        color: palette.texteTertiaire,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        statut,
+                        maxLines: 1,
+                        style: TextStyle(
+                          fontSize: 18,
+                          height: 22 / 18,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: -0.15,
+                          color: palette.texteFort,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Voir ma journée',
+                        maxLines: 1,
+                        style: TextStyle(
+                          fontSize: 15,
+                          height: 19 / 15,
+                          fontWeight: FontWeight.w400,
+                          decoration: TextDecoration.underline,
+                          decorationColor: palette.lien,
+                          decorationThickness: 1,
+                          color: palette.lien,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 14),
+              MotifUiIcon(
+                key: const Key('accueil-motif-ui-jour'),
+                motif: MotifService.actif.value,
+                fond: palette.surface,
+                bordure: palette.filet,
+                taille: 34,
+              ),
+            ],
+          ),
+
         ),
       ),
     );
   }
-
   /// « Voir ma journée » : la carte complète (statut, noms, pause,
   /// synchronisation) — les mêmes informations qu'avant, en entier.
   Future<void> _ouvrirFeuilleJournee() async {
@@ -2644,252 +2707,29 @@ class _PointageScreenState extends State<PointageScreen> {
     );
   }
 
-  /// ⭐ MAQUETTE FINALE 5/11 : pilule fine « Autres modes › » (mêmes
-  /// actions qu'avant — comportement inchangé).
-  Widget _boutonAutresModes() {
-    final sombre = Theme.of(context).brightness == Brightness.dark;
-    final texte = sombre ? const Color(0xFFF5F1EA) : const Color(0xFF2D2B2B);
-    return Semantics(
-      button: true,
-      label: 'Autres modes',
-      child: GestureDetector(
-        onTap: _ouvrirFeuilleModes,
-        child: Container(
-          constraints: const BoxConstraints(minHeight: 25),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-          decoration: BoxDecoration(
-            color: sombre ? const Color(0xFF202725) : const Color(0xFFF6F3EC),
-            borderRadius: BorderRadius.circular(13),
-            border: Border.all(
-                color: sombre
-                    ? const Color(0xFF333B38)
-                    : const Color(0xFFC6C3BE)),
-          ),
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              Text('Autres modes',
-                  style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                      color: texte)),
-              Align(
-                alignment: Alignment.centerRight,
-                child: Icon(Icons.chevron_right, size: 18, color: texte),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// « Autres modes » : les mêmes actions que la carte AUTRES MODES de la
-  /// tablette, regroupées derrière un bouton nommé (fiche affichage mobile).
-  Future<void> _ouvrirFeuilleModes() async {
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (sheetContext) {
-        return Container(
-          decoration: BoxDecoration(
-            color: Theme.of(context).cardColor,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-          ),
-          padding: const EdgeInsets.fromLTRB(22, 12, 22, 28),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text('Autres modes',
-                        style: TextStyle(
-                            fontSize: 21,
-                            fontWeight: FontWeight.w800,
-                            color: Theme.of(context)
-                                    .textTheme
-                                    .titleLarge
-                                    ?.color ??
-                                EnCheckColors.brunProfond)),
-                  ),
-                  IconButton(
-                    onPressed: () => Navigator.pop(sheetContext),
-                    icon: const Icon(Icons.close, color: EnCheckColors.gris),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              if (_moduleQRActif) ...[
-                _boutonScene(
-                  label: 'Scanner QR',
-                  icon: Icons.qr_code_scanner,
-                  rempli: false,
-                  onTap: () {
-                    Navigator.pop(sheetContext);
-                    setState(() {
-                      if (_modulePhotoActif) {
-                        _showPhotoScanner = true;
-                      } else {
-                        _showScanner = true;
-                      }
-                    });
-                  },
-                ),
-                const SizedBox(height: 8),
-              ],
-              if (_moduleRecoFacialeActif) ...[
-                _boutonScene(
-                  label: 'Reconnaissance faciale',
-                  icon: Icons.face,
-                  rempli: false,
-                  onTap: () {
-                    Navigator.pop(sheetContext);
-                    _onBoutonFaceClique();
-                  },
-                ),
-                const SizedBox(height: 8),
-              ],
-              if (_kioskMode) _buildBoutonEnrolerNouvelEmploye(),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
   // 📱 ÉCRAN ENRÔLEMENT TABLETTE
   // ═══════════════════════════════════════════════════════════
 
   Widget _buildKioskEnrolementScreen() {
     final total = _kioskEmployeesNonEnroles.length;
-    final restants = total - _kioskEnrolementIndex;
     final employee = _kioskEnrolementIndex < total
         ? _kioskEmployeesNonEnroles[_kioskEnrolementIndex]
         : null;
 
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: SafeArea(
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(30),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  width: 80,
-                  height: 80,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: EnCheckColors.terreChaude.withOpacity(0.15),
-                    border:
-                    Border.all(color: EnCheckColors.terreChaude, width: 2),
-                  ),
-                  child: const Icon(Icons.tablet_android,
-                      color: EnCheckColors.terreChaude, size: 40),
-                ),
-                const SizedBox(height: 24),
-                const Text(
-                  'MODE TABLETTE',
-                  style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 2),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Phase d\'enrôlement : $restants employé${restants > 1 ? 's' : ''} restant${restants > 1 ? 's' : ''}',
-                  style:
-                  const TextStyle(color: EnCheckColors.gris, fontSize: 14),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 30),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
-                  child: LinearProgressIndicator(
-                    value: total > 0 ? _kioskEnrolementIndex / total : 0,
-                    backgroundColor:
-                    EnCheckColors.terreChaude.withOpacity(0.1),
-                    valueColor: const AlwaysStoppedAnimation<Color>(
-                        EnCheckColors.terreChaude),
-                    minHeight: 8,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  '$_kioskEnrolementIndex / $total enrôlé${_kioskEnrolementIndex > 1 ? 's' : ''}',
-                  style:
-                  const TextStyle(color: EnCheckColors.gris, fontSize: 12),
-                ),
-                const SizedBox(height: 40),
-                if (employee != null) ...[
-                  Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).cardColor,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                          color: EnCheckColors.terreChaude.withOpacity(0.2)),
-                    ),
-                    child: Column(
-                      children: [
-                        const Text('Employé suivant à enrôler :',
-                            style: TextStyle(
-                                color: EnCheckColors.gris, fontSize: 13)),
-                        const SizedBox(height: 8),
-                        Text(
-                          '${employee['first_name']} ${employee['last_name']}',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color:
-                            Theme.of(context).textTheme.bodyLarge?.color,
-                          ),
-                        ),
-                        Text(employee['matricule'] ?? '',
-                            style: const TextStyle(
-                                color: EnCheckColors.gris, fontSize: 13)),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: _lancerEnrolementKioskSuivant,
-                      icon: const Icon(Icons.face_retouching_natural),
-                      label: const Text('Enrôler cet employé',
-                          style: TextStyle(
-                              fontSize: 16, fontWeight: FontWeight.bold)),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: EnCheckColors.terreChaude,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16)),
-                      ),
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 16),
-                if (_kioskEnrolementIndex > 0)
-                  TextButton(
-                    onPressed: () =>
-                        setState(() => _kioskPhase = 'pointage'),
-                    child: const Text(
-                      'Passer au pointage (enrôlement partiel)',
-                      style: TextStyle(
-                          color: EnCheckColors.gris, fontSize: 14),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ),
-      ),
+    return EcranEnrolementBorne(
+      nomEmploye: employee == null
+          ? ''
+          : '${employee['first_name']} ${employee['last_name']}'.trim(),
+      matricule: employee?['matricule']?.toString() ?? '',
+      index: _kioskEnrolementIndex,
+      total: total,
+      onRetourAccueil: () {
+        _retourAccueilDepuisEnrolementKiosk();
+      },
+      onCommencer: _lancerEnrolementKioskSuivant,
+      onPasser: _kioskEnrolementIndex > 0
+          ? () => setState(() => _kioskPhase = 'pointage')
+          : null,
     );
   }
 
@@ -2952,7 +2792,10 @@ class _PointageScreenState extends State<PointageScreen> {
             onTap: () => setState(() => _modeSelectionne = 'qr'),
           ),
         ],
-        if (_kioskMode) ...[
+        if (ModePointagePolicy.afficherActionEnrolement(
+          borneActive: _kioskMode,
+          modeChoisi: _modeAccueilChoisi,
+        )) ...[
           const SizedBox(height: 20),
           _buildBoutonEnrolerNouvelEmploye(),
         ],
@@ -2967,53 +2810,78 @@ class _PointageScreenState extends State<PointageScreen> {
     return _buildModePINSimple();
   }
 
-  Widget _buildBoutonEnrolerNouvelEmploye() {
-    return GestureDetector(
-      onTap: () async {
-        await _detecterEmployesNonEnroles();
-        if (_kioskEmployeesNonEnroles.isEmpty) {
-          // CONTRAT ÉTAPE 3 : message honnête selon l'état du cache borne.
-          if (!await BorneService.cacheValide()) {
-            _afficherErreur(
-                'Personnel de la borne non disponible sur cette tablette.\n'
-                'Synchronisez la borne (bouton « 🖥 Borne ») — une autorisation '
-                'de borne est fournie par le superadmin.\n'
-                'En attendant : un employé peut s\'enrôler en s\'identifiant '
-                'avec son matricule et son PIN.');
-          } else {
-            _afficherErreur(
-                'Tous les employés actifs de cette borne sont déjà enrôlés.');
-          }
-          return;
+  Future<void> _ouvrirFileEnrolementBorne() async {
+    if (_enrolementBorneEnCours) return;
+    setState(() => _enrolementBorneEnCours = true);
+    try {
+      await _detecterEmployesNonEnroles();
+      if (!mounted) return;
+      if (_kioskEmployeesNonEnroles.isEmpty) {
+        // CONTRAT ÉTAPE 3 : message honnête selon l'état du cache borne.
+        if (!await BorneService.cacheValide()) {
+          _afficherErreur(
+              'Personnel de la borne non disponible sur cette tablette.\n'
+              'Synchronisez la borne (bouton « 🖥 Borne ») — une autorisation '
+              'de borne est fournie par le superadmin.\n'
+              'En attendant : un employé peut s\'enrôler en s\'identifiant '
+              'avec son matricule et son PIN.');
+        } else {
+          _afficherErreur(
+              'Tous les employés actifs de cette borne sont déjà enrôlés.');
         }
-        setState(() {
-          _kioskPhase = 'enrolling';
-          _kioskEnrolementIndex = 0;
-        });
-      },
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
-        decoration: BoxDecoration(
-          color: Colors.indigo.withOpacity(0.08),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.indigo.withOpacity(0.3)),
+        return;
+      }
+      setState(() {
+        _kioskPhase = 'enrolling';
+        _kioskEnrolementIndex = 0;
+      });
+    } catch (error) {
+      if (mounted) {
+        _afficherErreur('Impossible de charger la liste des employés : $error');
+      }
+    } finally {
+      if (mounted) setState(() => _enrolementBorneEnCours = false);
+    }
+  }
+
+  Widget _buildBoutonEnrolerNouvelEmploye() {
+    final themeService = Provider.of<ThemeService>(context, listen: false);
+    final palette = AccueilPalette.pour(
+      MotifService.actif.value,
+      themeService.isDarkMode,
+    );
+
+    return SizedBox(
+      width: double.infinity,
+      height: 58,
+      child: ElevatedButton.icon(
+        key: const Key('bouton-enroler-nouvel-employe'),
+        onPressed:
+            _enrolementBorneEnCours ? null : _ouvrirFileEnrolementBorne,
+        icon: _enrolementBorneEnCours
+            ? const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
+              )
+            : const Icon(Icons.person_add_alt_1_outlined),
+        label: const Text(
+          'Enrôler un nouvel employé',
+          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
         ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.person_add_outlined,
-                color: Colors.indigo.shade300, size: 22),
-            const SizedBox(width: 10),
-            Text(
-              'Enrôler un nouvel employé',
-              style: TextStyle(
-                color: Colors.indigo.shade300,
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
+        style: ElevatedButton.styleFrom(
+          backgroundColor: palette.primaire,
+          foregroundColor: palette.surPrimaire,
+          disabledBackgroundColor: palette.primaire.withOpacity(.65),
+          disabledForegroundColor: palette.surPrimaire,
+          elevation: 0,
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
         ),
       ),
     );
@@ -3832,78 +3700,210 @@ class _PointageScreenState extends State<PointageScreen> {
   //        accessible), couleurAccent en sombre.
   //    Neutres, rendu mat et clair/sombre conservés ; la photo et les logos
   //    ne sont JAMAIS recolorés. Aucune analyse de pixels, aucune dépendance.
-  // ⭐ MAQUETTE FINALE 5/11 : les couleurs de l'accueil sont FIXES et
-  //    échantillonnées sur la maquette choisie (teintes vert profond,
-  //    menthe et crème) — sans variation par motif, sans ombre ni gloss.
+  // ⭐ FINITION : neutres fixes et accents déterministes du motif actif.
+  //    Le média et les logos ne sont jamais recolorés ; aucun pixel n'est analysé.
 
-  Widget _buildScenePointage(bool estEnLigne, ThemeService themeService,
-      {double hauteur = 250, double margeHaut = 0}) {
-    // ⭐ MAQUETTE FINALE 5/11 : la photo occupe tout le haut ; « En-Check »,
-    // l'heure et la date (DYNAMIQUES) sont posés directement dessus à
-    // gauche, la pastille lune/soleil à droite. Aucune barre, aucun
-    // cartouche. La photo n'est jamais recolorée ; elle est décodée à la
-    // taille d'affichage (économie mémoire/processeur) et isolée
-    // graphiquement (RepaintBoundary) pour ne pas être redessinée.
-    final sombre = Theme.of(context).brightness == Brightness.dark;
-    final texte = sombre ? const Color(0xFFF5F1EA) : const Color(0xFF2D2B2B);
-    return SizedBox(
-      height: hauteur,
-      child: Stack(
-        children: [
-          Positioned.fill(
-            child: RepaintBoundary(
-              child: LayoutBuilder(builder: (context, c) {
-                final dpr = MediaQuery.of(context).devicePixelRatio;
-                final cacheW =
-                    ((c.maxWidth * dpr).round()).clamp(480, 1600).toInt();
-                return Image.asset(
-                  'assets/scenes/scene_pointage.jpg',
-                  fit: BoxFit.cover,
-                  alignment: const Alignment(0, -0.12),
-                  cacheWidth: cacheW,
-                  filterQuality: FilterQuality.medium,
-                  errorBuilder: (_, __, ___) =>
-                      Container(color: const Color(0xFF2D2B2B)),
-                );
-              }),
-            ),
+  Widget _buildScenePointage(
+    ThemeService themeService,
+    AccueilPalette palette,
+  ) {
+    return LayoutBuilder(
+      builder: (context, contraintes) {
+        final largeur = contraintes.maxWidth;
+        final hauteur = contraintes.maxHeight;
+        final largeurEcran = MediaQuery.sizeOf(context).width;
+        final texte = MediaQuery.textScalerOf(context).scale(1.0);
+        final dateTop = 16.0 + 29.8 * texte + 5.0;
+        final margeDroiteHeure = largeurEcran <= 620
+            ? math.max(largeur * 0.29, 110.0)
+            : largeur * 0.29;
+        final margeDroiteDate = largeurEcran <= 620 ? 110.0 : 70.0;
+        final voileHauteur = math
+            .min(hauteur - 40.0, math.max(146.0, 105.0 * texte + 45.0))
+            .toDouble();
+        final entrepriseId = entrepriseSelectionnee?['id']?.toString() ?? '';
+
+        return DecoratedBox(
+          decoration: BoxDecoration(
+            color: palette.carteDouce,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x29282214),
+                blurRadius: 10,
+                offset: Offset(0, 3),
+              ),
+            ],
           ),
-          Positioned(
-            top: margeHaut + 14,
-            left: 21,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('En-Check',
-                    style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.2,
-                        color: texte)),
-                const SizedBox(height: 6),
-                Text(heureActuelle,
-                    style: TextStyle(
-                        fontSize: 31,
-                        fontWeight: FontWeight.w800,
-                        height: 1.0,
-                        color: texte)),
-                const SizedBox(height: 3),
-                Text(dateActuelle.toUpperCase(),
-                    style: TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0.8,
-                        color: texte.withOpacity(0.8))),
+                Expanded(
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      // Média 16:9, immédiatement remplacé par la campagne
+                      // lorsque la RPC répond. Le widget garde la photo locale
+                      // visible pendant le chargement et en cas d'échec.
+                      RepaintBoundary(
+                        child: CarrouselAnnoncesAccueil(
+                          entrepriseId: entrepriseId,
+                          annonces: _annoncesModalOuverte
+                              ? const <AnnonceAccueil>[]
+                              : _annoncesAccueil,
+                          fondParDefaut: palette.primaire,
+                        ),
+                      ),
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        top: 0,
+                        height: voileHauteur,
+                        child: IgnorePointer(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: themeService.isDarkMode
+                                    ? const [
+                                        Color(0xD1060808),
+                                        Color(0xC2060808),
+                                        Color(0x75060808),
+                                        Color(0x00060808),
+                                      ]
+                                    : const [
+                                        Color(0xC70A0E0E),
+                                        Color(0xB80A0E0E),
+                                        Color(0x6B0A0E0E),
+                                        Color(0x000A0E0E),
+                                      ],
+                                stops: const [0.0, 0.45, 0.75, 1.0],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        left: 19,
+                        top: 22,
+                        width: largeur * 0.31,
+                        height: 28 * texte,
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              Image.asset(
+                                'assets/logo_encheck.png',
+                                key: const Key('accueil-symbole-encheck'),
+                                width: 23,
+                                height: 23,
+                                fit: BoxFit.contain,
+                                cacheWidth: 96,
+                                cacheHeight: 96,
+                                filterQuality: FilterQuality.medium,
+                                semanticLabel: 'Symbole En-Check',
+                              ),
+                              const SizedBox(width: 6),
+                              const Text(
+                                'En-Check',
+                                maxLines: 1,
+                                style: TextStyle(
+                                  fontSize: 17,
+                                  height: 1.24,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: -1.1,
+                                  color: Colors.white,
+                                  shadows: [
+                                    Shadow(
+                                      color: Color(0x59000000),
+                                      blurRadius: 2,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        left: largeur * 0.29,
+                        right: margeDroiteHeure,
+                        top: 16,
+                        height: 32 * texte,
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            heureActuelle,
+                            maxLines: 1,
+                            style: const TextStyle(
+                              fontSize: 24,
+                              height: 1.24,
+                              fontWeight: FontWeight.w500,
+                              letterSpacing: 0.36,
+                              color: Colors.white,
+                              shadows: [
+                                Shadow(
+                                  color: Color(0x59000000),
+                                  blurRadius: 2,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        left: 70,
+                        right: margeDroiteDate,
+                        top: dateTop,
+                        height: 15 * texte,
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            dateActuelle.toUpperCase(),
+                            maxLines: 1,
+                            style: const TextStyle(
+                              fontSize: 10.5,
+                              height: 1.24,
+                              fontWeight: FontWeight.w400,
+                              letterSpacing: 0.5,
+                              color: Color(0xEBFFFFFF),
+                              shadows: [
+                                Shadow(
+                                  color: Color(0x59000000),
+                                  blurRadius: 2,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                SizedBox(
+                  height: 40,
+                  width: double.infinity,
+                  child: RepaintBoundary(
+                    child: FriseMotif(
+                      key: const Key('accueil-bandeau-motif'),
+                      motif: MotifService.actif.value,
+                      hauteur: 40,
+                      tuilee: true,
+                      opacite: 0.92,
+                      fond: palette.carteDouce,
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
-          Positioned(
-            top: margeHaut + 14,
-            right: 20,
-            child: _boutonLune(themeService),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -3918,68 +3918,28 @@ class _PointageScreenState extends State<PointageScreen> {
       child: GestureDetector(
         onTap: () => themeService.setDarkMode(!sombre),
         child: Container(
-          width: 33,
+          width: 53,
           height: 33,
           decoration: BoxDecoration(
-            color: sombre ? const Color(0xFF2D2B2B) : Colors.white,
-            shape: BoxShape.circle,
-            boxShadow: [
+            color: sombre ? const Color(0xFF2A2A27) : Colors.white,
+            borderRadius: BorderRadius.circular(999),
+            boxShadow: const [
               BoxShadow(
-                  color: Colors.black.withOpacity(0.12),
-                  blurRadius: 6,
-                  offset: const Offset(0, 2)),
+                color: Color(0x2E000000),
+                blurRadius: 6,
+                offset: Offset(0, 2),
+              ),
             ],
           ),
           child: Icon(
-            sombre ? Icons.wb_sunny_outlined : Icons.nightlight_round,
-            size: 18,
-            color: sombre ? const Color(0xFFF5F1EA) : const Color(0xFF262526),
+            sombre ? Icons.light_mode : Icons.dark_mode,
+            size: 20,
+            color: sombre ? const Color(0xFFF5F1EA) : const Color(0xFF252525),
           ),
         ),
       ),
     );
   }
-
-  /// ⭐ MAQUETTE FINALE 5/11 : carte « Annonces » — emplacement réservé au
-  /// futur pilotage depuis En-Check Admin (chantier séparé) ; aucun contenu
-  /// inventé : tant qu'il n'y a rien, la carte le dit simplement.
-  Widget _carteAnnonces() {
-    final sombre = Theme.of(context).brightness == Brightness.dark;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-      decoration: BoxDecoration(
-        color: sombre ? const Color(0xFF1E2422) : const Color(0xFFF8F7F2),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-            color:
-                sombre ? const Color(0xFF2C3431) : const Color(0xFFE9E6E0)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Annonces',
-              style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                  color: sombre
-                      ? const Color(0xFFA29B92)
-                      : const Color(0xFF787570))),
-          const SizedBox(height: 12),
-          Center(
-            child: Text('Aucune annonce pour le moment',
-                style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w400,
-                    color: sombre
-                        ? const Color(0xFFA29B92)
-                        : const Color(0xFF787570))),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _rondScene({
     required IconData icon,
     required VoidCallback onTap,
@@ -4000,135 +3960,279 @@ class _PointageScreenState extends State<PointageScreen> {
   }
 
   /// Le souhait de bienvenue, dans la langue du pays de l'entreprise.
-  /// ⭐ MAQUETTE FINALE 5/11 : le souhait (« Mboté »…) centré, avec
-  /// « chez l'entreprise » en dessous — exactement la maquette choisie.
-  Widget _buildSalutation({double taille = 26}) {
-    final nomEntreprise = entrepriseSelectionnee?['name']?.toString() ?? '';
+  /// Mboté reste à gauche ; CHEZ + le nom de l'entreprise sont juste
+  /// dessous, sur le même axe. Le vrai logo client garde son ratio, sans crop.
+  Widget _buildSalutation(AccueilPalette palette) {
+    final nomEntreprise =
+        entrepriseSelectionnee?['name']?.toString().trim() ?? '';
+    final nomVisible = nomEntreprise.isEmpty ? 'votre entreprise' : nomEntreprise;
+    final logo = entrepriseSelectionnee?['logo_url']?.toString().trim() ?? '';
     final pays = entrepriseSelectionnee?['country_code']?.toString();
     final souhait = SouhaitsService.souhait(pays);
-    final sombre = Theme.of(context).brightness == Brightness.dark;
+
+    Widget plaqueContenu() {
+      if (logo.isNotEmpty) {
+        return Image.network(
+          logo,
+          fit: BoxFit.contain,
+          alignment: Alignment.center,
+          gaplessPlayback: true,
+          cacheWidth: 384,
+          filterQuality: FilterQuality.medium,
+          semanticLabel: 'Logo de $nomVisible',
+          errorBuilder: (_, __, ___) => _nomPlaque(nomVisible, palette),
+        );
+      }
+      return _nomPlaque(nomVisible, palette);
+    }
+
     return _BlocSalut(
-      child: Column(
-        children: [
-          Text(
-            souhait,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: taille,
-              fontWeight: FontWeight.w800,
-              height: 1.1,
-              color:
-                  sombre ? const Color(0xFFF5F1EA) : const Color(0xFF2D2B2B),
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'chez $nomEntreprise',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-                fontSize: 14.5,
-                fontWeight: FontWeight.w400,
-                color: sombre
-                    ? const Color(0xFFA29B92)
-                    : const Color(0xFF787570)),
-          ),
-        ],
+      child: LayoutBuilder(
+        builder: (context, contraintes) {
+          final texte = MediaQuery.textScalerOf(context).scale(1.0);
+          final hauteurChez = math.min(
+            contraintes.maxHeight * 0.60,
+            math.max(34.0, 18.0 + 22.0 * texte),
+          );
+          final hauteurPlaque = contraintes.maxHeight - hauteurChez;
+          return Column(
+            children: [
+              SizedBox(
+                height: hauteurPlaque,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                alignment: Alignment.centerLeft,
+                                child: Text(
+                                  souhait,
+                                  maxLines: 1,
+                                  style: TextStyle(
+                                    fontSize: 28,
+                                    fontWeight: FontWeight.w600,
+                                    letterSpacing: -1.0,
+                                    height: 1.1,
+                                    color: palette.texte,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Container(
+                      width: 119,
+                      height: math.min(37.0, hauteurPlaque),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: palette.plaque,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: palette.filet),
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Color(0x1C282214),
+                            blurRadius: 6,
+                            offset: Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: plaqueContenu(),
+                    ),
+                  ],
+                ),
+              ),
+              SizedBox(
+                height: hauteurChez,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: Text.rich(
+                            TextSpan(
+                              children: [
+                                TextSpan(
+                                  text: 'CHEZ ',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    height: 1.3,
+                                    fontWeight: FontWeight.w500,
+                                    letterSpacing: 1.1,
+                                    color: palette.texteSecondaire,
+                                  ),
+                                ),
+                                TextSpan(
+                                  text: nomVisible.toUpperCase(),
+                                  style: TextStyle(
+                                    fontSize: 14.5,
+                                    height: 1.2,
+                                    fontWeight: FontWeight.w600,
+                                    letterSpacing: 0.2,
+                                    color: palette.lien,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            key: const Key('accueil-chez-entreprise'),
+                            maxLines: 1,
+                            softWrap: false,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
 
-  /// ⭐ MAQUETTE FINALE 5/11 : les deux gestes, même importance visuelle.
-  /// Les libellés affichés sont ceux de la maquette ; les comportements
-  /// (décision du type, validation) restent EXACTEMENT les mêmes.
-  /// Couleurs FIXES échantillonnées sur la maquette choisie.
-  Widget _buildCartesAction() {
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(
-            child: _carteAction(
-              titre: 'Je commence\nmon service',
-              semantique: 'Arrivée — Je commence mon service',
-              depart: false,
-              onTap: () => _ouvrirValidationPointage('arrivee'),
-            ),
-          ),
-          const SizedBox(width: 11),
-          Expanded(
-            child: _carteAction(
-              titre: 'Je quitte\nmon poste',
-              semantique: 'Départ — Je quitte mon poste',
-              depart: true,
-              onTap: () => _ouvrirValidationPointage('depart'),
-            ),
-          ),
-        ],
+  Widget _nomPlaque(String nom, AccueilPalette palette) {
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      child: Text(
+        nom.toUpperCase(),
+        maxLines: 1,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w500,
+          letterSpacing: 0.4,
+          color: palette.plaqueTexte,
+        ),
       ),
+    );
+  }
+  /// ⭐ MAQUETTE FINALE 5/11 : les deux gestes, même importance visuelle.
+  /// Les libellés affichés sont ceux de la maquette ; le type (arrivée/départ)
+  /// reste décidé automatiquement après l'identification. QR actif = scan direct,
+  /// sinon le parcours PIN reste le défaut.
+  /// Couleurs FIXES échantillonnées sur la maquette choisie.
+  Widget _buildCartesAction(AccueilPalette palette) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          child: _carteAction(
+            palette: palette,
+            titre: 'Je commence\nmon service',
+            semantique: 'Arrivée — Je commence mon service',
+            depart: false,
+            onTap: () => _ouvrirActionPointage('arrivee'),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: _carteAction(
+            palette: palette,
+            titre: 'Je quitte\nmon poste',
+            semantique: 'Départ — Je quitte mon poste',
+            depart: true,
+            onTap: () => _ouvrirActionPointage('depart'),
+          ),
+        ),
+      ],
     );
   }
 
   Widget _carteAction({
+    required AccueilPalette palette,
     required String titre,
     required String semantique,
     required bool depart,
     required VoidCallback onTap,
   }) {
-    final sombre = Theme.of(context).brightness == Brightness.dark;
-    final couleurTexte =
-        sombre ? const Color(0xFFF5F1EA) : const Color(0xFF2D2B2B);
-    final fond = depart
-        ? (sombre ? const Color(0xFF24322F) : const Color(0xFFCFDBD8))
-        : (sombre ? const Color(0xFF222A28) : const Color(0xFFF7F5EE));
-    final bordure =
-        sombre ? const Color(0xFF5F8A84) : const Color(0xFF22474D);
-    final cercleFond = depart
-        ? (sombre ? const Color(0xFF2C4A48) : const Color(0xFF203F44))
-        : (sombre ? const Color(0xFF2A3734) : const Color(0xFFCFDBD8));
-    final cercleIcone = depart
-        ? Colors.white
-        : (sombre ? const Color(0xFF8FB8B2) : const Color(0xFF22474D));
     return Semantics(
       button: true,
       label: semantique,
       child: GestureDetector(
         onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-          decoration: BoxDecoration(
-            color: fond,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: bordure, width: 1.6),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: cercleFond,
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(Icons.arrow_circle_right,
-                    color: cercleIcone, size: 22),
+        behavior: HitTestBehavior.opaque,
+        child: LayoutBuilder(
+          builder: (context, contraintes) {
+            final texte = MediaQuery.textScalerOf(context).scale(1.0);
+            final facteur = ((contraintes.maxHeight - 48.0 * texte) / 83.0)
+                .clamp(0.82, 1.0)
+                .toDouble();
+            final diametre = 44.0 * facteur;
+            return Container(
+              decoration: BoxDecoration(
+                color: depart ? palette.primaire : palette.carteDouce,
+                borderRadius: BorderRadius.circular(14),
+                boxShadow: [
+                  BoxShadow(
+                    color: depart
+                        ? const Color(0x29142828)
+                        : const Color(0x21282214),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
               ),
-              const SizedBox(height: 10),
-              Text(
-                titre,
-                style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    height: 1.05,
-                    color: couleurTexte),
+              child: Stack(
+                children: [
+                  Positioned(
+                    left: 18,
+                    top: 16 * facteur,
+                    width: diametre,
+                    height: diametre,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: depart
+                            ? palette.cerclePrimaire
+                            : palette.cercleDoux,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        Icons.login,
+                        size: 24 * facteur,
+                        color: depart
+                            ? palette.iconePrimaire
+                            : palette.iconeDouce,
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    left: 18,
+                    right: 12,
+                    bottom: 13 * facteur,
+                    child: Text(
+                      titre,
+                      maxLines: 2,
+                      style: TextStyle(
+                        fontSize: 18,
+                        height: 24 / 18,
+                        fontWeight: FontWeight.w500,
+                        letterSpacing: -0.18,
+                        color: depart ? palette.surPrimaire : palette.texte,
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ),
+            );
+          },
         ),
       ),
     );
   }
-
   /// La carte « Aujourd'hui » : qui est en pause, qui vient de pointer
   /// (contrat UX : le bandeau avec noms), et l'état de la synchronisation.
   Widget _buildCarteStatutJour() {
@@ -4312,36 +4416,26 @@ class _PointageScreenState extends State<PointageScreen> {
   /// ⭐ MAQUETTE FINALE 5/11 : barre de navigation plate (fond ivoire,
   /// filet supérieur), 4 onglets — l'onglet actif est vert profond, les
   /// autres gris. Comportements (Pause, Historique, Paramètres) inchangés.
-  Widget _buildBarreNavigation({bool pleineLargeur = false}) {
-    final sombre = Theme.of(context).brightness == Brightness.dark;
-    final barre = Container(
-      padding: const EdgeInsets.symmetric(vertical: 10),
+  Widget _buildBarreNavigation(AccueilPalette palette) {
+    return Container(
       decoration: BoxDecoration(
-        color: sombre ? const Color(0xFF1A201F) : const Color(0xFFF7F5EE),
-        borderRadius: pleineLargeur ? null : BorderRadius.circular(18),
-        border: pleineLargeur
-            ? Border(
-                top: BorderSide(
-                    color: sombre
-                        ? const Color(0xFF2A322F)
-                        : const Color(0xFFEBE7E1)))
-            : Border.all(
-                color: sombre
-                    ? const Color(0xFF2A322F)
-                    : const Color(0xFFEBE7E1)),
+        color: palette.navFond,
+        border: Border(top: BorderSide(color: palette.filet)),
       ),
       child: Row(
         children: [
           Expanded(
             child: _itemNav(
+              palette: palette,
               icon: Icons.home_filled,
               label: 'Accueil',
               actif: true,
-              onTap: () {},
+              onTap: _gererActionAccueilPointage,
             ),
           ),
           Expanded(
             child: _itemNav(
+              palette: palette,
               icon: Icons.restaurant,
               label: 'Pause',
               actif: false,
@@ -4350,6 +4444,7 @@ class _PointageScreenState extends State<PointageScreen> {
           ),
           Expanded(
             child: _itemNav(
+              palette: palette,
               icon: Icons.history,
               label: 'Historique',
               actif: false,
@@ -4358,102 +4453,185 @@ class _PointageScreenState extends State<PointageScreen> {
           ),
           Expanded(
             child: _itemNav(
+              palette: palette,
               icon: Icons.settings_outlined,
               label: 'Paramètres',
               actif: false,
+              badgeDemarrage: true,
               onTap: () => ouvrirPanneauMotif(context),
             ),
           ),
         ],
       ),
     );
-    return pleineLargeur ? SafeArea(top: false, child: barre) : barre;
   }
 
   Widget _itemNav({
+    required AccueilPalette palette,
     required IconData icon,
     required String label,
     required bool actif,
     required VoidCallback onTap,
+    bool badgeDemarrage = false,
   }) {
-    final sombre = Theme.of(context).brightness == Brightness.dark;
-    // Onglet actif : vert profond de la maquette (jamais de doré).
-    final couleur = actif
-        ? (sombre ? const Color(0xFF8FB8B2) : const Color(0xFF244951))
-        : (sombre ? const Color(0xFF9A938A) : const Color(0xFF8A8578));
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 23, color: couleur),
-          const SizedBox(height: 3),
-          Text(
-            label,
-            style: TextStyle(
+    final couleur = actif ? palette.navActif : palette.navInactif;
+    final icone = Icon(icon, size: 24, color: couleur);
+    return Semantics(
+      button: true,
+      label: label,
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            if (badgeDemarrage)
+              ListenableBuilder(
+                listenable: Listenable.merge([
+                  ChecklistService.motifChoisi,
+                  ChecklistService.premierPointage,
+                ]),
+                builder: (context, _) {
+                  final faites = 1 +
+                      (ChecklistService.motifChoisi.value ? 1 : 0) +
+                      (ChecklistService.premierPointage.value ? 1 : 0);
+                  if (faites == 3) return icone;
+                  return Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      icone,
+                      Positioned(
+                        right: -17,
+                        top: -7,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 4,
+                            vertical: 1,
+                          ),
+                          decoration: BoxDecoration(
+                            color: palette.navFond,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: palette.navActif),
+                          ),
+                          child: Text(
+                            '$faites/3',
+                            style: TextStyle(
+                              fontSize: 9,
+                              height: 1.1,
+                              fontWeight: FontWeight.w600,
+                              color: palette.navActif,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              )
+            else
+              icone,
+            const SizedBox(height: 4),
+            Text(
+              label,
+              maxLines: 1,
+              style: TextStyle(
                 fontSize: 11,
-                fontWeight: actif ? FontWeight.w700 : FontWeight.w500,
-                color: couleur),
+                fontWeight: actif ? FontWeight.w500 : FontWeight.w400,
+                color: couleur,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  // NAVIGATION VERS LES PAGES (une page = une action)
+
+  /// Depuis l'accueil, permet de changer de mode sans quitter l'entreprise.
+  /// La confirmation évite une sortie accidentelle de l'écran de pointage.
+  /// S'il n'y a qu'un mode autorisé, le bouton Accueil revient à l'identification.
+  Future<void> _gererActionAccueilPointage() async {
+    if (_modesAccueilDisponibles.length <= 1) {
+      await _confirmerRetourIdentificationEntreprise();
+      return;
+    }
+
+    final confirmer = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Changer de mode de pointage ?'),
+        content: const Text(
+          'Vous allez revenir au choix du mode. Les pointages déjà enregistrés ne seront pas supprimés.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('ANNULER'),
+          ),
+          FilledButton(
+            key: const Key('pointage-confirmer-changement-mode'),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('CONTINUER'),
           ),
         ],
       ),
     );
+    if (confirmer != true || !mounted) return;
+
+    setState(() {
+      _modeAccueilChoisi = null;
+      _modeSelectionne = null;
+      numeroMatricule = '';
+      codePin = '';
+      afficherPin = false;
+      _intention = 'pointage';
+      _gpsVerifie = false;
+      _currentPosition = null;
+      _verificationZone = null;
+    });
+    FocusManager.instance.primaryFocus?.unfocus();
   }
 
-  /// Autres modes (QR, visage, enrôlement borne) — modules actifs seulement.
-  Widget _buildCarteModules() {
-    final enfants = <Widget>[];
-    if (_moduleQRActif) {
-      enfants.add(_boutonScene(
-        label: 'Scanner QR',
-        icon: Icons.qr_code_scanner,
-        rempli: false,
-        onTap: () => setState(() {
-          if (_modulePhotoActif) {
-            _showPhotoScanner = true;
-          } else {
-            _showScanner = true;
-          }
-        }),
-      ));
-    }
-    if (_moduleRecoFacialeActif) {
-      enfants.add(_boutonScene(
-        label: 'Reconnaissance faciale',
-        icon: Icons.face,
-        rempli: false,
-        onTap: _onBoutonFaceClique,
-      ));
-    }
-    if (_kioskMode) {
-      enfants.add(_buildBoutonEnrolerNouvelEmploye());
-    }
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text('AUTRES MODES',
-              style: TextStyle(
-                  fontFamily: 'JetBrainsMono',
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.8,
-                  color: EnCheckColors.gris)),
-          const SizedBox(height: 10),
-          for (final b in enfants) ...[b, const SizedBox(height: 8)],
+  /// Le retour vers la configuration est volontaire et confirmé : le code
+  /// entreprise existant sera redemandé par l'écran Welcome.
+  Future<void> _confirmerRetourIdentificationEntreprise() async {
+    final confirmer = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Retour à l’identification de l’entreprise ?'),
+        content: const Text(
+          'Vous allez quitter l’écran de pointage. Les pointages déjà enregistrés ne seront pas supprimés. Pour continuer, vous devrez saisir le code entreprise.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('ANNULER'),
+          ),
+          FilledButton(
+            key: const Key('pointage-confirmer-retour-entreprise'),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('CONTINUER'),
+          ),
         ],
       ),
     );
+    if (confirmer != true || !mounted) return;
+
+    await Navigator.of(context).pushReplacementNamed<void, void>(
+      '/welcome',
+    );
   }
 
-  // NAVIGATION VERS LES PAGES (une page = une action)
+  /// Annule une identification et revient à l'écran d'accueil du pointage.
+  /// Le parcours est détruit ; aucune validation métier n'est appelée.
+  void _retourAccueilPublic() {
+    numeroMatricule = '';
+    codePin = '';
+    afficherPin = false;
+    _modeSelectionne = null;
+    FocusManager.instance.primaryFocus?.unfocus();
+    Navigator.of(context).popUntil((route) => route.isFirst);
+  }
 
   Future<void> _ouvrirPagePause() async {
     final entrepriseId = entrepriseSelectionnee?['id']?.toString() ?? '';
@@ -4467,6 +4645,8 @@ class _PointageScreenState extends State<PointageScreen> {
           entrepriseId: entrepriseId,
           matriculePrefix:
               entrepriseSelectionnee?['matricule_prefix']?.toString() ?? '',
+          maquettePause: true,
+          onAccueil: _retourAccueilPublic,
         ),
       ),
     );
@@ -4502,6 +4682,48 @@ class _PointageScreenState extends State<PointageScreen> {
     ));
   }
 
+  /// Ferme proprement le scanner avant d'ouvrir l'identification PIN de repli.
+  void _ouvrirPinDepuisQR() {
+    if (!mounted) return;
+    setState(() {
+      _showScanner = false;
+      _showPhotoScanner = false;
+      _modeSelectionne = null;
+      if (_intention == 'pause') _intention = 'pointage';
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _ouvrirValidationPointage(_sensActionQR);
+    });
+  }
+
+  /// Le QR devient le geste principal dès qu'il est activé pour l'entreprise.
+  /// Sans QR, le code PIN reste le parcours par défaut.
+  Future<void> _ouvrirActionPointage(String sens) async {
+    final mode = _modeAccueilChoisi ??
+        ModePointagePolicy.principal(qrActif: _moduleQRActif);
+    if (mode == MethodePointage.qr) {
+      _sensActionQR = sens;
+      _ouvrirLecteurQR();
+      return;
+    }
+    if (mode == MethodePointage.reconnaissanceFaciale) {
+      await _onBoutonFaceClique();
+      return;
+    }
+    await _ouvrirValidationPointage(sens);
+  }
+
+  void _ouvrirLecteurQR() {
+    if (!mounted) return;
+    setState(() {
+      if (_modulePhotoActif) {
+        _showPhotoScanner = true;
+      } else {
+        _showScanner = true;
+      }
+    });
+  }
+
   Future<void> _ouvrirValidationPointage(String sens) async {
     final entrepriseId = entrepriseSelectionnee?['id']?.toString() ?? '';
     if (entrepriseId.isEmpty) {
@@ -4525,6 +4747,7 @@ class _PointageScreenState extends State<PointageScreen> {
           entrepriseId: entrepriseId,
           matriculePrefix:
               entrepriseSelectionnee?['matricule_prefix']?.toString() ?? '',
+          maquettePointage: true,
         ),
       ),
     );
@@ -4627,180 +4850,42 @@ class _PointageScreenState extends State<PointageScreen> {
   /// Aucun pointage n'est créé : c'est toute la différence avec
   /// _identifierEtEnroler, qui enchaîne l'identification et le pointage.
   Future<void> _ouvrirHistoriqueJournee() async {
-    if (entrepriseSelectionnee == null) {
+    final entreprise = entrepriseSelectionnee;
+    if (entreprise == null) {
       _afficherErreur('Aucune entreprise sélectionnée.');
       return;
     }
 
-    final matriculeController = TextEditingController();
-    final pinController = TextEditingController();
-    bool afficherPinLocal = false;
-    bool verificationEnCours = false;
-    String? messageErreur;
-
-    await showDialog(
+    final employee = await showDialog<Map<String, dynamic>>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModalState) => AlertDialog(
-          backgroundColor: Theme.of(context).cardColor,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: Row(
-            children: [
-              const Icon(Icons.today_outlined,
-                  color: EnCheckColors.terreChaude),
-              const SizedBox(width: 10),
-              Text(
-                'MA JOURNÉE',
-                style: TextStyle(
-                  letterSpacing: 2,
-                  fontWeight: FontWeight.w300,
-                  color: Theme.of(context).textTheme.bodyLarge?.color,
-                ),
+      builder: (_) => MaJourneeDialog(
+        prefixeEntreprise: (entreprise['matricule_prefix'] ?? '').toString(),
+        verifier: (matriculeComplet, pin) async {
+          // Même vérification d'identité et même repli hors-ligne qu'avant.
+          // La modale ne reçoit que le résultat ; le PIN n'est ni mémorisé
+          // ni affiché en clair et aucun pointage n'est créé ici.
+          final resultat = ConnectivityService.isOnline
+              ? await SupabaseService.verifierEmployee(
+                  entreprise['id'], matriculeComplet, pin)
+              : await LocalDatabase.verifierEmployeeCache(
+                  entreprise['id'], matriculeComplet, pin);
+          if (resultat == null) {
+            return ResultatVerificationJournee.echec(
+              _messageIdentifiants(
+                estHorsLigne: !ConnectivityService.isOnline,
+                type: 'pin',
               ),
-            ],
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Saisissez votre matricule et votre PIN pour consulter vos '
-                  'pointages du jour. Aucun pointage ne sera enregistré.',
-                  style: TextStyle(color: EnCheckColors.gris, fontSize: 13),
-                ),
-                const SizedBox(height: 20),
-                TextField(
-                  controller: matriculeController,
-                  keyboardType: TextInputType.number,
-                  enabled: !verificationEnCours,
-                  decoration: InputDecoration(
-                    labelText: 'Matricule',
-                    prefixText:
-                        '${entrepriseSelectionnee!['matricule_prefix'] ?? ''}-',
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12)),
-                  ),
-                ),
-                if (afficherPinLocal) ...[
-                  const SizedBox(height: 15),
-                  TextField(
-                    controller: pinController,
-                    obscureText: true,
-                    keyboardType: TextInputType.number,
-                    enabled: !verificationEnCours,
-                    decoration: InputDecoration(
-                      labelText: 'PIN',
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12)),
-                    ),
-                  ),
-                ],
-                if (messageErreur != null) ...[
-                  const SizedBox(height: 15),
-                  Text(
-                    messageErreur!,
-                    style: const TextStyle(
-                        color: EnCheckColors.erreur, fontSize: 13),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: verificationEnCours ? null : () => Navigator.pop(ctx),
-              child: Text(
-                'ANNULER',
-                style: TextStyle(
-                    color: Theme.of(context).textTheme.bodyLarge?.color),
-              ),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: EnCheckColors.terreChaude,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
-              ),
-              onPressed: verificationEnCours
-                  ? null
-                  : () async {
-                      if (!afficherPinLocal) {
-                        if (matriculeController.text.trim().isEmpty) return;
-                        setModalState(() => afficherPinLocal = true);
-                        return;
-                      }
-
-                      if (pinController.text.length < 4) {
-                        setModalState(() => messageErreur =
-                            'Le PIN doit contenir au moins 4 chiffres.');
-                        return;
-                      }
-
-                      setModalState(() {
-                        verificationEnCours = true;
-                        messageErreur = null;
-                      });
-
-                      final matriculeComplet =
-                          '${entrepriseSelectionnee!['matricule_prefix']}-'
-                          '${matriculeController.text.trim()}';
-
-                      try {
-                        // Même logique que _identifierEtEnroler : on lit le
-                        // cache local quand la connexion manque.
-                        final employee = ConnectivityService.isOnline
-                            ? await SupabaseService.verifierEmployee(
-                                entrepriseSelectionnee!['id'],
-                                matriculeComplet,
-                                pinController.text,
-                              )
-                            : await LocalDatabase.verifierEmployeeCache(
-                                entrepriseSelectionnee!['id'],
-                                matriculeComplet,
-                                pinController.text,
-                              );
-
-                        if (!mounted) return;
-
-                        if (employee == null) {
-                          setModalState(() {
-                            verificationEnCours = false;
-                            messageErreur = _messageIdentifiants(
-                                estHorsLigne: !ConnectivityService.isOnline,
-                                type: 'pin');
-                          });
-                          return;
-                        }
-
-                        Navigator.pop(ctx);
-                        await Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => HistoriqueScreen(employee: employee),
-                          ),
-                        );
-                      } catch (e) {
-                        setModalState(() {
-                          verificationEnCours = false;
-                          messageErreur = 'Vérification impossible : $e';
-                        });
-                      }
-                    },
-              child: verificationEnCours
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white),
-                    )
-                  : Text(afficherPinLocal ? 'CONSULTER' : 'SUIVANT'),
-            ),
-          ],
-        ),
+            );
+          }
+          return ResultatVerificationJournee.reussite(resultat);
+        },
       ),
+    );
+
+    if (employee == null || !mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => HistoriqueScreen(employee: employee)),
     );
   }
 
@@ -6235,15 +6320,7 @@ class _PointageScreenState extends State<PointageScreen> {
                       color: EnCheckColors.terreChaude, letterSpacing: 2)),
             ),
           TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                    builder: (context) =>
-                        HistoriqueScreen(employee: employee)),
-              );
-            },
+            onPressed: () => _ouvrirHistoriqueDepuisModale(context, employee),
             child: Text('HISTORIQUE',
                 style: TextStyle(
                     color: Theme.of(context).textTheme.bodyLarge?.color,

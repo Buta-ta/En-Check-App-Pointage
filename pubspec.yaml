@@ -33,6 +33,7 @@ dependencies:
   path_provider: ^2.1.4
   uuid: ^4.5.1
   web: ^1.0.0
+  video_player: ^2.9.2
 
   # Geofencing
   geolocator: ^12.0.0
@@ -54,12 +55,26 @@ flutter:
     - assets/icon/icon.png
     - assets/logo_encheck.png   # ⭐ Vrai logo En-Check (en-tête)
     - assets/models/          # ← Dossier pour le modèle IA
-    - assets/motifs/          # 🧵 Étoffes culturelles (Raphia par défaut)
+    - assets/motifs/          # 🧵 Étoffes culturelles (Adinkra par défaut)
+    - assets/motifs/frises/   # Crops légers d'une rangée pour l'accueil
     - assets/scenes/          # 📸 Scènes photo (visuels de l'Admin)
 
   # 🎨 Refonte design : chiffres en JetBrains Mono (horloge, matricule,
   #    heures de pointage) — le même « compteur » que l'app En-Check Admin.
   fonts:
+    # Maquette d'accueil du 5/11 : Inter, graisses 400 à 700.
+    # Les fontes sont subsettées (latin étendu) et distribuées sous OFL.
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-400.ttf
+          weight: 400
+        - asset: assets/fonts/Inter-500.ttf
+          weight: 500
+        - asset: assets/fonts/Inter-600.ttf
+          weight: 600
+        - asset: assets/fonts/Inter-700.ttf
+          weight: 700
+
     - family: JetBrainsMono
       fonts:
         - asset: assets/fonts/JetBrainsMono-Light.ttf

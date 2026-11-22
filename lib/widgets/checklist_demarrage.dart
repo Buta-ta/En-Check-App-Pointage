@@ -4,7 +4,7 @@
 // ═══════════════════════════════════════════════════════════
 //
 //  Visible uniquement tant qu'elle n'est pas terminée :
-//  ☑ Code entreprise (toujours fait) ☑ Motif culturel choisi
+//  ☑ Code entreprise (toujours fait) ☑ Motif d'interface choisi
 //  ☑ Premier pointage. Ensuite elle disparaît toute seule.
 // ═══════════════════════════════════════════════════════════
 
@@ -57,7 +57,7 @@ class ChecklistDemarrage extends StatelessWidget {
                 children: [
                   _pastille('Code entreprise', true),
                   _pastille(
-                      'Motif culturel', ChecklistService.motifChoisi.value),
+                      'Motif d’interface', ChecklistService.motifChoisi.value),
                   _pastille('Premier pointage',
                       ChecklistService.premierPointage.value),
                 ],

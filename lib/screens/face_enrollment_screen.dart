@@ -20,6 +20,7 @@ class FaceEnrollmentScreen extends StatefulWidget {
   final bool adminApprovalRequired;
   final VoidCallback onEnrollmentComplete;
   final VoidCallback onCancel;
+  final VoidCallback? onReturnHome;
 
   const FaceEnrollmentScreen({
     super.key,
@@ -28,6 +29,7 @@ class FaceEnrollmentScreen extends StatefulWidget {
     required this.adminApprovalRequired,
     required this.onEnrollmentComplete,
     required this.onCancel,
+    this.onReturnHome,
   });
 
   @override
@@ -377,8 +379,24 @@ class _FaceEnrollmentScreenState extends State<FaceEnrollmentScreen> {
       color: Colors.black,
       child: Row(
         children: [
-          GestureDetector(onTap: widget.onCancel, child: const Icon(Icons.close, color: Colors.white, size: 28)),
-          const SizedBox(width: 16),
+          if (widget.onReturnHome != null) ...[
+            IconButton(
+              tooltip: 'Retour à la liste des employés',
+              onPressed: widget.onCancel,
+              icon: const Icon(Icons.close, color: Colors.white, size: 26),
+            ),
+            IconButton(
+              tooltip: 'Retour à l’accueil Pointage',
+              onPressed: widget.onReturnHome,
+              icon: const Icon(Icons.home_outlined, color: Colors.white),
+            ),
+          ] else
+            IconButton(
+              tooltip: 'Annuler l’enrôlement',
+              onPressed: widget.onCancel,
+              icon: const Icon(Icons.close, color: Colors.white, size: 26),
+            ),
+          const SizedBox(width: 8),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,

@@ -1,0 +1,8 @@
+{
+  "name": "encheck-apercu-accueil",
+  "private": true,
+  "description": "Captures hors réseau de la PWA compilée en CI",
+  "dependencies": {
+    "puppeteer-core": "25.16.0"
+  }
+}

@@ -10,7 +10,10 @@ import '../services/heure_pointage.dart'; // ⭐ LIVRAISON 19 — conversion d'h
 import '../services/pause_service.dart'; // ⏸ LOT D — les pauses
 import '../services/geofencing_service.dart'; // ⏸ LOT D — mention « Hors site »
 import '../services/motif_service.dart';
+import '../services/historique_periode.dart';
+import '../theme/accueil_palette.dart';
 import '../widgets/sans_etirement.dart';
+import '../widgets/historique_date_picker_dialog.dart';
 
 class HistoriqueScreen extends StatefulWidget {
   final Map<String, dynamic> employee;
@@ -25,15 +28,16 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
   List<Map<String, dynamic>> pointages = [];
   bool chargement = true;
 
-  /// ⭐ PTG-01.4 : pagination des 7 derniers jours + signal honnête quand
-  /// la limite du contrat d'accès (500) est atteinte.
-  int _pageSeptJours = 0;
+  /// Date consultée dans la période de sept jours déjà autorisée à l'employé.
+  /// Le calendrier ne fait que filtrer les lignes déjà chargées.
+  late DateTime _dateSelectionnee;
   bool _limiteAtteinte = false;
 
   /// 🔄 CONTRAT ÉTAPE 2 (25/10/2026) — fiche rafraîchie via le jeton de la
   /// session (le serveur en résout le titulaire) : poste, département et
   /// horaires à jour. `null` tant que le rafraîchissement n'a pas abouti.
   Map<String, dynamic>? _ficheFraiche;
+  String? _nomEntreprise;
 
   /// Raison métier d'un refus de session (jeton expiré, ancien jeton…),
   /// affichée honnêtement au lieu de laisser croire que tout va bien.
@@ -43,6 +47,15 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
   /// l'écran précédent — mêmes identifiants, le rafraîchissement par jeton
   /// n'étant accepté que pour le même employé.
   Map<String, dynamic> get _fiche => _ficheFraiche ?? widget.employee;
+
+  bool get _estSombre => Theme.of(context).brightness == Brightness.dark;
+
+  AccueilPalette get _palette =>
+      AccueilPalette.pour(MotifService.actif.value, _estSombre);
+
+  Color get _accentAmbre => _estSombre
+      ? const Color(0xFFE0BE82)
+      : EnCheckColors.terreChaude;
 
   /// Message à afficher quand la lecture a échoué. Sans lui, un refus
   /// d'autorisation sur la table `attendances` produisait une liste vide et
@@ -85,9 +98,11 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
   @override
   void initState() {
     super.initState();
+    _dateSelectionnee = HistoriquePeriode.jour(HeurePointage.maintenant());
     _chargerHistorique();
     _chargerPause();
     _rafraichirProfil();
+    _chargerNomEntreprise();
   }
 
   /// 🔄 Contrat étape 2 : la fiche de la session se rafraîchit par le jeton
@@ -105,6 +120,18 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
     );
     if (rafraichi != null && mounted) {
       setState(() => _ficheFraiche = rafraichi);
+    }
+  }
+
+  Future<void> _chargerNomEntreprise() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final nom = prefs.getString('enterprise_name')?.trim();
+      if (mounted && nom != null && nom.isNotEmpty) {
+        setState(() => _nomEntreprise = nom);
+      }
+    } catch (_) {
+      // Le nom local est un complément d'affichage, jamais une condition d'accès.
     }
   }
 
@@ -246,10 +273,13 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
       _programmerRappel();
       final horsLigne = !ConnectivityService.isOnline;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(horsLigne
-            ? '⏸ Pause enregistrée hors-ligne : elle sera synchronisée.'
-            : '⏸ Pause enregistrée. Bonne pause !'),
-        backgroundColor: EnCheckColors.terreChaude,
+        content: Text(
+          horsLigne
+              ? '⏸ Pause enregistrée hors-ligne : elle sera synchronisée.'
+              : '⏸ Pause enregistrée. Bonne pause !',
+          style: TextStyle(color: _palette.surPrimaire),
+        ),
+        backgroundColor: _estSombre ? _palette.primaire : EnCheckColors.terreChaude,
       ));
     } catch (e) {
       if (!mounted) return;
@@ -317,10 +347,12 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
     void afficher() {
       if (_rappelAffiche || !mounted) return;
       setState(() => _rappelAffiche = true);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(
-            'Toujours en pause ? Touche « Je reprends » si tu es de retour.'),
-        backgroundColor: EnCheckColors.terreChaude,
+          'Toujours en pause ? Touche « Je reprends » si tu es de retour.',
+          style: TextStyle(color: _palette.surPrimaire),
+        ),
+        backgroundColor: _estSombre ? _palette.primaire : EnCheckColors.terreChaude,
       ));
     }
 
@@ -340,13 +372,12 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
   Widget _pastilleHorsSite() => Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: BoxDecoration(
-          color: EnCheckColors.terreChaude.withOpacity(0.12),
+          color: _accentAmbre.withOpacity(0.12),
           borderRadius: BorderRadius.circular(12),
         ),
-        child: const Text(
+        child: Text(
           '📍 Hors site',
-          style:
-              TextStyle(fontSize: 11, color: EnCheckColors.terreChaude),
+          style: TextStyle(fontSize: 11, color: _accentAmbre),
         ),
       );
 
@@ -356,8 +387,8 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
     final debutIso = etat == null ? null : etat['debut'] as String?;
     final motifActif = etat == null ? null : etat['motif'] as String?;
 
-    // « Service en cours depuis … » = le dernier pointage du jour est une
-    // arrivée (entrée). Sinon la carte le dit honnêtement.
+    // État réel du service : la ligne d'entrée elle-même n'est rendue qu'une
+    // fois dans la liste chronologique ci-dessous.
     String? serviceDepuis;
     final duJour = _pointagesDuJour;
     if (duJour.isNotEmpty && duJour.last['check_type'] == 'in') {
@@ -373,7 +404,7 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: debutIso != null
-              ? EnCheckColors.terreChaude.withOpacity(0.55)
+              ? _accentAmbre.withOpacity(0.55)
               : EnCheckColors.succes.withOpacity(0.35),
         ),
       ),
@@ -383,8 +414,7 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
           if (debutIso != null) ...[
             Row(
               children: [
-                const Icon(Icons.pause_circle,
-                    color: EnCheckColors.terreChaude, size: 18),
+                Icon(Icons.pause_circle, color: _accentAmbre, size: 18),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -406,9 +436,9 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
               const SizedBox(height: 8),
               Text(
                 'Pause prévue ${_pausePrevue!['debut']}–${_pausePrevue!['fin']}',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 12,
-                  color: EnCheckColors.gris,
+                  color: _palette.texteSecondaire,
                   fontStyle: FontStyle.italic,
                 ),
               ),
@@ -420,18 +450,17 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
                 margin: const EdgeInsets.only(top: 10),
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: EnCheckColors.terreChaude.withOpacity(0.12),
+                  color: _accentAmbre.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Row(
+                child: Row(
                   children: [
-                    Icon(Icons.alarm, size: 16, color: EnCheckColors.terreChaude),
-                    SizedBox(width: 8),
+                    Icon(Icons.alarm, size: 16, color: _accentAmbre),
+                    const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         'Toujours en pause ? Touche « Je reprends » si tu es de retour.',
-                        style: TextStyle(
-                            fontSize: 12, color: EnCheckColors.terreChaude),
+                        style: TextStyle(fontSize: 12, color: _accentAmbre),
                       ),
                     ),
                   ],
@@ -440,8 +469,9 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
             ],
 
             const SizedBox(height: 12),
-            const Text('Motif facultatif :',
-                style: TextStyle(fontSize: 12, color: EnCheckColors.gris)),
+            Text('Motif facultatif :',
+                style: TextStyle(
+                    fontSize: 12, color: _palette.texteSecondaire)),
             const SizedBox(height: 6),
             Wrap(
               spacing: 8,
@@ -451,7 +481,7 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
                   ChoiceChip(
                     label: Text(motif),
                     selected: motifActif == motif,
-                    selectedColor: EnCheckColors.terreChaude.withOpacity(0.2),
+                    selectedColor: _accentAmbre.withOpacity(0.2),
                     onSelected: (_) => _choisirMotif(motif),
                   ),
               ],
@@ -478,14 +508,14 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
                       : Icons.radio_button_unchecked,
                   color: serviceDepuis != null
                       ? EnCheckColors.succes
-                      : EnCheckColors.gris,
+                      : _palette.texteSecondaire,
                   size: 18,
                 ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     serviceDepuis != null
-                        ? 'Service en cours depuis $serviceDepuis'
+                        ? 'Service en cours'
                         : 'Pas de service en cours',
                     style: const TextStyle(
                       fontWeight: FontWeight.w600,
@@ -504,8 +534,11 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
                 icon: const Icon(Icons.pause),
                 label: const Text('Je pars en pause'),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: EnCheckColors.terreChaude,
-                  foregroundColor: EnCheckColors.blanc,
+                  backgroundColor:
+                      _estSombre ? _accentAmbre : EnCheckColors.terreChaude,
+                  foregroundColor: _estSombre
+                      ? const Color(0xFF2A241A)
+                      : EnCheckColors.blanc,
                 ),
               ),
             ),
@@ -522,7 +555,6 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
     setState(() {
       chargement = true;
       erreur = null;
-      _pageSeptJours = 0;
       _limiteAtteinte = false;
     });
 
@@ -565,6 +597,7 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
           );
 
           if (!existeDeja) {
+            localPointage['sync_pending'] = true;
             tousLesPointages.add(localPointage);
           }
         }
@@ -661,23 +694,41 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
     final bool estTelephone =
         tailleFenetre.width < 620 || tailleFenetre.height < 520;
 
+    final palette = _palette;
     return Scaffold(
-      backgroundColor: EnCheckColors.sableClair,
+      backgroundColor: palette.fond,
       appBar: AppBar(
-        backgroundColor: EnCheckColors.brunProfond,
-        foregroundColor: EnCheckColors.blanc,
+        backgroundColor: palette.navFond,
+        foregroundColor: palette.texte,
         elevation: 0,
         title: const Text(
           'HISTORIQUE',
-          style: TextStyle(letterSpacing: 3, fontWeight: FontWeight.w300),
+          style: TextStyle(letterSpacing: 3, fontWeight: FontWeight.w500),
         ),
         centerTitle: true,
+        actions: [
+          if (!_estAujourdHui)
+            IconButton(
+              tooltip: "Revenir à aujourd'hui",
+              onPressed: _revenirAujourdhui,
+              icon: const Icon(Icons.today_outlined),
+              constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+            ),
+          IconButton(
+            key: const Key('historique-bouton-calendrier'),
+            tooltip: 'Choisir un jour dans les 7 derniers jours',
+            onPressed: _ouvrirCalendrier,
+            icon: const Icon(Icons.calendar_month_outlined),
+            constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+          ),
+        ],
       ),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          final page = Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
+      body: SansEtirement(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.only(bottom: 24),
+          child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
           // ═══════════════════════════════════════════
           // 👤 EN-TÊTE EMPLOYÉ AVEC PHOTO
           // ═══════════════════════════════════════════
@@ -704,7 +755,15 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
                   ),
                 ),
               ),
-              child: Column(
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                decoration: BoxDecoration(
+                  color: const Color(0xC92A1B12),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.white.withOpacity(0.16)),
+                ),
+                child: Column(
                 children: [
                 _construireAvatar(taille: estTelephone ? 64 : 80),
                 SizedBox(height: estTelephone ? 10 : 12),
@@ -731,7 +790,8 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
 
                 SizedBox(height: estTelephone ? 10 : 12),
 
-                if (_fiche['position'] != null || _fiche['department'] != null)
+                if (_fiche['position'] != null ||
+                    _fiche['department'] != null || _nomEntreprise != null)
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                     decoration: BoxDecoration(
@@ -788,11 +848,38 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
                               ),
                             ],
                           ),
+                        if (_nomEntreprise != null) ...[
+                          if ((_fiche['position'] != null &&
+                                  _fiche['position'].toString().isNotEmpty) ||
+                              (_fiche['department'] != null &&
+                                  _fiche['department'].toString().isNotEmpty))
+                            const SizedBox(height: 6),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.domain_outlined,
+                                  color: EnCheckColors.sableDore, size: 15),
+                              const SizedBox(width: 8),
+                              Flexible(
+                                child: Text(
+                                  _nomEntreprise!,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: EnCheckColors.blanc.withOpacity(0.82),
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                       ],
                     ),
                   ),
               ],
             ),
+              ),
             ),
           ),
 
@@ -801,20 +888,12 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
           // ═══════════════════════════════════════════
           // ⏸ LES PAUSES (fiche LOT D) — la carte « Ma journée »
           // ═══════════════════════════════════════════
-          if (_pausePret) ...[
+          if (_pausePret && _estAujourdHui) ...[
             _construireCartePause(),
             const SizedBox(height: 16),
           ],
 
-          const SizedBox(height: 20),
-
-          // Le résumé du jour, ce que l'employé vient chercher en premier.
-          // Masqué pendant le chargement et quand la liste est vide : l'écran
-          // « Aucun pointage » le dit déjà.
-          if (!chargement && pointages.isNotEmpty) ...[
-            _construireResumeJour(),
-            const SizedBox(height: 16),
-          ],
+          const SizedBox(height: 12),
 
           // 💬 Contrat étape 2 : un refus de session (expirée, ancien jeton…)
           // s'affiche honnêtement, au lieu de laisser croire que la fiche
@@ -824,27 +903,25 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
             const SizedBox(height: 12),
           ],
 
-          Expanded(
-            child: chargement
-                ? const Center(
-                    child: CircularProgressIndicator(
-                        color: EnCheckColors.terreChaude),
-                  )
-                : (pointages.isEmpty && erreur != null)
-                    ? _construireErreur()
-                    : pointages.isEmpty
-                        ? _construireVide()
-                        : _zoneSeptJours(),
+          if (chargement)
+            SizedBox(
+              height: 220,
+              child: Center(
+                child: CircularProgressIndicator(color: _palette.lien),
+              ),
+            )
+          else if (pointages.isEmpty && erreur != null)
+            SizedBox(height: 260, child: _construireErreur())
+          else if (pointages.isEmpty)
+            SizedBox(height: 220, child: _construireVide())
+          else
+            _zoneSeptJours(),
+          ],
           ),
-                ],
-          );
-          // La page ne s'étire jamais pendant les gestes (téléphone ET
-          // ordinateur — fiche « Accueil et historique »).
-          return SansEtirement(child: page);
-        },
         ),
-      );
-    }
+      ),
+    );
+  }
 
   /// 💬 Bandeau de session — contrat étape 2 (25/10/2026).
   Widget _construireBandeauSession() {
@@ -852,19 +929,19 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: EnCheckColors.terreChaude.withOpacity(0.12),
+        color: _accentAmbre.withOpacity(0.12),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: EnCheckColors.terreChaude.withOpacity(0.4)),
+        border: Border.all(color: _accentAmbre.withOpacity(0.4)),
       ),
       child: Row(
         children: [
-          const Icon(Icons.lock_clock, color: EnCheckColors.terreChaude, size: 20),
+          Icon(Icons.lock_clock, color: _accentAmbre, size: 20),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
               _messageSession(_sessionRaison!),
-              style: const TextStyle(
-                color: EnCheckColors.brunProfond,
+              style: TextStyle(
+                color: _palette.texte,
                 fontSize: 13,
                 height: 1.4,
               ),
@@ -875,118 +952,16 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
     );
   }
 
-  /// Le résumé de la journée en cours, en haut de l'écran.
-  ///
-  /// Pourquoi l'ajouter alors que la liste en dessous regroupe déjà les
-  /// pointages par jour ? Parce que l'employé qui consulte « Ma journée »
-  /// veut une réponse immédiate (« suis-je pointé ? à quelle heure ? »),
-  /// pas une liste à faire défiler.
-  Widget _construireResumeJour() {
-    final duJour = _pointagesDuJour;
-
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 20),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: EnCheckColors.terreChaude.withOpacity(0.35)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.today_outlined,
-                  color: EnCheckColors.terreChaude, size: 18),
-              const SizedBox(width: 8),
-              const Text(
-                "AUJOURD'HUI",
-                style: TextStyle(
-                  letterSpacing: 2,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 13,
-                  color: EnCheckColors.terreChaude,
-                ),
-              ),
-              const Spacer(),
-              Text(
-                '${duJour.length} pointage${duJour.length > 1 ? 's' : ''}',
-                style: const TextStyle(fontSize: 12, color: EnCheckColors.gris),
-              ),
-            ],
-          ),
-
-          if (duJour.isEmpty) ...[
-            const SizedBox(height: 10),
-            const Text(
-              "Aucun pointage enregistré aujourd'hui.",
-              style: TextStyle(color: EnCheckColors.gris, fontSize: 13),
-            ),
-          ] else ...[
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 10,
-              runSpacing: 8,
-              children: duJour.map((pointage) {
-                final estEntree = pointage['check_type'] == 'in';
-                final couleur =
-                    estEntree ? EnCheckColors.succes : EnCheckColors.terreChaude;
-                // « HH:MM:SS » → « HH:MM » : la seconde n'intéresse pas
-                // l'employé qui consulte sa journée.
-                final heure = HeurePointage.heureDePointage(pointage);
-                final heureCourte =
-                    heure.length >= 5 ? heure.substring(0, 5) : heure;
-
-                return Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: couleur.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        estEntree ? Icons.login : Icons.logout,
-                        size: 14,
-                        color: couleur,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        heureCourte,
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.bold,
-                          color: Theme.of(context).textTheme.bodyLarge?.color,
-                        ),
-                      ),
-                      const SizedBox(width: 5),
-                      Text(
-                        estEntree ? 'Entrée' : 'Sortie',
-                        style: const TextStyle(
-                            fontSize: 11, color: EnCheckColors.gris),
-                      ),
-                    ],
-                  ),
-                );
-              }).toList(),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
   Widget _construireVide() {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.history, size: 80, color: EnCheckColors.gris.withOpacity(0.5)),
+          Icon(Icons.history,
+              size: 80, color: _palette.texteSecondaire.withOpacity(0.5)),
           const SizedBox(height: 20),
-          const Text('Aucun pointage', style: TextStyle(color: EnCheckColors.gris, fontSize: 18)),
+          Text('Aucun pointage',
+              style: TextStyle(color: _palette.texteSecondaire, fontSize: 18)),
         ],
       ),
     );
@@ -1003,24 +978,31 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.cloud_off, size: 70, color: EnCheckColors.gris.withOpacity(0.5)),
+            Icon(Icons.cloud_off,
+                size: 70, color: _palette.texteSecondaire.withOpacity(0.5)),
             const SizedBox(height: 20),
-            const Text(
+            Text(
               'Historique indisponible',
-              style: TextStyle(color: EnCheckColors.gris, fontSize: 18, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                  color: _palette.texteSecondaire,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 12),
             Text(
               erreur!,
-              style: TextStyle(color: EnCheckColors.gris.withOpacity(0.8), fontSize: 14, height: 1.5),
+              style: TextStyle(
+                  color: _palette.texteSecondaire.withOpacity(0.8),
+                  fontSize: 14,
+                  height: 1.5),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 24),
             TextButton.icon(
               onPressed: _chargerHistorique,
-              icon: const Icon(Icons.refresh, color: EnCheckColors.terreChaude),
-              label: const Text('Réessayer', style: TextStyle(color: EnCheckColors.terreChaude)),
+              icon: Icon(Icons.refresh, color: _palette.lien),
+              label: Text('Réessayer', style: TextStyle(color: _palette.lien)),
             ),
           ],
         ),
@@ -1028,185 +1010,125 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
     );
   }
 
-  // ═══════════════════════════════════════════════════════════
-  // 📅 7 DERNIERS JOURS, PAGINÉS — PTG-01.4
-  // ═══════════════════════════════════════════════════════════
-  //
-  //  Dans l'app Pointage, on consulte les 7 derniers jours (aujourd'hui
-  //  et les six jours précédents, selon l'heure de l'entreprise déjà
-  //  utilisée). Rien n'est supprimé : les pointages plus anciens restent
-  //  conservés et consultables côté Admin. Le contenu se répartit en
-  //  pages remplies — une journée trop longue continue sur la page
-  //  suivante avec sa date et la mention « suite » — et deux flèches
-  //  discrètes ‹ › n'apparaissent que lorsqu'une page existe dans leur
-  //  direction. Aucun défilement, aucune page vide.
-  // ═══════════════════════════════════════════════════════════
+  bool get _estAujourdHui => HistoriquePeriode.jour(_dateSelectionnee) ==
+      HistoriquePeriode.jour(HeurePointage.maintenant());
 
-  /// Les pointages des 7 derniers jours seulement (AFFICHAGE uniquement :
-  /// aucune donnée n'est supprimée, aucune règle de paie/pause/sync n'est
-  /// touchée).
-  List<Map<String, dynamic>> _pointagesSeptJours() {
-    // ⭐ CORRECTIF VÉRIFIÉ (analyse du 4 nov) : les bornes se calculent dans
-    // le domaine de l'heure MURALE de l'entreprise (déjà convertie), SANS
-    // reconvertir — sinon le décalage s'appliquait deux fois et le 7e jour
-    // disparaissait dans la dernière heure du jour. Limite haute explicite :
-    // aujourd'hui (aucune date future affichée comme récente).
-    final m = HeurePointage.maintenant();
-    final jourFin = _cleJourLocal(m);
-    final jourDepart = _cleJourLocal(DateTime(m.year, m.month, m.day - 6));
-    return pointages.where((p) {
-      final j = HeurePointage.jourDePointage(p);
-      // Un horodatage illisible reste consultable (« Journée inconnue ») :
-      // aucun pointage n'est jamais masqué.
-      if (j == HeurePointage.jourInconnu) return true;
-      return j.compareTo(jourDepart) >= 0 && j.compareTo(jourFin) <= 0;
-    }).toList();
-  }
-
-  /// Clé « AAAA-MM-JJ » depuis les CHAMPS d'une date murale.
   String _cleJourLocal(DateTime d) =>
       '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
-  Widget _zoneSeptJours() {
-    return LayoutBuilder(builder: (context, constraints) {
-    final echan =
-        MediaQuery.of(context).textScaler.scale(1.0).clamp(1.0, 1.4).toDouble();
-    // Hauteurs de référence LARGES : la pagination reste déterministe et
-    // rien ne déborde jamais — le contenu tient sans défilement.
-    final hSession = 100.0 * echan;
-    final hEntete = 70.0 * echan;
-    final hMargeCarte = 16.0 * echan;
-    final hBarre = 56.0 * echan;
-
-    final sept = _pointagesSeptJours();
-    final parJour = <String, List<Map<String, dynamic>>>{};
-    // ⭐ LIVRAISON 19 : la journée se découpe sur minuit LOCAL (heure de
-    // l'entreprise), jamais sur minuit UTC.
-    for (final p in sept) {
-      parJour.putIfAbsent(HeurePointage.jourDePointage(p), () => []).add(p);
-    }
-    final jours = parJour.entries.toList();
-
-    final double hauteurDispo = constraints.maxHeight - hBarre;
-    final pages = <List<Widget>>[];
-    var pageEnCours = <Widget>[];
-    var hauteurPage = 0.0;
-
-    for (final jour in jours) {
-      final calcul = _calculerHeures(List.from(jour.value));
-      final sessions = calcul['sessions'] as List<Map<String, dynamic>>;
-      var debut = 0;
-      var suite = false;
-      while (debut < sessions.length) {
-        final reste = sessions.length - debut;
-        var place =
-            ((hauteurDispo - hauteurPage - hMargeCarte - hEntete) / hSession)
-                .floor();
-        if (place < 1 && pageEnCours.isNotEmpty) {
-          pages.add(pageEnCours);
-          pageEnCours = [];
-          hauteurPage = 0.0;
-          place =
-              ((hauteurDispo - hMargeCarte - hEntete) / hSession).floor();
-        }
-        final pris = place < 1 ? 1 : (place > reste ? reste : place);
-        pageEnCours.add(_construireJour(
-          jour.key,
-          jour.value,
-          sessionsDebut: debut,
-          sessionsFin: debut + pris,
-          suite: suite,
-        ));
-        hauteurPage += hMargeCarte + hEntete + pris * hSession;
-        debut += pris;
-        suite = true;
-      }
-    }
-    if (pageEnCours.isNotEmpty) pages.add(pageEnCours);
-
-    if (pages.isEmpty) {
-      return const Center(
-        child: Text('Aucun pointage sur les 7 derniers jours.',
-            style: TextStyle(color: EnCheckColors.gris, fontSize: 16)),
-      );
-    }
-    if (_pageSeptJours >= pages.length) _pageSeptJours = pages.length - 1;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: pages[_pageSeptJours],
-            ),
-          ),
-        ),
-        if (_limiteAtteinte)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Text(
-              'Liste limitée aux 500 derniers événements : '
-              'certains pointages des 7 jours peuvent manquer.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                  fontSize: 11,
-                  color: EnCheckColors.erreur.withOpacity(0.9)),
-            ),
-          ),
-        if (pages.length > 1) _barreFlechesSeptJours(pages.length),
-        if (pages.length <= 1) const SizedBox(height: 4),
-      ],
+  Future<void> _ouvrirCalendrier() async {
+    final maintenant = HeurePointage.maintenant();
+    final palette = _palette;
+    final surfaceCalendrier =
+        _estSombre ? palette.surface : EnCheckColors.cremePapier;
+    final datesAvecHistorique = pointages
+        .map(HeurePointage.jourDePointage)
+        .where((cle) => RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(cle))
+        .toSet();
+    final choisi = await showDialog<DateTime>(
+      context: context,
+      builder: (_) => HistoriqueDatePickerDialog(
+        initialDate: _dateSelectionnee,
+        firstDate: HistoriquePeriode.premierJourAutorise(maintenant),
+        lastDate: HistoriquePeriode.jour(maintenant),
+        datesAvecHistorique: datesAvecHistorique,
+        palette: palette,
+        surfaceCalendrier: surfaceCalendrier,
+      ),
     );
-    });
+    if (choisi == null || !mounted) return;
+    setState(() => _dateSelectionnee = HistoriquePeriode.jour(choisi));
   }
 
-  /// ⭐ PTG-01.4 : deux flèches discrètes, SANS texte visible, seulement
-  /// lorsqu'une page existe dans leur direction. Sémantique pour la
-  /// lecture vocale, zones de clic larges (48 px minimum).
-  Widget _barreFlechesSeptJours(int total) {
-    final couleur = Theme.of(context).iconTheme.color ?? EnCheckColors.brunProfond;
+  void _revenirAujourdhui() {
+    setState(() =>
+        _dateSelectionnee = HistoriquePeriode.jour(HeurePointage.maintenant()));
+  }
+
+  List<Map<String, dynamic>> _pointagesDateSelectionnee() =>
+      HistoriquePeriode.pointagesDuJour(pointages, _dateSelectionnee);
+
+  List<Map<String, dynamic>> _pointagesDateInconnue() => pointages
+      .where((p) => HeurePointage.jourDePointage(p) == HeurePointage.jourInconnu)
+      .toList();
+
+  Widget _zoneSeptJours() {
+    final lignes = _pointagesDateSelectionnee();
+    final datesIllisibles = _pointagesDateInconnue();
+    final enfants = <Widget>[];
+    if (lignes.isEmpty) {
+      final date = _dateSelectionnee;
+      final dateTexte = '${date.day.toString().padLeft(2, '0')}/'
+          '${date.month.toString().padLeft(2, '0')}/${date.year}';
+      enfants.add(Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.event_available_outlined,
+                size: 52, color: _palette.lien.withOpacity(0.75)),
+            const SizedBox(height: 12),
+            Text(
+              'Aucun pointage le $dateTexte.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                  color: _palette.texteSecondaire, fontSize: 16),
+            ),
+          ],
+        ),
+      ));
+    } else {
+      enfants.add(_construireJour(_cleJourLocal(_dateSelectionnee), lignes));
+    }
+    if (datesIllisibles.isNotEmpty) {
+      enfants.add(const Padding(
+        padding: EdgeInsets.only(top: 12, bottom: 8),
+        child: Text(
+          'Ces événements ont une date illisible et ne sont pas inclus dans la journée sélectionnée.',
+          style: TextStyle(color: EnCheckColors.erreur, fontSize: 12, height: 1.35),
+        ),
+      ));
+      enfants.add(_construireEvenementsInconnus(datesIllisibles));
+    }
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          if (_pageSeptJours > 0)
-            Semantics(
-              button: true,
-              label: 'Page précédente',
-              child: IconButton(
-                onPressed: () => setState(() => _pageSeptJours -= 1),
-                icon: Icon(Icons.chevron_left, size: 30, color: couleur),
-                padding: const EdgeInsets.all(12),
-                constraints:
-                    const BoxConstraints(minWidth: 48, minHeight: 48),
-              ),
-            )
-          else
-            const SizedBox(width: 48, height: 48),
-          if (_pageSeptJours < total - 1)
-            Semantics(
-              button: true,
-              label: 'Page suivante',
-              child: IconButton(
-                onPressed: () => setState(() => _pageSeptJours += 1),
-                icon: Icon(Icons.chevron_right, size: 30, color: couleur),
-                padding: const EdgeInsets.all(12),
-                constraints:
-                    const BoxConstraints(minWidth: 48, minHeight: 48),
-              ),
-            )
-          else
-            const SizedBox(width: 48, height: 48),
-        ],
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+      child: Column(
+        key: const Key('historique-liste-evenements'),
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: enfants,
       ),
     );
   }
 
-
+  Widget _construireEvenementsInconnus(
+      List<Map<String, dynamic>> evenements) {
+    return Container(
+      key: const Key('historique-evenements-date-inconnue'),
+      margin: const EdgeInsets.only(top: 4, bottom: 12),
+      decoration: BoxDecoration(
+        color: _palette.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: EnCheckColors.erreur.withOpacity(0.26)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(14),
+            child: Text(
+              'Date inconnue · ${evenements.length} événement${evenements.length == 1 ? '' : 's'}',
+              style: const TextStyle(
+                color: EnCheckColors.erreur,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          for (var i = 0; i < evenements.length; i++)
+            _construireEvenement(evenements[i], i, dateInconnue: true),
+        ],
+      ),
+    );
+  }
 
   // ═══════════════════════════════════════════════════════════
   // ⏰ CALCULER LES HEURES TRAVAILLÉES (CORRECTION FINALE - PRÉCISION SECONDES)
@@ -1303,238 +1225,177 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
   //    un seul fichier (services/heure_pointage.dart). L'ancienne version
   //    affichait l'heure telle quelle, donc « 07:30 » pour un pointage de 08:30
   //    à Cotonou (UTC+1) — et l'inverse à Montréal (UTC-4).
-  Widget _construireJour(String jour, List<Map<String, dynamic>> pointagesJour,
-      {int sessionsDebut = 0, int? sessionsFin, bool suite = false}) {
+  Widget _construireJour(
+      String jour, List<Map<String, dynamic>> pointagesJour) {
     final date = DateTime.tryParse(jour);
-    final maintenant = DateTime.now();
+    final maintenant = HeurePointage.maintenant();
     final hier = DateTime(maintenant.year, maintenant.month, maintenant.day - 1);
-
     String titreJour;
     if (date == null) {
-      // ⭐ LIVRAISON 19 — horodatage illisible : on le DIT, au lieu de le ranger
-      //    au hasard dans la journée d'aujourd'hui.
       titreJour = 'Journée inconnue';
-    } else if (date.year == maintenant.year &&
-        date.month == maintenant.month &&
-        date.day == maintenant.day) {
+    } else if (_cleJourLocal(date) == _cleJourLocal(maintenant)) {
       titreJour = "Aujourd'hui";
-    } else if (date.year == hier.year && date.month == hier.month && date.day == hier.day) {
-      titreJour = "Hier";
+    } else if (_cleJourLocal(date) == _cleJourLocal(hier)) {
+      titreJour = 'Hier';
     } else {
-      final jours = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
-      final mois = [
-        'Jan',
-        'Fév',
-        'Mar',
-        'Avr',
-        'Mai',
-        'Juin',
-        'Juil',
-        'Août',
-        'Sep',
-        'Oct',
-        'Nov',
-        'Déc',
-      ];
+      const jours = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
+      const mois = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc'];
       titreJour = '${jours[date.weekday % 7]} ${date.day} ${mois[date.month - 1]}';
     }
 
     final calcul = _calculerHeures(List.from(pointagesJour));
-    final sessions = calcul['sessions'] as List<Map<String, dynamic>>;
     final totalDuree = calcul['totalDuree'] as Duration;
     final sortiManquante = calcul['sortiManquante'] as bool;
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 15),
+      key: const Key('historique-carte-jour'),
       decoration: BoxDecoration(
-        color: EnCheckColors.blanc,
+        color: _palette.surface,
         borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: _palette.bordure.withOpacity(0.8)),
         boxShadow: [
           BoxShadow(
-            color: EnCheckColors.brunProfond.withOpacity(0.1),
-            blurRadius: 10,
-            offset: const Offset(0, 5),
+            color: EnCheckColors.brunProfond.withOpacity(0.08),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-            decoration: BoxDecoration(
-              color: EnCheckColors.sableDore.withOpacity(0.3),
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(20),
-                topRight: Radius.circular(20),
-              ),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+            child: Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              runSpacing: 8,
               children: [
-                Text(
-                  suite ? '$titreJour — suite' : titreJour,
-                  style: const TextStyle(
-                    color: EnCheckColors.brunProfond,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                Row(
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (sortiManquante) ...[
-                      const Icon(Icons.warning_amber, color: EnCheckColors.erreur, size: 18),
-                      const SizedBox(width: 5),
-                    ],
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color:
-                        sortiManquante
-                            ? EnCheckColors.erreur.withOpacity(0.1)
-                            : EnCheckColors.succes.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.access_time,
-                            size: 14,
-                            color: sortiManquante ? EnCheckColors.erreur : EnCheckColors.succes,
-                          ),
-                          const SizedBox(width: 5),
-                          Text(
-                            _formaterDuree(totalDuree),
-                            style: TextStyle(
-                              color: sortiManquante ? EnCheckColors.erreur : EnCheckColors.succes,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
+                    Text(titreJour, style: TextStyle(
+                      color: _palette.texte,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w600,
+                    )),
+                    const SizedBox(height: 3),
+                    Text(
+                      '${pointagesJour.length} événement${pointagesJour.length == 1 ? '' : 's'}',
+                      style: TextStyle(
+                          color: _palette.texteSecondaire, fontSize: 12),
                     ),
                   ],
                 ),
+                Row(mainAxisSize: MainAxisSize.min, children: [
+                  if (sortiManquante) ...[
+                    const Icon(Icons.warning_amber_rounded,
+                        color: EnCheckColors.erreur, size: 19),
+                    const SizedBox(width: 6),
+                  ],
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: (sortiManquante ? EnCheckColors.erreur : _palette.lien).withOpacity(0.14),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      _formaterDuree(totalDuree),
+                      style: TextStyle(
+                        color: sortiManquante ? EnCheckColors.erreur : _palette.lien,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ]),
               ],
             ),
           ),
-          ...sessions
-              .skip(sessionsDebut)
-              .take((sessionsFin ?? sessions.length) - sessionsDebut)
-              .map((session) => _construireSession(session)),
+          Divider(height: 1, color: _palette.filet),
+          for (var i = 0; i < pointagesJour.length; i++)
+            _construireEvenement(pointagesJour[i], i),
+          if (_limiteAtteinte)
+            Padding(
+              padding: EdgeInsets.fromLTRB(16, 8, 16, 12),
+              child: Text(
+                'Historique limité aux 500 derniers événements autorisés.',
+                style: TextStyle(
+                    color: _palette.texteSecondaire, fontSize: 12),
+              ),
+            ),
         ],
       ),
     );
   }
 
-  Widget _construireSession(Map<String, dynamic> session) {
-    final entree = session['entree'];
-    final sortie = session['sortie'];
-    final duree = session['duree'] as Duration?;
-
-    // ⭐ LIVRAISON 19 — heure locale de la tablette, quelle que soit l'origine
-    //    de la ligne (serveur en UTC ou file d'attente à l'heure murale).
-    final heureEntree = entree != null ? HeurePointage.heureDePointage(entree) : '--:--:--';
-    final heureSortie = sortie != null ? HeurePointage.heureDePointage(sortie) : '--:--:--';
+  Widget _construireEvenement(
+      Map<String, dynamic> pointage, int index,
+      {bool dateInconnue = false}) {
+    final estEntree = pointage['check_type'] == 'in';
+    final enAttente = pointage['sync_pending'] == true;
+    final couleur = estEntree ? _palette.lien : _accentAmbre;
+    final heure = HeurePointage.heureDePointage(pointage);
+    final heureCourte = heure.length >= 5 ? heure.substring(0, 5) : heure;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: EnCheckColors.sableClair, width: 1)),
+      key: Key('historique-evenement-${dateInconnue ? 'inconnu-' : ''}$index'),
+      constraints: const BoxConstraints(minHeight: 58),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+      decoration: BoxDecoration(
+        border: index == 0
+            ? null
+            : Border(top: BorderSide(color: _palette.filet)),
       ),
       child: Row(
         children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: couleur.withOpacity(0.10),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(estEntree ? Icons.login_rounded : Icons.logout_rounded,
+                size: 18, color: couleur),
+          ),
+          const SizedBox(width: 12),
           Expanded(
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color:
-                    entree != null
-                        ? EnCheckColors.succes.withOpacity(0.1)
-                        : EnCheckColors.gris.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
+                Text(estEntree ? 'Entrée' : 'Sortie', style: TextStyle(
+                  color: _palette.texte,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                )),
+                if (enAttente || dateInconnue) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    enAttente ? 'En attente de synchronisation' : 'Heure non vérifiable',
+                    style: TextStyle(
+                      color: enAttente ? _accentAmbre : EnCheckColors.erreur,
+                      fontSize: 11,
+                    ),
                   ),
-                  child: Icon(
-                    Icons.login,
-                    size: 16,
-                    color: entree != null ? EnCheckColors.succes : EnCheckColors.gris,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  heureEntree,
-                  style: TextStyle(
-                    color: entree != null ? EnCheckColors.brunProfond : EnCheckColors.gris,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                    fontFamily: 'monospace',
-                  ),
-                ),
+                ],
               ],
             ),
           ),
-          Column(
-            children: [
-              const Icon(Icons.arrow_forward, color: EnCheckColors.sableDore, size: 20),
-              if (duree != null)
-                Text(
-                  _formaterDuree(duree),
-                  style: const TextStyle(
-                    color: EnCheckColors.terreChaude,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                  ),
-                )
-              else
-                const Text(
-                  '?',
-                  style: TextStyle(
-                    color: EnCheckColors.erreur,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-            ],
-          ),
-          Expanded(
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                Text(
-                  heureSortie,
-                  style: TextStyle(
-                    color: sortie != null ? EnCheckColors.brunProfond : EnCheckColors.erreur,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                    fontFamily: 'monospace',
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color:
-                    sortie != null
-                        ? EnCheckColors.terreChaude.withOpacity(0.1)
-                        : EnCheckColors.erreur.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(
-                    sortie != null ? Icons.logout : Icons.help_outline,
-                    size: 16,
-                    color: sortie != null ? EnCheckColors.terreChaude : EnCheckColors.erreur,
-                  ),
-                ),
-              ],
+          const SizedBox(width: 8),
+          Text(
+            heureCourte,
+            textAlign: TextAlign.end,
+            style: TextStyle(
+              color: _palette.texte,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              fontFamily: 'JetBrainsMono',
             ),
           ),
         ],
       ),
     );
   }
+
 }

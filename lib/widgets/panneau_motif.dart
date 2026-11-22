@@ -1,10 +1,11 @@
 // lib/widgets/panneau_motif.dart
 // ═══════════════════════════════════════════════════════════
-// 🧵 PANNEAU « MOTIF CULTUREL » — partagé (accueil + pointage)
+// 🧵 APPARENCE — motif d'interface partagé (accueil + pointage)
 // ═══════════════════════════════════════════════════════════
 //
-//  Le bouton ⚙️/« Paramètres » ouvre ce panneau. Raphia (Kuba) est le
-//  motif PAR DÉFAUT ; le choix est enregistré sur l'appareil.
+//  Le bouton « Paramètres » ouvre ce panneau. Le choix d'apparence est
+//  enregistré sur l'appareil ; chaque motif affiche son peuple et son pays
+//  d'inspiration culturelle.
 //  ⌨️ Touche Échap (clavier physique) = fermer le panneau.
 // ═══════════════════════════════════════════════════════════
 
@@ -13,6 +14,8 @@ import 'package:flutter/services.dart' show KeyDownEvent, LogicalKeyboardKey;
 import '../theme/app_theme.dart';
 import '../services/motif_service.dart';
 import '../screens/tutoriel_screen.dart';
+import '../services/checklist_service.dart';
+import 'checklist_demarrage.dart';
 
 Future<void> ouvrirPanneauMotif(BuildContext context) async {
   MotifCulturel choix = MotifService.actif.value;
@@ -40,7 +43,10 @@ Future<void> ouvrirPanneauMotif(BuildContext context) async {
                 borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
               ),
               padding: const EdgeInsets.fromLTRB(22, 12, 22, 28),
-              child: Column(
+              // L'accueil ne défile jamais ; ce panneau secondaire peut en
+              // revanche défiler si la checklist rend son contenu trop haut.
+              child: SingleChildScrollView(
+                child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -48,7 +54,7 @@ Future<void> ouvrirPanneauMotif(BuildContext context) async {
                     children: [
                       const Expanded(
                         child: Text(
-                          'Motif culturel',
+                          'Apparence',
                           style: TextStyle(
                             fontSize: 21,
                             fontWeight: FontWeight.w800,
@@ -63,9 +69,84 @@ Future<void> ouvrirPanneauMotif(BuildContext context) async {
                     ],
                   ),
                   const Text(
-                    'Choisissez le motif de votre entreprise',
+                    'Motif d’interface',
                     style: TextStyle(fontSize: 13.5, color: EnCheckColors.gris),
                   ),
+                  const SizedBox(height: 14),
+                  Container(
+                    key: const Key('apparence-apercu-motif'),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: choix.couleurTint,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: choix.couleurAccent.withOpacity(0.36),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(10),
+                          child: Image.asset(
+                            choix.asset,
+                            width: 104,
+                            height: 76,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => SizedBox(
+                              width: 104,
+                              height: 76,
+                              child: ColoredBox(color: choix.couleurBouton),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                choix.nom,
+                                style: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                  color: EnCheckColors.brunProfond,
+                                ),
+                              ),
+                              Text(
+                                '${choix.peuple} · ${choix.pays}',
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 10.5,
+                                  color: EnCheckColors.gris,
+                                ),
+                              ),
+                              TextButton.icon(
+                                key: const Key('apparence-a-propos-motif'),
+                                onPressed: () =>
+                                    _afficherAproposMotif(sheetContext, choix),
+                                style: TextButton.styleFrom(
+                                  foregroundColor: choix.couleurBouton,
+                                  padding: EdgeInsets.zero,
+                                  minimumSize: Size.zero,
+                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                  visualDensity: VisualDensity.compact,
+                                ),
+                                icon: const Icon(Icons.info_outline, size: 17),
+                                label: const Text('À propos du motif'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Décision 3 : la checklist ne prend plus de place sur
+                  // l'accueil ; elle reste disponible ici jusqu'à sa fin.
+                  if (!ChecklistService.complete) ...[
+                    const SizedBox(height: 14),
+                    const ChecklistDemarrage(),
+                  ],
                   const SizedBox(height: 18),
                   GridView.count(
                     crossAxisCount: 2,
@@ -73,7 +154,7 @@ Future<void> ouvrirPanneauMotif(BuildContext context) async {
                     physics: const NeverScrollableScrollPhysics(),
                     mainAxisSpacing: 14,
                     crossAxisSpacing: 14,
-                    childAspectRatio: 1.45,
+                    childAspectRatio: 1.25,
                     children: [
                       for (final motif in MotifCulturel.tous)
                         _vignetteMotif(
@@ -137,6 +218,7 @@ Future<void> ouvrirPanneauMotif(BuildContext context) async {
                     ),
                   ),
                 ],
+                ),
               ),
             ),
           );
@@ -145,6 +227,29 @@ Future<void> ouvrirPanneauMotif(BuildContext context) async {
     },
   );
 }
+
+Future<void> _afficherAproposMotif(
+  BuildContext context,
+  MotifCulturel motif,
+) =>
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('À propos du motif ${motif.nom}'),
+        content: Text(
+          '${motif.inspiration}.\n\n'
+          'Peuple : ${motif.peuple}.\n'
+          'Pays : ${motif.pays}.\n\n'
+          'Le visuel de l’application est une interprétation graphique inspirée de cette tradition.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('FERMER'),
+          ),
+        ],
+      ),
+    );
 
 Widget _vignetteMotif(
   MotifCulturel motif, {
@@ -210,11 +315,23 @@ Widget _vignetteMotif(
         const SizedBox(height: 6),
         Text(
           motif.nom,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
           textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: 13,
             fontWeight: selectionne ? FontWeight.w800 : FontWeight.w600,
             color: EnCheckColors.brunProfond,
+          ),
+        ),
+        Text(
+          '${motif.peuple} · ${motif.pays}',
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            fontSize: 9.5,
+            color: EnCheckColors.gris,
           ),
         ),
       ],
