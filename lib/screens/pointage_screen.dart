@@ -44,6 +44,8 @@ import '../services/geofencing_service.dart';
 import '../services/heure_pointage.dart';   // ⭐ LIVRAISON 21
 import '../services/pause_service.dart'; // ⏸ VISIBILITÉ DES PAUSES — le bouton du haut de l'écran
 import '../services/trusted_punch_service.dart';   // ⭐ LIVRAISON 22
+import '../services/mesure_perf.dart'; // ⏱ LOT 1 VITESSE — mesure p50/p95 du retour à l'accueil
+import 'package:uuid/uuid.dart'; // ⭐ JETON D'INTENTION (conception pauses, 22/11)
 import 'historique_screen.dart';
 import 'tutoriel_screen.dart';
 import '../services/checklist_service.dart';
@@ -1208,6 +1210,22 @@ class _PointageScreenState extends State<PointageScreen> {
                             if (!ctx.mounted) return;
                             Navigator.of(ctx).pop();
                             final horsLigne = !ConnectivityService.isOnline;
+                            // ⭐ Texte figé (conception 22/11) : « Pause
+                            //    commencée — reprise prévue à 17:12 » quand la
+                            //    grille donne la durée ; sinon les textes
+                            //    existants. Jamais de reprise prévue inventée.
+                            String? reprisePrevue;
+                            if (!estOuverte && ouverte != null) {
+                              final d =
+                                  HeurePointage.instantDe(ouverte!['debut']);
+                              final m = (ouverte!['prevue_minutes'] as num?)
+                                  ?.toInt();
+                              if (d != null && m != null) {
+                                reprisePrevue = PauseService.heureCourteDe(d
+                                    .add(Duration(minutes: m))
+                                    .toIso8601String());
+                              }
+                            }
                             if (mounted) {
                               ScaffoldMessenger.of(context)
                                   .showSnackBar(SnackBar(
@@ -1217,7 +1235,9 @@ class _PointageScreenState extends State<PointageScreen> {
                                         : '▶ Reprise enregistrée. Bon service !')
                                     : (horsLigne
                                         ? '⏸ Pause enregistrée hors-ligne : elle sera synchronisée.'
-                                        : '⏸ Pause enregistrée. Bonne pause !')),
+                                        : (reprisePrevue != null
+                                            ? 'Pause commencée — reprise prévue à $reprisePrevue'
+                                            : '⏸ Pause enregistrée. Bonne pause !'))),
                                 backgroundColor: estOuverte
                                     ? EnCheckColors.succes
                                     : EnCheckColors.terreChaude,
@@ -2544,6 +2564,10 @@ class _PointageScreenState extends State<PointageScreen> {
       label: 'Voir ma journée',
       child: GestureDetector(
         onTap: _ouvrirFeuilleJournee,
+        // ⏱ Diagnostic caché (lot 1 vitesse) : appui long = les mesures
+        //    p50/p95 réelles du retour à l'accueil. Aucun changement
+        //    visuel : le geste est invisible, son contenu est technique.
+        onLongPress: _afficherDiagnosticPerf,
         behavior: HitTestBehavior.opaque,
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 19),
@@ -2621,6 +2645,7 @@ class _PointageScreenState extends State<PointageScreen> {
               ),
             ],
           ),
+
         ),
       ),
     );
@@ -5444,6 +5469,13 @@ class _PointageScreenState extends State<PointageScreen> {
     if (_pointageEnCoursPour == employee['id']) return;
     _pointageEnCoursPour = employee['id'];
 
+    // ⏱ LOT 1 VITESSE — le chronomètre du « retour à l'accueil » : t0 = la
+    //    validation est enclenchée. Les dialogues où l'employé RÉFLÉCHIT sont
+    //    chronométrés à part : la réflexion humaine n'est pas la lenteur de
+    //    l'application.
+    final chrono = Stopwatch()..start();
+    var attenteEmployeMs = 0;
+
     try {
       String typePointage = 'in';
       try {
@@ -5501,8 +5533,10 @@ class _PointageScreenState extends State<PointageScreen> {
       // Le système doute vraiment (par exemple une entrée vieille de plus du
       // seuil d'oubli) : plutôt que de deviner, on laisse l'employé trancher.
       if (confiance == 'basse') {
+        final tAvantChoix = chrono.elapsedMilliseconds;
         final choix = await _demanderTypePointage(
             typePointage, anomalie, seuilPresenceHeures);
+        attenteEmployeMs += chrono.elapsedMilliseconds - tAvantChoix;
         if (choix == null) return;   // annulé : RIEN n'est enregistré
         typePointage = choix;
         origineDecision = 'manuel_employe';
@@ -5514,6 +5548,82 @@ class _PointageScreenState extends State<PointageScreen> {
         anomalie = 'resolution_employe';
       }
 
+      // ── ⭐ CONCEPTION PAUSES VALIDÉE 22/11 : PAUSE OUVERTE = DIALOGUE ──
+      // Avant TOUTE écriture, on vérifie si l'employé est en pause. Les
+      // textes et les boutons sont FIGÉS (contrats du fondateur) :
+      //
+      //   SORTIE (type 'out')  « Vous êtes en pause depuis 2:05 (prévue 1:30).
+      //                          Terminer votre journée ? Pause clôturée à
+      //                          18:20 — Travaillé 3:16. »
+      //                          [Rester travailler] [Terminer ma journée]
+      //   ARRIVÉE (type 'in')  « Vous êtes en pause depuis 16:42. Reprendre
+      //                          le service ? »
+      //                          [Rester en pause] [Reprendre le service]
+      //
+      // Chaque bouton dit l'état qu'il produit — rien n'est jamais écrit à la
+      // place de l'employé, rien n'est jamais bloqué :
+      //   [Rester travailler]   → la journée continue EN TRAVAIL : la pause est
+      //                           refermée ('reprise'), aucun départ n'est écrit.
+      //   [Terminer ma journée] → double écriture confirmée (décision ①) :
+      //                           fermeture ('sortie') + pointage de départ,
+      //                           portant le MÊME jeton d'intention.
+      //   [Rester en pause]     → rien n'est écrit, la pause continue.
+      //   [Reprendre le service]→ fermeture ('reprise') + l'arrivée demandée
+      //                           est enregistrée (le pointage n'est jamais
+      //                           bloqué), même jeton d'intention.
+      String? intentionPartagee;
+      final pauseOuverte = await _pauseDeLEmploye(employee['id'] as String);
+      if (pauseOuverte != null) {
+        final tAvantDialogue = chrono.elapsedMilliseconds;
+        if (typePointage == 'out') {
+          final choix = await _dialogueSortiePendantPause(pauseOuverte);
+          attenteEmployeMs += chrono.elapsedMilliseconds - tAvantDialogue;
+          if (!mounted) return;
+          if (choix != 'terminer') {
+            // « Rester travailler » — ou fermeture du dialogue sans choix :
+            // dans les deux cas, aucun départ n'est écrit. Seul le bouton qui
+            // le DIT explicitement ferme la journée.
+            if (choix == 'rester_travailler') {
+              await PauseService.reprendre(
+                employeeId: employee['id'] as String,
+                enterpriseId: entrepriseSelectionnee?['id']?.toString(),
+                motifFermeture: 'reprise',
+              );
+              if (!mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: const Text('▶ Reprise enregistrée. Bon service !'),
+                backgroundColor: EnCheckColors.succes,
+              ));
+              _chargerPausesOuvertes();
+            }
+            return;
+          }
+          intentionPartagee = const Uuid().v4();
+          await PauseService.reprendre(
+            employeeId: employee['id'] as String,
+            enterpriseId: entrepriseSelectionnee?['id']?.toString(),
+            motifFermeture: 'sortie',
+            intention: intentionPartagee,
+          );
+          if (mounted) _chargerPausesOuvertes();
+        } else {
+          final choix = await _dialogueArriveePendantPause(pauseOuverte);
+          attenteEmployeMs += chrono.elapsedMilliseconds - tAvantDialogue;
+          if (!mounted) return;
+          if (choix != 'reprendre') {
+            return; // « Rester en pause » : rien n'est écrit.
+          }
+          intentionPartagee = const Uuid().v4();
+          await PauseService.reprendre(
+            employeeId: employee['id'] as String,
+            enterpriseId: entrepriseSelectionnee?['id']?.toString(),
+            motifFermeture: 'reprise',
+            intention: intentionPartagee,
+          );
+          if (mounted) _chargerPausesOuvertes();
+        }
+      }
+
       bool success;
       String? pointageId;
 
@@ -5523,6 +5633,11 @@ class _PointageScreenState extends State<PointageScreen> {
           enterpriseId: entrepriseSelectionnee!['id'],
           checkType: typePointage,
           method: method,
+          // ⭐ Jeton d'intention : présent quand le pointage accompagne une
+          //    fermeture de pause. La référence unique EST le jeton — le
+          //    rejeu de la file ne créera jamais de doublon.
+          clientRef: intentionPartagee,
+          intention: intentionPartagee,
         );
         if (photoBytes != null) {
           await PhotoService.sauvegarderLocalement(
@@ -5540,41 +5655,72 @@ class _PointageScreenState extends State<PointageScreen> {
           method: method,
           position: _currentPosition,
           verificationZone: _verificationZone,
+          clientRef: intentionPartagee,
         );
         success = pointageId != null;
-
-        if (success && photoBytes != null && pointageId != null) {
-          await PhotoService.uploadEtEnregistrer(
-            photoBytes: photoBytes,
-            enterpriseId: entrepriseSelectionnee!['id'],
-            employeeId: employee['id'],
-            pointageId: pointageId,
-          );
-        }
       }
 
       if (success) {
-        if (!estHorsLigne) {
-          SyncService.synchroniserPointages();
-
-          // Traçabilité : on inscrit comment le type a été décidé, pour que
-          // l'admin puisse retrouver les cas douteux. Sans conséquence si la
-          // base refuse : le pointage, lui, est déjà enregistré.
-          if (pointageId != null) {
-            await SupabaseService.marquerPointage(
-              attendanceId: pointageId,
-              origine: origineDecision == 'manuel_employe' ? 'manuel' : 'auto',
-              raison: origineDecision,
-              anomalie: anomalie,
-            );
-          }
-        }
         await _compterPointagesEnAttente();
+        if (typePointage == 'in') {
+          // Le début de service du jour est mémorisé dès qu'on le connaît :
+          // les dialogues afficheront « Travaillé » même plus tard hors-ligne.
+          await PauseService.memoriserDebutService(
+              employee['id'] as String,
+              PauseService.instantDeConfiance().toIso8601String());
+        }
         if (mounted) {
           _afficherSucces(employee['first_name'], employee['last_name'],
               typePointage, estHorsLigne, employee, photoBytes,
               attendanceId: estHorsLigne ? null : pointageId);
         }
+        // ⏱ RETOUR À L'ACCUEIL — mesuré sur la frame où la confirmation
+        //    apparaît. Budget de la conception validée : moins de 500 ms.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final ecoule = chrono.elapsedMilliseconds;
+          MesurePerf.enregistrer('retour_accueil', ecoule);
+          MesurePerf.enregistrer(
+              'retour_accueil_hors_attente', ecoule - attenteEmployeMs);
+        });
+
+        // ⏱ RETOUR OPTIMISTE — la chaîne lourde (photo, traçabilité,
+        //    synchronisation) tourne APRÈS le retour à l'accueil : c'est elle
+        //    qui rendait le retour lent. Rien n'est perdu — chaque écriture
+        //    reste idempotente (référence unique) et un échec est signalé
+        //    dans les journaux, jamais masqué.
+        final pointageIdFinal = pointageId;
+        unawaited(() async {
+          try {
+            if (photoBytes != null && pointageIdFinal != null) {
+              await PhotoService.uploadEtEnregistrer(
+                photoBytes: photoBytes,
+                enterpriseId: entrepriseSelectionnee!['id'],
+                employeeId: employee['id'],
+                pointageId: pointageIdFinal,
+              );
+            }
+            if (!estHorsLigne && pointageIdFinal != null) {
+              // Traçabilité : comment le type a été décidé (le pointage, lui,
+              // est déjà enregistré — sans conséquence si la base refuse).
+              await SupabaseService.marquerPointage(
+                attendanceId: pointageIdFinal,
+                origine:
+                    origineDecision == 'manuel_employe' ? 'manuel' : 'auto',
+                raison: origineDecision,
+                anomalie: anomalie,
+              );
+            }
+            if (!estHorsLigne) {
+              await SyncService.synchroniserPointages();
+            }
+            await _compterPointagesEnAttente();
+          } catch (e) {
+            print('⚠️ suite du pointage (arrière-plan) : $e');
+          } finally {
+            MesurePerf.enregistrer(
+                'pointage_complet', chrono.elapsedMilliseconds);
+          }
+        }());
       } else {
         if (mounted) _afficherErreur('Erreur lors de l\'enregistrement');
       }
@@ -5585,6 +5731,297 @@ class _PointageScreenState extends State<PointageScreen> {
       // retiré : aucune tablette ne reste bloquée sur un pointage en cours.
       if (_pointageEnCoursPour == employee['id']) _pointageEnCoursPour = null;
     }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  //  ⏸ CONCEPTION PAUSES VALIDÉE 22/11 — LES DIALOGUES FIGÉS
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /// La pause ouverte de l'employé : l'état local (cette tablette) d'abord,
+  /// le bandeau (pauses ouvertes ailleurs) ensuite. `null` = pas en pause.
+  Future<Map<String, dynamic>?> _pauseDeLEmploye(String employeId) async {
+    try {
+      final etat = await PauseService.etatPause(employeId);
+      if (etat != null && etat['debut'] != null) {
+        return {
+          'employee_id': employeId,
+          'enterprise_id': etat['enterprise_id']?.toString(),
+          'debut': etat['debut'] as String,
+          'prevue_minutes': etat['prevue_minutes'],
+        };
+      }
+      for (final p in _pausesOuvertes) {
+        if (p['employee_id'] == employeId && p['debut'] != null) {
+          return {
+            'employee_id': employeId,
+            'enterprise_id': entrepriseSelectionnee?['id']?.toString(),
+            'debut': p['debut'] as String,
+            'prevue_minutes': null,
+          };
+        }
+      }
+    } catch (e) {
+      print('⚠️ _pauseDeLEmploye : $e');
+    }
+    return null;
+  }
+
+  /// « 2:05 » — une durée en heures:minutes, exactement comme dans les
+  /// textes figés du fondateur (« depuis 2:05 », « prévue 1:30 »).
+  String _dureeHM(Duration d) {
+    final minutes = d.inMinutes < 0 ? 0 : d.inMinutes;
+    return '${minutes ~/ 60}:${HeurePointage.deux(minutes % 60)}';
+  }
+
+  /// « Travaillé 3:16 » = présence − pauses de la journée, CALCULÉ sur les
+  /// seules données connues de la tablette. `null` si le début de service est
+  /// inconnu : le texte affiché OMET alors le décompte — jamais de valeur
+  /// inventée. Le décompte complet arrivera avec `encheck_pauses_mes_pauses`
+  /// (lot 2).
+  Future<String?> _travailleDuJour(
+      String employeId, DateTime maintenantUtc) async {
+    try {
+      final debut = await _chercherDebutService(employeId, maintenantUtc);
+      if (debut == null) return null;
+      final presence = maintenantUtc.difference(debut);
+      if (presence.isNegative) return null;
+      var pauses = Duration.zero;
+      for (final p in await PauseService.pausesDuJour(employeId)) {
+        final d = HeurePointage.instantDe(p['debut']);
+        if (d == null) continue;
+        final f = HeurePointage.instantDe(p['fin']) ?? maintenantUtc;
+        final duree = f.difference(d);
+        if (duree.isNegative) continue;
+        pauses += duree;
+      }
+      final travaille = presence - pauses;
+      if (travaille.isNegative) return null;
+      return _dureeHM(travaille);
+    } catch (e) {
+      print('⚠️ _travailleDuJour : $e');
+      return null;
+    }
+  }
+
+  /// Le premier pointage « in » de la journée : la mémoire locale, puis les
+  /// pointages en attente, puis l'historique serveur. `null` = inconnu.
+  Future<DateTime?> _chercherDebutService(
+      String employeId, DateTime maintenantUtc) async {
+    try {
+      final memorise = await PauseService.lireDebutService(employeId);
+      if (memorise != null) return memorise;
+
+      final jourNow = HeurePointage
+          .jourDePointage({'check_time': maintenantUtc.toIso8601String()});
+      DateTime? debut;
+
+      final pending =
+          await LocalDatabase.getPointagesPendingParEmploye(employeId);
+      for (final p in pending) {
+        if (p['check_type'] != 'in') continue;
+        final t = HeurePointage.instant(p);
+        if (t == null) continue;
+        final jour =
+            HeurePointage.jourDePointage({'check_time': t.toIso8601String()});
+        if (jour == jourNow && (debut == null || t.isBefore(debut))) debut = t;
+      }
+
+      if (debut == null && ConnectivityService.isOnline) {
+        final histo = await SupabaseService.getHistoriquePointages(employeId,
+            limite: 100);
+        for (final p in histo) {
+          if (p['check_type'] != 'in') continue;
+          final t = HeurePointage.instant(p);
+          if (t == null) continue;
+          final jour = HeurePointage
+              .jourDePointage({'check_time': t.toIso8601String()});
+          if (jour == jourNow && (debut == null || t.isBefore(debut))) {
+            debut = t;
+          }
+        }
+      }
+
+      if (debut != null) {
+        await PauseService.memoriserDebutService(
+            employeId, debut.toUtc().toIso8601String());
+        return debut;
+      }
+    } catch (e) {
+      print('⚠️ _chercherDebutService : $e');
+    }
+    return null;
+  }
+
+  /// La durée prévue de la pause (grille), en minutes : mémorisée à
+  /// l'ouverture, relue en ligne si la pause vient d'ailleurs. `null` = non
+  /// connue — le texte s'affiche sans la parenthèse.
+  Future<int?> _prevueMinutesDe(Map<String, dynamic> pause) async {
+    final direct = (pause['prevue_minutes'] as num?)?.toInt();
+    if (direct != null) return direct;
+    if (!ConnectivityService.isOnline) return null;
+    try {
+      final res = await PauseService.pausePrevue(
+        employeeId: pause['employee_id'] as String,
+        enterpriseId: pause['enterprise_id'] as String?,
+      );
+      if (res['trouvee'] == true) return (res['minutes'] as num?)?.toInt();
+    } catch (_) {}
+    return null;
+  }
+
+  /// SORTIE pendant pause — texte FIGÉ (contrat) :
+  /// « Vous êtes en pause depuis 2:05 (prévue 1:30). Terminer votre journée ?
+  ///   Pause clôturée à 18:20 — Travaillé 3:16. »
+  ///   [Rester travailler] [Terminer ma journée]
+  /// Renvoie 'rester_travailler' ou 'terminer'. Une fermeture sans choix
+  /// n'écrit rien (le dialogue est non disqualifiable).
+  Future<String?> _dialogueSortiePendantPause(
+      Map<String, dynamic> pause) async {
+    final debut = HeurePointage.instantDe(pause['debut']);
+    final maintenant = PauseService.instantDeConfiance();
+    final depuis = debut == null
+        ? '0:00'
+        : _dureeHM(maintenant.difference(debut));
+    final prevue = await _prevueMinutesDe(pause);
+    final cloture =
+        PauseService.heureCourteDe(maintenant.toIso8601String());
+    final travaille =
+        await _travailleDuJour(pause['employee_id'] as String, maintenant);
+
+    final dureePrevue = prevue == null
+        ? ''
+        : ' (prévue ${_dureeHM(Duration(minutes: prevue))})';
+    final bilan = travaille == null ? '' : ' — Travaillé $travaille';
+    final texte = 'Vous êtes en pause depuis $depuis$dureePrevue. '
+        'Terminer votre journée ? '
+        'Pause clôturée à $cloture$bilan.';
+
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(ctx).cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        content: Text(texte,
+            style: TextStyle(
+                fontSize: 16,
+                color: Theme.of(ctx).textTheme.bodyLarge?.color)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'rester_travailler'),
+            child: const Text('Rester travailler'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, 'terminer'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: EnCheckColors.terreChaude,
+              foregroundColor: EnCheckColors.blanc,
+            ),
+            child: const Text('Terminer ma journée'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// ARRIVÉE pendant pause (pause oubliée) — texte FIGÉ (contrat) :
+  /// « Vous êtes en pause depuis 16:42. Reprendre le service ? »
+  ///   [Rester en pause] [Reprendre le service]
+  /// Renvoie 'rester_en_pause' ou 'reprendre'.
+  Future<String?> _dialogueArriveePendantPause(
+      Map<String, dynamic> pause) async {
+    final debut = HeurePointage.instantDe(pause['debut']);
+    final maintenant = PauseService.instantDeConfiance();
+    final depuis = debut == null
+        ? '0:00'
+        : _dureeHM(maintenant.difference(debut));
+
+    final texte = 'Vous êtes en pause depuis $depuis. Reprendre le service ?';
+
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(ctx).cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        content: Text(texte,
+            style: TextStyle(
+                fontSize: 16,
+                color: Theme.of(ctx).textTheme.bodyLarge?.color)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'rester_en_pause'),
+            child: const Text('Rester en pause'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, 'reprendre'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: EnCheckColors.succes,
+              foregroundColor: EnCheckColors.blanc,
+            ),
+            child: const Text('Reprendre le service'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  //  ⏱ DIAGNOSTIC DE VITESSE — appui long sur la carte « AUJOURD'HUI »
+  // ═══════════════════════════════════════════════════════════════════════
+
+  Future<void> _afficherDiagnosticPerf() async {
+    final resumes = await MesurePerf.tousLesResumes();
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(ctx).cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Diagnostic de vitesse'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Mesures locales réelles de cette tablette '
+                '(les 100 dernières par ligne). Objectif du retour à '
+                'l\'accueil : moins de ${MesurePerf.budgetRetourAccueilMs} ms.',
+                style: const TextStyle(fontSize: 12),
+              ),
+              const SizedBox(height: 12),
+              if (resumes.isEmpty)
+                const Text('Pas encore de mesure : faites un pointage.',
+                    style: TextStyle(fontSize: 13))
+              else
+                for (final r in resumes) ...[
+                  Text('${r['nom']} (n=${r['n']})',
+                      style: const TextStyle(
+                          fontSize: 13, fontWeight: FontWeight.w700)),
+                  Text(
+                      'p50 ${r['p50']} ms · p95 ${r['p95']} ms · max ${r['max']} ms',
+                      style: const TextStyle(fontSize: 12)),
+                  const SizedBox(height: 8),
+                ],
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              await MesurePerf.reinitialiser();
+              if (ctx.mounted) Navigator.pop(ctx);
+            },
+            child: const Text('RÉINITIALISER'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('FERMER'),
+          ),
+        ],
+      ),
+    );
   }
 
   // ═══════════════════════════════════════════════════════════

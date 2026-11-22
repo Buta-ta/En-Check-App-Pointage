@@ -52,12 +52,20 @@ class LocalDatabase {
     required String enterpriseId,
     required String checkType,
     String method = 'pin',
+    String? clientRef,
+    String? intention,
   }) async {
     var box = Hive.box('pointages_pending');
     final maintenant = DateTime.now();
     final checkTime = maintenant.toIso8601String();
     final int? delai = TrustedPunchService.ecouleSecondes();
-    final String reference = TrustedPunchService.nouvelleReference();
+    // ⭐ JETON D'INTENTION (conception pauses, 22/11) : quand un pointage
+    //    accompagne la fermeture d'une pause (fin de journée pendant pause),
+    //    les deux écritures portent LE MÊME jeton — la référence unique du
+    //    pointage EST ce jeton : renvoyer la même décision ne crée jamais de
+    //    doublon (la base l'accepte une seule fois).
+    final String reference =
+        clientRef ?? TrustedPunchService.nouvelleReference();
     final DateTime? ancre = TrustedPunchService.ancreUtc;
     final DateTime? instantUtc = (ancre != null && delai != null)
         ? ancre.add(Duration(seconds: delai)).toUtc()
@@ -75,6 +83,7 @@ class LocalDatabase {
       'instant_utc': (instantUtc == null ? null : instantUtc.toIso8601String()),
       'client_ref': reference,
       'jeton': TrustedPunchService.jeton,
+      'intention': intention,
     };
 
     int id = await box.add(data);
