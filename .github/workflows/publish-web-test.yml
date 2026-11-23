@@ -65,8 +65,27 @@ jobs:
 
       # Le base-href correspond au chemin du site GitHub Pages du projet
       # (buta-ta.github.io/En-Check-App-Pointage/).
+      # Même discipline que build-web.yml : on vide d'abord build/web
+      # (l'ancien build est commité pour Vercel et contient des fichiers
+      # qui faussent une nouvelle compilation), et en cas d'échec le
+      # diagnostic est remonté dans les annotations — un échec muet ne
+      # sert personne.
       - name: Compiler la PWA de test
-        run: flutter build web --release --base-href /En-Check-App-Pointage/
+        run: |
+          rm -rf build/web
+          set +e
+          flutter build web --release --base-href=/En-Check-App-Pointage/ 2>&1 | tee /tmp/build-web.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            sed 's/\x1b\[[0-9;]*[mK]//g' /tmp/build-web.log | sed 's/^\[[^]]*\] //' > /tmp/build-web-propre.log
+            echo "::error::Compilation PWA de test échouée (code $status). Début du journal :"
+            debut=$(head -c 3500 /tmp/build-web-propre.log | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')
+            echo "::error::DEBUT $debut"
+            fin=$(tail -c 3500 /tmp/build-web-propre.log | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')
+            echo "::error::FIN $fin"
+            exit "$status"
+          fi
 
       - name: Préparer la publication
         uses: actions/upload-pages-artifact@v3

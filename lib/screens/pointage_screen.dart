@@ -149,18 +149,6 @@ class _PointageScreenState extends State<PointageScreen> {
   bool _dernierPointageEnAttente = false;
   String? _dernierPointageJour;
 
-  // ⭐ LOT 2 (§2.7) : totaux de la journée du dernier pointeur, carte
-  //    « AUJOURD'HUI ». Textes FIGÉS : « Présence 4:54 · Pause 1:38 ·
-  //    Travaillé 3:16 » (pause déduite, défaut) ou « Présence 4:54 (pause
-  //    incluse) ». Toute donnée inconnue fait OMETTRE sa clause — jamais de
-  //    valeur inventée.
-  String? _totauxPresence;
-  String? _totauxPause;
-  String? _totauxTravaille;
-  bool _totauxPauseIncluse = false;
-  String? _totauxEmployeId;
-  String? _totauxEntrepriseId;
-
   // ⭐ LOT 2 (§2.5) : option « Personne suivante » (Autres modes) — défaut
   //    ACTIVÉE = retour automatique à l'accueil après un pointage réussi.
   bool _personneSuivanteActive = true;
@@ -1821,16 +1809,7 @@ class _PointageScreenState extends State<PointageScreen> {
     // 🧭 Checklist : le premier pointage est fait.
     ChecklistService.marquerPremierPointage();
     _memoriserEtatPointage(
-        result['check_type']?.toString() ?? 'in', false,
-        employeId: result['employee'] is Map
-            ? (result['employee'] as Map)['id']?.toString()
-            : null,
-        entrepriseId: (result['enterprise_id'] ??
-                (result['employee'] is Map
-                    ? (result['employee'] as Map)['enterprise_id']
-                    : null))
-            ?.toString());
-    unawaited(_chargerTotauxDuJour());
+        result['check_type']?.toString() ?? 'in', false);
     final estEntree = result['check_type'] == 'in';
     final emp = result['employee'] as Map<String, dynamic>?;
     final nomAffiche = emp != null
@@ -2538,8 +2517,7 @@ class _PointageScreenState extends State<PointageScreen> {
 
   /// ⭐ PTG-01.6 : mémorise l'ÉVÉNEMENT réellement enregistré (heure, type,
   /// en attente d'envoi si hors-ligne) — jamais un nom sur la borne partagée.
-  void _memoriserEtatPointage(String type, bool enAttente,
-      {String? employeId, String? entrepriseId}) {
+  void _memoriserEtatPointage(String type, bool enAttente) {
     final jour = HeurePointage.jourDePointage(
         {'check_time': DateTime.now().toIso8601String()});
     if (!mounted) return;
@@ -2548,159 +2526,7 @@ class _PointageScreenState extends State<PointageScreen> {
       _dernierPointageType = type;
       _dernierPointageEnAttente = enAttente;
       _dernierPointageJour = jour;
-      if (employeId != null) _totauxEmployeId = employeId;
-      if (entrepriseId != null) _totauxEntrepriseId = entrepriseId;
     });
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════
-  //  ⭐ LOT 2 — LES TOTAUX DE LA JOURNÉE (§2.7, texte figé §3.9)
-  // ═══════════════════════════════════════════════════════════════════════
-
-  /// Le texte des totaux, ou `null` quand la présence est inconnue (la
-  /// ligne entière est alors omise — on n'affirme jamais une somme sans la
-  /// connaître). Formes FIGÉES :
-  ///   « Présence 4:54 · Pause 1:38 · Travaillé 3:16 »  (pause déduite)
-  ///   « Présence 4:54 · Pause 1:38 »                   (« Travaillé » omis)
-  ///   « Présence 4:54 (pause incluse) »                (non déduite)
-  String? _texteTotauxJour() {
-    final presence = _totauxPresence;
-    if (presence == null) return null;
-    if (_totauxPauseIncluse) return 'Présence $presence (pause incluse)';
-    final pause = _totauxPause;
-    if (pause == null) return 'Présence $presence (pause incluse)';
-    final travaille = _totauxTravaille;
-    if (travaille == null) return 'Présence $presence · Pause $pause';
-    return 'Présence $presence · Pause $pause · Travaillé $travaille';
-  }
-
-  /// Recalcule les totaux du dernier pointeur. Sources : premier « in » du
-  /// jour (mémoire locale → pending → serveur), dernier « out » du jour ou
-  /// maintenant, et les pauses — la base (`encheck_pauses_mes_pauses`, jeton
-  /// de session) quand elle répond, sinon le journal local. Aucun chiffre
-  /// n'est inventé : sans donnée, la clause est omise.
-  Future<void> _chargerTotauxDuJour() async {
-    final employeId = _totauxEmployeId;
-    if (employeId == null) return;
-    try {
-      final maintenant = PauseService.instantDeConfiance();
-      final debut = await _chercherDebutService(employeId, maintenant);
-      if (debut == null || maintenant.isBefore(debut)) {
-        if (mounted) {
-          setState(() {
-            _totauxPresence = null;
-            _totauxPause = null;
-            _totauxTravaille = null;
-          });
-        }
-        return;
-      }
-      // Fin de journée : le dernier « out » connu du jour, sinon maintenant.
-      final fin = await _finServiceDuJour(employeId, debut) ?? maintenant;
-      final presenceMinutes = fin.difference(debut).inMinutes;
-      if (presenceMinutes < 0) return;
-
-      // Les pauses : la base (lecture scopée par le jeton) quand elle
-      // répond — la vérité complète ; sinon le journal local (hors-ligne).
-      int? pausesServeur;
-      final jeton = TrustedPunchService.jeton;
-      if (jeton != null && jeton.isNotEmpty) {
-        final res = await PauseService.mesPauses(
-            jeton: jeton, du: debut, au: fin.isAfter(debut) ? fin : debut);
-        if (res['ok'] == true) {
-          var total = 0;
-          for (final row in (res['pauses'] as List)) {
-            final r = Map<String, dynamic>.from(row as Map);
-            final d = HeurePointage.instantDe(r['debut']);
-            if (d == null) continue;
-            final f = HeurePointage.instantDe(r['fin']) ?? fin;
-            final min = f.difference(d).inMinutes;
-            if (min > 0) total += min;
-          }
-          pausesServeur = total;
-        }
-      }
-      final int pausesMinutes =
-          pausesServeur ?? await _pauseMinutesLocalDuJour(employeId, fin);
-
-      final entrepriseId = _totauxEntrepriseId;
-      final deduit = entrepriseId == null || entrepriseId.isEmpty
-          ? true
-          : await PauseService.pauseDeduite(entrepriseId);
-
-      if (!mounted) return;
-      setState(() {
-        _totauxPresence = _dureeHM(Duration(minutes: presenceMinutes));
-        if (deduit) {
-          _totauxPauseIncluse = false;
-          _totauxPause = _dureeHM(Duration(minutes: pausesMinutes));
-          final travaille = presenceMinutes - pausesMinutes;
-          // « Travaillé » omis si le calcul est impossible (jamais inventé).
-          _totauxTravaille =
-              travaille < 0 ? null : _dureeHM(Duration(minutes: travaille));
-        } else {
-          _totauxPauseIncluse = true;
-          _totauxPause = null;
-          _totauxTravaille = null;
-        }
-      });
-    } catch (e) {
-      print('⚠️ totaux du jour : $e');
-    }
-  }
-
-  /// Somme des pauses du jour dans le JOURNAL LOCAL (en minutes).
-  Future<int> _pauseMinutesLocalDuJour(
-      String employeId, DateTime borne) async {
-    var total = 0;
-    for (final p in await PauseService.pausesDuJour(employeId)) {
-      final d = HeurePointage.instantDe(p['debut']);
-      if (d == null) continue;
-      final f = HeurePointage.instantDe(p['fin']) ?? borne;
-      final min = f.difference(d).inMinutes;
-      if (min > 0) total += min;
-    }
-    return total;
-  }
-
-  /// Le dernier pointage « out » du jour après [debut] : pending puis
-  /// serveur. `null` = la journée n'est pas encore close.
-  Future<DateTime?> _finServiceDuJour(
-      String employeId, DateTime debut) async {
-    try {
-      final jourNow =
-          HeurePointage.jourDePointage({'check_time': debut.toIso8601String()});
-      DateTime? sortie;
-      final pending = await LocalDatabase.getPointagesPendingParEmploye(employeId);
-      for (final p in pending) {
-        if (p['check_type'] != 'out') continue;
-        final t = HeurePointage.instant(p);
-        if (t == null || !t.isAfter(debut)) continue;
-        final jour =
-            HeurePointage.jourDePointage({'check_time': t.toIso8601String()});
-        if (jour == jourNow && (sortie == null || t.isAfter(sortie))) {
-          sortie = t;
-        }
-      }
-      if (sortie == null && ConnectivityService.isOnline) {
-        final histo =
-            await SupabaseService.getHistoriquePointages(employeId, limite: 100);
-        for (final p in histo) {
-          if (p['check_type'] != 'out') continue;
-          final t = HeurePointage.instant(p);
-          if (t == null || !t.isAfter(debut)) continue;
-          final jour =
-              HeurePointage.jourDePointage({'check_time': t.toIso8601String()});
-          if (jour == jourNow && (sortie == null || t.isAfter(sortie))) {
-            sortie = t;
-          }
-        }
-      }
-      return sortie;
-    } catch (e) {
-      print('⚠️ _finServiceDuJour : $e');
-      return null;
-    }
   }
 
   /// Texte d'état de la journée — carte « Aujourd'hui » ET bandeau téléphone.
@@ -2756,13 +2582,7 @@ class _PointageScreenState extends State<PointageScreen> {
           decoration: BoxDecoration(
             color: palette.surface,
             borderRadius: BorderRadius.circular(12),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x1A282214),
-                blurRadius: 10,
-                offset: Offset(0, 3),
-              ),
-            ],
+            border: Border.all(color: palette.filet, width: 1),
           ),
           child: Row(
             children: [
@@ -2781,52 +2601,51 @@ class _PointageScreenState extends State<PointageScreen> {
                         color: palette.texteTertiaire,
                       ),
                     ),
-                    const SizedBox(height: 5),
-                    FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        statut,
-                        maxLines: 1,
-                        style: TextStyle(
-                          fontSize: 18,
-                          height: 22 / 18,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: -0.15,
-                          color: palette.texteFort,
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Icon(Icons.circle,
+                            size: 9, color: _couleurStatutJour()),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              statut,
+                              maxLines: 1,
+                              style: TextStyle(
+                                fontSize: 18,
+                                height: 22 / 18,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: -0.15,
+                                color: palette.texteFort,
+                              ),
+                            ),
+                          ),
                         ),
-                      ),
+                      ],
                     ),
-                    if (_texteTotauxJour() != null) ...[
-                      const SizedBox(height: 3),
-                      Text(
-                        _texteTotauxJour()!,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          height: 16 / 12.5,
-                          fontWeight: FontWeight.w400,
-                          color: palette.texteSecondaire,
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Text(
+                          'Voir ma journée',
+                          maxLines: 1,
+                          style: TextStyle(
+                            fontSize: 15,
+                            height: 19 / 15,
+                            fontWeight: FontWeight.w400,
+                            decoration: TextDecoration.underline,
+                            decorationColor: palette.lien,
+                            decorationThickness: 1,
+                            color: palette.lien,
+                          ),
                         ),
-                      ),
-                    ],
-                    const SizedBox(height: 4),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        'Voir ma journée',
-                        maxLines: 1,
-                        style: TextStyle(
-                          fontSize: 15,
-                          height: 19 / 15,
-                          fontWeight: FontWeight.w400,
-                          decoration: TextDecoration.underline,
-                          decorationColor: palette.lien,
-                          decorationThickness: 1,
-                          color: palette.lien,
-                        ),
-                      ),
+                        const SizedBox(width: 4),
+                        Icon(Icons.chevron_right,
+                            size: 17, color: palette.lien),
+                      ],
                     ),
                   ],
                 ),
@@ -4645,16 +4464,6 @@ class _PointageScreenState extends State<PointageScreen> {
               ),
             ],
           ),
-          if (_texteTotauxJour() != null) ...[
-            const SizedBox(height: 6),
-            Text(
-              _texteTotauxJour()!,
-              style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                  color: Theme.of(context).textTheme.bodyMedium?.color),
-            ),
-          ],
           // ⭐ §3.3/§3.9 (validés 22/11 — postérieurs à la maquette image-4,
           //    même évolution que la ligne de totaux) : le rappel
           //    « Toujours en pause ? » sensé à la grille et le texte figé
@@ -6680,11 +6489,7 @@ class _PointageScreenState extends State<PointageScreen> {
       }) {
     // 🧭 Checklist : le premier pointage est fait.
     ChecklistService.marquerPremierPointage();
-    _memoriserEtatPointage(type, horsLigne,
-        employeId: employee['id']?.toString(),
-        entrepriseId: (employee['enterprise_id'] ?? entrepriseSelectionnee?['id'])
-            ?.toString());
-    unawaited(_chargerTotauxDuJour());
+    _memoriserEtatPointage(type, horsLigne);
     final estEntree = type == 'in';
     final horaires = _getEmployeeScheduleInfo();
 
