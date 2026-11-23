@@ -2954,10 +2954,15 @@ class _PointageScreenState extends State<PointageScreen> {
     rows.sort((a, b) => (a['debut']?.toString() ?? '')
         .compareTo(b['debut']?.toString() ?? ''));
     final jourNow = _jourCourant();
+    // ⭐ Règle partagée « mes pauses » (adoptée côté web le 23/11) : une
+    //    pause ÉCARTÉE par l'administration n'existe plus pour l'employé —
+    //    elle n'apparaît dans aucune de ses listes. Aligné des deux côtés.
+    final visibles =
+        rows.where((r) => r['statut'] != 'ecartee').toList();
     sortie['pauses'] =
-        rows.where((r) => _jourDe(r) == jourNow).toList();
-    sortie['a_verifier'] = _lignesAVerifier(rows, jourNow);
-    sortie['etat'] = rows.isEmpty ? 'vide' : 'ok';
+        visibles.where((r) => _jourDe(r) == jourNow).toList();
+    sortie['a_verifier'] = _lignesAVerifier(visibles, jourNow);
+    sortie['etat'] = visibles.isEmpty ? 'vide' : 'ok';
     return sortie;
   }
 

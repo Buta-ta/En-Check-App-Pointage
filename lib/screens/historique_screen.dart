@@ -260,7 +260,8 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
       }
       final rows = (res['pauses'] as List)
           .map((e) => Map<String, dynamic>.from(e as Map))
-          .toList();
+          .where((r) => r['statut'] != 'ecartee') // règle partagée : une
+          .toList(); // pause écartée n'existe plus pour l'employé (23/11)
       rows.sort((a, b) => (b['debut']?.toString() ?? '')
           .compareTo(a['debut']?.toString() ?? '')); // du plus récent
       final jourNow = HeurePointage.jourDePointage(

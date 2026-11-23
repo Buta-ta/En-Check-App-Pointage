@@ -1046,6 +1046,9 @@ class PauseService {
     Map<String, dynamic>? trouvee;
     for (final row in (res['pauses'] as List)) {
       final r = Map<String, dynamic>.from(row as Map);
+      // Règle partagée (23/11) : une pause ÉCARTÉE n'existe plus pour
+      // l'employé — elle ne déclenche ni liste ni dialogue.
+      if (r['statut'] == 'ecartee') continue;
       if (r['ouverte'] != true) continue;
       // La plus récente si le cas se présentait deux fois.
       if (trouvee == null ||
