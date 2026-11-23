@@ -990,6 +990,8 @@ class _PointageScreenState extends State<PointageScreen> {
           p['rappel'] = false;
           continue;
         }
+        // (employee_id absent des lignes serveur réduites : la prévue reste
+        // calculable pour les pauses ouvertes sur CETTE tablette.)
         final dureeMin = maintenant.difference(debut).inMinutes;
         final prevue = await _prevueMinutesDe(p);
         p['prevue_minutes'] = prevue;
@@ -1090,6 +1092,18 @@ class _PointageScreenState extends State<PointageScreen> {
     Map<String, dynamic>? ouverte;
     for (final p in liste) {
       if (p['employee_id'] == employeId) ouverte = p;
+    }
+    // ⭐ Choix B : ouverte depuis un autre appareil ? La lecture scopée par
+    //    jeton la retrouve (la personne vient de s'identifier).
+    if (ouverte == null) {
+      final viaJeton = await PauseService.pauseOuverteJeton();
+      if (viaJeton != null && viaJeton['debut'] != null) {
+        ouverte = {
+          'employee_id': employeId,
+          'debut': viaJeton['debut'].toString(),
+          'motif': viaJeton['motif']?.toString(),
+        };
+      }
     }
 
     if (!mounted) return;
@@ -5081,6 +5095,17 @@ class _PointageScreenState extends State<PointageScreen> {
     for (final p in liste) {
       if (p['employee_id'] == employeId) ouverte = p;
     }
+    // ⭐ Choix B : ouverte depuis un autre appareil ? Lecture scopée jeton.
+    if (ouverte == null) {
+      final viaJeton = await PauseService.pauseOuverteJeton();
+      if (viaJeton != null && viaJeton['debut'] != null) {
+        ouverte = {
+          'employee_id': employeId,
+          'debut': viaJeton['debut'].toString(),
+          'motif': viaJeton['motif']?.toString(),
+        };
+      }
+    }
     if (ouverte != null) {
       await PauseService.reprendre(
           employeeId: employeId, enterpriseId: entrepriseId);
@@ -6190,6 +6215,20 @@ class _PointageScreenState extends State<PointageScreen> {
           };
         }
       }
+      // ⭐ Choix B (24/11) : pause ouverte depuis un AUTRE appareil — la
+      //    lecture scopée par jeton la retrouve (la fonction réduite du
+      //    bandeau n'expose plus d'identité). La personne vient de
+      //    s'identifier : le jeton la désigne.
+      final viaJeton = await PauseService.pauseOuverteJeton();
+      if (viaJeton != null && viaJeton['debut'] != null) {
+        return {
+          'employee_id': employeId,
+          'enterprise_id': entrepriseSelectionnee?['id']?.toString(),
+          'debut': viaJeton['debut'].toString(),
+          'prevue_minutes': viaJeton['prevue_minutes'],
+          'motif': viaJeton['motif']?.toString(),
+        };
+      }
     } catch (e) {
       print('⚠️ _pauseDeLEmploye : $e');
     }
@@ -6289,9 +6328,15 @@ class _PointageScreenState extends State<PointageScreen> {
     final direct = (pause['prevue_minutes'] as num?)?.toInt();
     if (direct != null) return direct;
     if (!ConnectivityService.isOnline) return null;
+    // ⭐ Choix B (24/11) : la fonction réduite du bandeau n'expose plus
+    //    d'identité — la prévue n'est calculable que pour les pauses
+    //    connues LOCALEMENT (ouvertes sur cette tablette). Ailleurs, la
+    //    ligne de dépassement est omise et le rappel retombe sur 75 min.
+    final employeId = pause['employee_id'] as String?;
+    if (employeId == null || employeId.isEmpty) return null;
     try {
       final res = await PauseService.pausePrevue(
-        employeeId: pause['employee_id'] as String,
+        employeeId: employeId,
         enterpriseId: pause['enterprise_id'] as String?,
       );
       if (res['trouvee'] == true) return (res['minutes'] as num?)?.toInt();

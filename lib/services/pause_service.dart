@@ -363,6 +363,59 @@ class PauseService {
     required String debut,
     String? motif,
   }) async {
+    // ⭐ BASCULE SÉCURITÉ (23-24/11/2026) : le chemin sûr
+    //    `encheck_ma_pause_ouvrir(p_jeton, p_debut, p_motif)` — le jeton de
+    //    session désigne l'employé, qui n'est plus un paramètre. Même
+    //    politique que `_rpcFermer` : session expirée → le geste reste en
+    //    file ; fonction absente → repli de transition sur l'ancien chemin
+    //    (`anon`, révocation planifiée après vérification de l'APK).
+    final jeton = TrustedPunchService.jeton;
+    if (jeton != null && jeton.isNotEmpty) {
+      try {
+        final res = await _sb.rpc('encheck_ma_pause_ouvrir', params: {
+          'p_jeton': jeton,
+          'p_debut': debut,
+          'p_motif': motif,
+        });
+        return res is Map
+            ? Map<String, dynamic>.from(res)
+            : {'ok': false, 'erreur': 'reponse_inattendue'};
+      } on PostgrestException catch (e) {
+        if (e.code == '42501' || e.message.contains('Session employ')) {
+          print('ℹ️ encheck_ma_pause_ouvrir : session expirée — geste gardé '
+              'en file, rejoué à la prochaine identification.');
+          return {
+            'ok': false,
+            'reseau': true,
+            'session': true,
+            'erreur': e.toString(),
+          };
+        }
+        if (e.code == 'PGRST202' ||
+            e.message.contains('encheck_ma_pause_ouvrir')) {
+          print('ℹ️ encheck_ma_pause_ouvrir absente du serveur — repli sur '
+              'le chemin de transition.');
+        } else {
+          print('❌ encheck_ma_pause_ouvrir : ${e.message} (code ${e.code})');
+          return {'ok': false, 'reseau': true, 'erreur': e.toString()};
+        }
+      } catch (e) {
+        print('❌ encheck_ma_pause_ouvrir (réseau/serveur) : $e');
+        return {'ok': false, 'reseau': true, 'erreur': e.toString()};
+      }
+    }
+    return _rpcOuvrirLegacy(
+        employeeId: employeeId, debut: debut, motif: motif);
+  }
+
+  /// Repli de TRANSITION — `encheck_pause_ouvrir(p_employee, p_debut,
+  /// p_motif)`, exécutable par `anon` : sa révocation est écrite côté
+  /// serveur et n'aura lieu qu'APRÈS la vérification de l'APK.
+  static Future<Map<String, dynamic>> _rpcOuvrirLegacy({
+    required String employeeId,
+    required String debut,
+    String? motif,
+  }) async {
     try {
       final res = await _sb.rpc('encheck_pause_ouvrir', params: {
         'p_employee': employeeId,
@@ -573,74 +626,109 @@ class PauseService {
   static Future<List<Map<String, dynamic>>> pausesOuvertes({
     required String enterpriseId,
   }) async {
-    // 1. État local : les pauses connues de CETTE tablette (ouvertes OU
-    //    fermées localement — la mention « fin » sert de arbitre).
-    final localParEmploye = <String, Map<String, dynamic>>{};
+    // 1. État local — indexé par INSTANT DE DÉBUT. La fonction réduite du
+    //    bandeau (`encheck_pauses_bandeau`, choix B du fondateur) n'expose
+    //    PLUS d'identité : la fusion se fait sur les horodatages, jamais sur
+    //    les noms.
+    //    • pauses ouvertes ICI : instant de début → fiche locale ;
+    //    • pauses fermées ICI aujourd'hui (journal) : instants à masquer
+    //      tant que le rejeu ne les a pas supprimées de la base.
+    final ouvertsIci = <String, Map<String, dynamic>>{};
+    final fermesIci = <int>{};
     try {
       final box = await _boiteEtat();
+      final jour = HeurePointage.jourDePointage(
+          {'check_time': instantDeConfiance().toIso8601String()});
       for (final key in box.keys.toList()) {
-        if (!key.toString().startsWith('etat:')) continue;
-        final etat = Map<String, dynamic>.from(box.get(key) as Map);
-        final empId = etat['employee_id']?.toString();
-        if (empId == null) continue;
-        localParEmploye[empId] = etat;
+        final k = key.toString();
+        if (k.startsWith('etat:')) {
+          final etat = Map<String, dynamic>.from(box.get(key) as Map);
+          final debutIso = etat['debut'] as String?;
+          if (debutIso != null) ouvertsIci[debutIso] = etat;
+        } else if (k.startsWith('jour:') && k.endsWith(':$jour')) {
+          final brut = box.get(key);
+          if (brut is List) {
+            for (final e in brut.whereType<Map>()) {
+              final m = Map<String, dynamic>.from(e);
+              final d = HeurePointage.instantDe(m['debut']);
+              if (d != null) fermesIci.add(d.millisecondsSinceEpoch);
+            }
+          }
+        }
       }
     } catch (e) {
       print('⚠️ pausesOuvertes (local) : $e');
     }
 
-    // 2. La base, quand c'est possible.
+    // 2. La base — `encheck_pauses_bandeau` (réduite : `affichage`, `debut`,
+    //    `motif`, `duree_minutes` — aucun identifiant, aucun matricule) avec
+    //    repli de TRANSITION sur l'ancienne `encheck_pauses_en_cours`
+    //    (ouverte à `anon`, révocation planifiée après vérification APK).
     final lignes = <Map<String, dynamic>>[];
-    final vues = <String>{};
+    final vues = <int>{};
     if (ConnectivityService.isOnline) {
+      List<dynamic>? rows;
+      var formeReduite = true;
       try {
-        final res = await _sb.rpc('encheck_pauses_en_cours',
+        final res = await _sb.rpc('encheck_pauses_bandeau',
             params: {'p_enterprise': enterpriseId});
-        if (res is List) {
-          for (final row in res) {
-            final r = Map<String, dynamic>.from(row as Map);
-            final empId = r['employe_id']?.toString();
-            if (empId == null) continue;
-            final local = localParEmploye[empId];
-            // Reprise déjà tapée sur cette tablette (pas encore rejouée) :
-            // on la considère fermée tout de suite.
-            if (local != null &&
-                local['debut'] == null &&
-                local['fin'] != null) {
-              continue;
-            }
-            final prenom = r['prenom']?.toString() ?? '';
-            final nom = r['nom']?.toString() ?? '';
-            lignes.add({
-              'employee_id': empId,
-              'nom': ('$prenom $nom').trim(),
-              'matricule': r['matricule']?.toString(),
-              'debut': r['debut']?.toString(),
-              'motif': r['motif']?.toString(),
-              'duree_minutes': r['duree_minutes'],
-              'source': 'base',
-            });
-            vues.add(empId);
-          }
+        rows = res is List ? res : null;
+      } on PostgrestException catch (e) {
+        if (!(e.code == 'PGRST202' ||
+            e.message.contains('encheck_pauses_bandeau'))) {
+          print('⚠️ encheck_pauses_bandeau : ${e.message}');
         }
       } catch (e) {
-        // Fonction pas encore créée ou moment sans réseau : le bandeau
-        // restera sur l'état local — jamais d'erreur à l'écran.
-        print('⚠️ pausesOuvertes (base) : $e');
+        print('⚠️ encheck_pauses_bandeau : $e');
+      }
+      if (rows == null) {
+        formeReduite = false;
+        try {
+          final res = await _sb.rpc('encheck_pauses_en_cours',
+              params: {'p_enterprise': enterpriseId});
+          rows = res is List ? res : null;
+        } catch (e) {
+          // Fonction absente ou moment sans réseau : le bandeau restera sur
+          // l'état local — jamais d'erreur à l'écran.
+          print('⚠️ pausesOuvertes (base) : $e');
+        }
+      }
+      for (final row in rows ?? const <dynamic>[]) {
+        final r = Map<String, dynamic>.from(row as Map);
+        final debutIso = r['debut']?.toString();
+        final cle = _cleInstant(debutIso);
+        if (cle == null) continue;
+        // Reprise déjà tapée sur cette tablette (pas encore rejouée) :
+        // on la considère fermée tout de suite.
+        if (fermesIci.contains(cle)) continue;
+        final affichage = formeReduite
+            ? (r['affichage']?.toString() ?? '')
+            : ('${r['prenom'] ?? ''} ${r['nom'] ?? ''}').trim();
+        lignes.add({
+          // `employee_id` n'est plus exposé par la fonction réduite : il
+          // reste présent pour les lignes locales et l'ancienne forme.
+          'employee_id': r['employe_id']?.toString(),
+          'nom': affichage.isEmpty ? 'Employé' : affichage,
+          'matricule': r['matricule']?.toString(),
+          'debut': debutIso,
+          'motif': r['motif']?.toString(),
+          'duree_minutes': r['duree_minutes'],
+          'source': 'base',
+        });
+        vues.add(cle);
       }
     }
 
     // 3. Compléter avec les pauses ouvertes ICI que la base ne liste pas.
-    for (final entry in localParEmploye.entries) {
+    for (final entry in ouvertsIci.entries) {
+      final cle = _cleInstant(entry.key);
+      if (cle == null || vues.contains(cle)) continue;
       final etat = entry.value;
-      if (etat['debut'] == null) continue; // fermée ici
-      if (vues.contains(entry.key)) continue;
-      final debutIso = etat['debut'] as String?;
       lignes.add({
-        'employee_id': entry.key,
-        'nom': etat['nom']?.toString() ?? 'Employé',
+        'employee_id': etat['employee_id']?.toString(),
+        'nom': _affichageLocal(etat['nom']?.toString()),
         'matricule': etat['matricule']?.toString(),
-        'debut': debutIso,
+        'debut': entry.key,
         'motif': etat['motif']?.toString(),
         'duree_minutes': null,
         'source': 'local',
@@ -654,6 +742,23 @@ class PauseService {
       return da.compareTo(db);
     });
     return lignes;
+  }
+
+  /// La clé de fusion d'un instant ISO (millisecondes) — la base et la
+  /// tablette disent la même chose en `Z` ou en `+00:00`.
+  static int? _cleInstant(String? iso) =>
+      iso == null ? null : HeurePointage.instantDe(iso)?.millisecondsSinceEpoch;
+
+  /// « Hippo Biyokila » → « Hippo B. » : la même forme que le serveur
+  /// (`encheck_pauses_bandeau`), pour la ligne locale en attendant la base.
+  static String _affichageLocal(String? nomComplet) {
+    final n = (nomComplet ?? '').trim();
+    if (n.isEmpty) return 'Employé';
+    final mots = n.split(RegExp(r'\s+'));
+    if (mots.length == 1) return mots.first;
+    final dernier = mots.last;
+    final initiale = dernier.isEmpty ? '' : dernier[0];
+    return '${mots.first} $initiale.';
   }
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -926,6 +1031,29 @@ class PauseService {
       print('⚠️ encheck_pauses_mes_pauses : $e');
       return {'ok': false, 'erreur': e.toString()};
     }
+  }
+
+  /// La pause OUVERTE de la personne désignée par le jeton de session, lue
+  /// par la base (`encheck_pauses_mes_pauses`, scopée) — même ouverte depuis
+  /// un AUTRE appareil (la fonction réduite du bandeau n'expose plus
+  /// d'identité). `null` = pas de pause ouverte, pas de session, ou pas de
+  /// réseau — jamais d'exception.
+  static Future<Map<String, dynamic>?> pauseOuverteJeton() async {
+    final jeton = TrustedPunchService.jeton;
+    if (jeton == null || jeton.isEmpty) return null;
+    final res = await mesPauses(jeton: jeton);
+    if (res['ok'] != true) return null;
+    Map<String, dynamic>? trouvee;
+    for (final row in (res['pauses'] as List)) {
+      final r = Map<String, dynamic>.from(row as Map);
+      if (r['ouverte'] != true) continue;
+      // La plus récente si le cas se présentait deux fois.
+      if (trouvee == null ||
+          ('${r['debut'] ?? ''}'.compareTo('${trouvee['debut'] ?? ''}') > 0)) {
+        trouvee = r;
+      }
+    }
+    return trouvee;
   }
 
   /// « 2026-11-05 » pour les paramètres `date` de la base.
