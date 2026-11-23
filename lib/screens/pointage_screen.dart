@@ -6268,10 +6268,8 @@ class _PointageScreenState extends State<PointageScreen> {
 
   /// « 2:05 » — une durée en heures:minutes, exactement comme dans les
   /// textes figés du fondateur (« depuis 2:05 », « prévue 1:30 »).
-  String _dureeHM(Duration d) {
-    final minutes = d.inMinutes < 0 ? 0 : d.inMinutes;
-    return '${minutes ~/ 60}:${HeurePointage.deux(minutes % 60)}';
-  }
+  String _dureeHM(Duration d) =>
+      PauseService.dureeHM(d.inMinutes); // source unique (§3.9, testée)
 
   /// « Travaillé 3:16 » = présence − pauses de la journée, CALCULÉ sur les
   /// seules données connues de la tablette. `null` si le début de service est

@@ -464,7 +464,9 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
     final ecart = dureeMin - minutes;
     if (ecart <= 0) return null;
     final seuil = _rappelSeuilMinutes;
-    if (seuil == null || dureeMin < seuil) return null; // pas encore dépassé
+    // Frontière STRICTE, comme `zonePause` : à exactement prévue + tolérance,
+    // ce n'est pas encore un dépassement (test pauses_zones_test).
+    if (seuil == null || dureeMin <= seuil) return null; // pas encore dépassé
     return 'En pause depuis ${PauseService.dureeHM(dureeMin < 0 ? 0 : dureeMin)}'
         ' · dépassement de $ecart min';
   }
