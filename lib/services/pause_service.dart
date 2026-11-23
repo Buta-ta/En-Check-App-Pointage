@@ -383,11 +383,75 @@ class PauseService {
     required String fin,
     String? motifFermeture,
   }) async {
-    // ⭐ LIVRAISON ADMIN VALIDÉE 22/11 : le paramètre s'appelle `p_motif`
-    //    ('reprise' par défaut côté serveur, 'sortie' quand la fin de
-    //    journée ferme la pause) — nom VÉRIFIÉ sur la production. Un serveur
-    //    qui ne le connaîtrait pas répond PGRST202 : on retente SANS le
-    //    paramètre (ancien comportement), jamais de pause bloquée.
+    // ⭐ BASCULE SÉCURITÉ (23/11/2026) — séquence
+    //    `docs/SECURITE-ECRITURES-ANONYMES.md` (dépôt admin) :
+    //    le chemin sûr `encheck_ma_pause_fermer(p_jeton, p_fin, p_motif)`
+    //    est essayé EN PREMIER : le jeton de session désigne l'employé,
+    //    l'employé n'est plus un paramètre. Vérifié en production le 23/11
+    //    (jeton invalide → 42501).
+    //    L'ancien chemin `encheck_pause_fermer(p_employee, …)`, exécutable
+    //    par `anon`, reste un repli de TRANSITION : la révocation serveur
+    //    n'aura lieu qu'APRÈS la vérification de l'APK sur tablette réelle.
+    final jeton = TrustedPunchService.jeton;
+    if (jeton != null && jeton.isNotEmpty) {
+      try {
+        final res = await _sb.rpc('encheck_ma_pause_fermer', params: {
+          'p_jeton': jeton,
+          'p_fin': fin,
+          if (motifFermeture != null) 'p_motif': motifFermeture,
+        });
+        return res is Map
+            ? Map<String, dynamic>.from(res)
+            : {'ok': false, 'erreur': 'reponse_inattendue'};
+      } on PostgrestException catch (e) {
+        if (e.code == '42501' || e.message.contains('Session employ')) {
+          // Session expirée ou révoquée (cas du rejeu hors-ligne tardif) :
+          // le geste reste en file et sera rejoué à la prochaine
+          // identification — jamais bloqué, jamais écrit par le chemin
+          // ouvert en attendant la révocation.
+          print('ℹ️ encheck_ma_pause_fermer : session expirée — geste '
+              'gardé en file, rejoué à la prochaine identification.');
+          return {
+            'ok': false,
+            'reseau': true,
+            'session': true,
+            'erreur': e.toString(),
+          };
+        }
+        if (e.code == 'PGRST202' ||
+            e.message.contains('encheck_ma_pause_fermer')) {
+          // Fonction absente (ancien serveur) : on continue au repli de
+          // transition ci-dessous.
+          print('ℹ️ encheck_ma_pause_fermer absente du serveur — repli sur '
+              'le chemin de transition.');
+        } else {
+          print('❌ encheck_ma_pause_fermer : ${e.message} (code ${e.code})');
+          return {'ok': false, 'reseau': true, 'erreur': e.toString()};
+        }
+      } catch (e) {
+        print('❌ encheck_ma_pause_fermer (réseau/serveur) : $e');
+        return {'ok': false, 'reseau': true, 'erreur': e.toString()};
+      }
+    }
+    return _rpcFermerLegacy(employeeId: employeeId, fin: fin, motifFermeture: motifFermeture);
+  }
+
+  /// Repli de TRANSITION — `encheck_pause_fermer(p_employee, p_fin,
+  /// p_motif)`. Le paramètre s'appelle `p_motif` ('reprise' par défaut côté
+  /// serveur, 'sortie' quand la fin de journée ferme la pause) — nom VÉRIFIÉ
+  /// sur la production. Un serveur qui ne le connaîtrait pas répond
+  /// PGRST202 : on retente SANS le paramètre (ancien comportement), jamais
+  /// de pause bloquée.
+  /// ⚠️ Ce chemin est exécutable par `anon` : sa révocation est écrite côté
+  /// serveur (`docs/SECURITE-ECRITURES-ANONYMES.md`) et sera appliquée après
+  /// la vérification de l'APK sur tablette réelle. Le garder ici n'ajoute
+  /// aucune exposition (la fonction est ouverte de toute façon) et rend
+  /// l'app compatible des deux mondes pendant la bascule.
+  static Future<Map<String, dynamic>> _rpcFermerLegacy({
+    required String employeeId,
+    required String fin,
+    String? motifFermeture,
+  }) async {
     final avecMotif =
         motifFermeture != null && await _motifFermetureSupporte();
     try {
@@ -410,7 +474,7 @@ class PauseService {
         await _memoriserCapMotifFermeture(false);
         print('ℹ️ encheck_pause_fermer sans p_motif — ancien serveur, la '
             'fermeture passe sans le motif.');
-        return _rpcFermer(employeeId: employeeId, fin: fin);
+        return _rpcFermerLegacy(employeeId: employeeId, fin: fin);
       }
       print('❌ encheck_pause_fermer : ${e.message} (code ${e.code})');
       return {'ok': false, 'reseau': true, 'erreur': e.toString()};
