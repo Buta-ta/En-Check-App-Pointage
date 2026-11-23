@@ -4722,6 +4722,37 @@ class _PointageScreenState extends State<PointageScreen> {
                   color: Theme.of(context).textTheme.bodyMedium?.color),
             ),
           ],
+          // ⭐ §3.3/§3.9 (validés 22/11 — postérieurs à la maquette image-4,
+          //    même évolution que la ligne de totaux) : le rappel
+          //    « Toujours en pause ? » sensé à la grille et le texte figé
+          //    « En pause depuis 1:51 · dépassement de 21 min » — ici, dans
+          //    la carte qui porte le « qui est en pause » (contrat UX).
+          for (final pause in _pausesOuvertes) ...[
+            if (pause['rappel'] == true) ...[
+              const SizedBox(height: 6),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: EnCheckColors.erreur.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Text('🕒 Toujours en pause ?',
+                    style: TextStyle(
+                        fontSize: 10, color: EnCheckColors.erreur)),
+              ),
+            ],
+            if (pause['texte_depassement'] != null) ...[
+              const SizedBox(height: 4),
+              Text(
+                pause['texte_depassement'] as String,
+                style: const TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w500,
+                    color: EnCheckColors.erreur),
+              ),
+            ],
+          ],
           if (chips.length > 1) ...[
             const SizedBox(height: 10),
             Wrap(spacing: 8, runSpacing: 8, children: chips),
