@@ -13,6 +13,8 @@ class SelectionModePointage extends StatelessWidget {
     required this.onSelection,
     required this.onAccueil,
     this.dernierMode,
+    this.personneSuivanteActive = true,
+    this.onTogglePersonneSuivante,
   });
 
   final List<MethodePointage> modes;
@@ -20,6 +22,11 @@ class SelectionModePointage extends StatelessWidget {
   final MethodePointage? dernierMode;
   final ValueChanged<MethodePointage> onSelection;
   final VoidCallback onAccueil;
+
+  /// ⭐ Option « Personne suivante » (§2.5) : retour automatique à l'accueil
+  /// après un pointage réussi. Défaut activée ; se désactive ici.
+  final bool personneSuivanteActive;
+  final ValueChanged<bool>? onTogglePersonneSuivante;
 
   @override
   Widget build(BuildContext context) {
@@ -75,6 +82,28 @@ class SelectionModePointage extends StatelessWidget {
                     side: BorderSide(color: palette.bordure),
                     padding: const EdgeInsets.symmetric(vertical: 14),
                   ),
+                ),
+                const SizedBox(height: 10),
+                // ⭐ §2.5 : option « Personne suivante » (Autres modes).
+                SwitchListTile(
+                  key: const Key('option-personne-suivante'),
+                  value: personneSuivanteActive,
+                  onChanged: onTogglePersonneSuivante,
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(
+                    'Personne suivante',
+                    style: TextStyle(
+                      color: palette.texteFort,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  subtitle: Text(
+                    'Retour automatique à l\'accueil après un pointage réussi.',
+                    style: TextStyle(color: palette.texteSecondaire, fontSize: 13),
+                  ),
+                  secondary:
+                      Icon(Icons.people_outline, color: palette.navActif),
                 ),
               ],
             ),

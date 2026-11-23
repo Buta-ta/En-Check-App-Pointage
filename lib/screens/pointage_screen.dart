@@ -149,6 +149,23 @@ class _PointageScreenState extends State<PointageScreen> {
   bool _dernierPointageEnAttente = false;
   String? _dernierPointageJour;
 
+  // ⭐ LOT 2 (§2.7) : totaux de la journée du dernier pointeur, carte
+  //    « AUJOURD'HUI ». Textes FIGÉS : « Présence 4:54 · Pause 1:38 ·
+  //    Travaillé 3:16 » (pause déduite, défaut) ou « Présence 4:54 (pause
+  //    incluse) ». Toute donnée inconnue fait OMETTRE sa clause — jamais de
+  //    valeur inventée.
+  String? _totauxPresence;
+  String? _totauxPause;
+  String? _totauxTravaille;
+  bool _totauxPauseIncluse = false;
+  String? _totauxEmployeId;
+  String? _totauxEntrepriseId;
+
+  // ⭐ LOT 2 (§2.5) : option « Personne suivante » (Autres modes) — défaut
+  //    ACTIVÉE = retour automatique à l'accueil après un pointage réussi.
+  bool _personneSuivanteActive = true;
+  Timer? _timerPersonneSuivante;
+
   /// ⭐ État d'autorisation de la borne (PTG-01.5 analyse 4 nov) :
   /// 'aActiver' | 'ok' | 'refusee' | 'inconnu' — on n'affirme un refus
   /// que s'il est prouvé ; sinon on dit que l'état est non vérifié.
@@ -286,6 +303,7 @@ class _PointageScreenState extends State<PointageScreen> {
   void dispose() {
     _timer?.cancel();
     _timerPauses?.cancel();
+    _timerPersonneSuivante?.cancel();
     _timerAnnoncesAccueil?.cancel();
     _generationAnnoncesAccueil++;
     _matriculeNouveauCtrl.dispose();
@@ -299,6 +317,13 @@ class _PointageScreenState extends State<PointageScreen> {
   Future<void> _initialiserApp() async {
     await MotifService.charger();
     await ChecklistService.charger();
+    try {
+      // ⭐ §2.5 : option « Personne suivante » — défaut ACTIVÉE (retour
+      //    automatique = comportement par défaut).
+      final prefs = await SharedPreferences.getInstance();
+      _personneSuivanteActive =
+          prefs.getBool('personne_suivante_active') ?? true;
+    } catch (_) {}
     await _chargerModulesLocaux();
     await _chargerEntrepriseLocale();
 
@@ -951,6 +976,44 @@ class _PointageScreenState extends State<PointageScreen> {
     try {
       final liste =
           await PauseService.pausesOuvertes(enterpriseId: entrepriseId);
+      // ⭐ LOT 2 (§3.3) : le rappel suit la GRILLE, pas un délai fixe.
+      //    La prévue vient de la base (`encheck_pause_prevue`, cachée) et les
+      //    seuils de `encheck_seuil` — jamais de chiffre inventé. Le texte
+      //    « En pause depuis 1:51 · dépassement de 21 min » (§3.9) est prêt
+      //    ici, la minute suivante le recalcule.
+      final tolerance = await PauseService.tolerancePause(entrepriseId);
+      final plafond = await PauseService.plafondPause(entrepriseId);
+      final maintenant = PauseService.instantDeConfiance();
+      for (final p in liste) {
+        final debut = HeurePointage.instantDe(p['debut']);
+        if (debut == null) {
+          p['rappel'] = false;
+          continue;
+        }
+        // (employee_id absent des lignes serveur réduites : la prévue reste
+        // calculable pour les pauses ouvertes sur CETTE tablette.)
+        final dureeMin = maintenant.difference(debut).inMinutes;
+        final prevue = await _prevueMinutesDe(p);
+        p['prevue_minutes'] = prevue;
+        final ecart = prevue == null ? null : dureeMin - prevue;
+        p['ecart_minutes'] = ecart;
+        p['zone'] = PauseService.zonePause(
+          dureeMinutes: dureeMin < 0 ? 0 : dureeMin,
+          prevueMinutes: prevue,
+          toleranceMinutes: tolerance,
+          maxMinutes: plafond,
+        );
+        // Texte figé dès que le dépassement du créneau est avéré.
+        p['texte_depassement'] = (ecart != null && ecart > tolerance)
+            ? 'En pause depuis ${_dureeHM(Duration(minutes: dureeMin < 0 ? 0 : dureeMin))}'
+                ' · dépassement de $ecart min'
+            : null;
+        p['rappel'] = PauseService.rappelSensGrille(
+          debutUtc: debut,
+          prevueMinutes: prevue,
+          toleranceMinutes: tolerance,
+        );
+      }
       if (mounted) {
         setState(() => _pausesOuvertes = liste);
       }
@@ -1029,6 +1092,18 @@ class _PointageScreenState extends State<PointageScreen> {
     Map<String, dynamic>? ouverte;
     for (final p in liste) {
       if (p['employee_id'] == employeId) ouverte = p;
+    }
+    // ⭐ Choix B : ouverte depuis un autre appareil ? La lecture scopée par
+    //    jeton la retrouve (la personne vient de s'identifier).
+    if (ouverte == null) {
+      final viaJeton = await PauseService.pauseOuverteJeton();
+      if (viaJeton != null && viaJeton['debut'] != null) {
+        ouverte = {
+          'employee_id': employeId,
+          'debut': viaJeton['debut'].toString(),
+          'motif': viaJeton['motif']?.toString(),
+        };
+      }
     }
 
     if (!mounted) return;
@@ -1316,10 +1391,7 @@ class _PointageScreenState extends State<PointageScreen> {
                         fontSize: 13, fontWeight: FontWeight.w600),
                   ),
                 ),
-                if (pause['debut'] != null &&
-                    PauseService.rappelDepasse(
-                        HeurePointage.instantDe(pause['debut']) ??
-                            DateTime.now().toUtc()))
+                if (pause['rappel'] == true)
                   Container(
                     padding:
                         const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -1333,6 +1405,18 @@ class _PointageScreenState extends State<PointageScreen> {
                   ),
               ],
             ),
+            // ⭐ §3.3 : « En pause depuis 1:51 · dépassement de 21 min » —
+            //    affiché dès que le créneau est dépassé (texte figé §3.9).
+            if (pause['texte_depassement'] != null) ...[
+              const SizedBox(height: 2),
+              Text(
+                pause['texte_depassement'] as String,
+                style: const TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w500,
+                    color: EnCheckColors.erreur),
+              ),
+            ],
             const SizedBox(height: 2),
           ],
         ],
@@ -1809,7 +1893,16 @@ class _PointageScreenState extends State<PointageScreen> {
     // 🧭 Checklist : le premier pointage est fait.
     ChecklistService.marquerPremierPointage();
     _memoriserEtatPointage(
-        result['check_type']?.toString() ?? 'in', false);
+        result['check_type']?.toString() ?? 'in', false,
+        employeId: result['employee'] is Map
+            ? (result['employee'] as Map)['id']?.toString()
+            : null,
+        entrepriseId: (result['enterprise_id'] ??
+                (result['employee'] is Map
+                    ? (result['employee'] as Map)['enterprise_id']
+                    : null))
+            ?.toString());
+    unawaited(_chargerTotauxDuJour());
     final estEntree = result['check_type'] == 'in';
     final emp = result['employee'] as Map<String, dynamic>?;
     final nomAffiche = emp != null
@@ -2227,6 +2320,14 @@ class _PointageScreenState extends State<PointageScreen> {
         palette: palette,
         onSelection: _choisirModeAccueil,
         onAccueil: _confirmerRetourIdentificationEntreprise,
+        personneSuivanteActive: _personneSuivanteActive,
+        onTogglePersonneSuivante: (v) async {
+          setState(() => _personneSuivanteActive = v);
+          try {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setBool('personne_suivante_active', v);
+          } catch (_) {}
+        },
       );
     }
 
@@ -2509,7 +2610,8 @@ class _PointageScreenState extends State<PointageScreen> {
 
   /// ⭐ PTG-01.6 : mémorise l'ÉVÉNEMENT réellement enregistré (heure, type,
   /// en attente d'envoi si hors-ligne) — jamais un nom sur la borne partagée.
-  void _memoriserEtatPointage(String type, bool enAttente) {
+  void _memoriserEtatPointage(String type, bool enAttente,
+      {String? employeId, String? entrepriseId}) {
     final jour = HeurePointage.jourDePointage(
         {'check_time': DateTime.now().toIso8601String()});
     if (!mounted) return;
@@ -2518,7 +2620,159 @@ class _PointageScreenState extends State<PointageScreen> {
       _dernierPointageType = type;
       _dernierPointageEnAttente = enAttente;
       _dernierPointageJour = jour;
+      if (employeId != null) _totauxEmployeId = employeId;
+      if (entrepriseId != null) _totauxEntrepriseId = entrepriseId;
     });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  //  ⭐ LOT 2 — LES TOTAUX DE LA JOURNÉE (§2.7, texte figé §3.9)
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /// Le texte des totaux, ou `null` quand la présence est inconnue (la
+  /// ligne entière est alors omise — on n'affirme jamais une somme sans la
+  /// connaître). Formes FIGÉES :
+  ///   « Présence 4:54 · Pause 1:38 · Travaillé 3:16 »  (pause déduite)
+  ///   « Présence 4:54 · Pause 1:38 »                   (« Travaillé » omis)
+  ///   « Présence 4:54 (pause incluse) »                (non déduite)
+  String? _texteTotauxJour() {
+    final presence = _totauxPresence;
+    if (presence == null) return null;
+    if (_totauxPauseIncluse) return 'Présence $presence (pause incluse)';
+    final pause = _totauxPause;
+    if (pause == null) return 'Présence $presence (pause incluse)';
+    final travaille = _totauxTravaille;
+    if (travaille == null) return 'Présence $presence · Pause $pause';
+    return 'Présence $presence · Pause $pause · Travaillé $travaille';
+  }
+
+  /// Recalcule les totaux du dernier pointeur. Sources : premier « in » du
+  /// jour (mémoire locale → pending → serveur), dernier « out » du jour ou
+  /// maintenant, et les pauses — la base (`encheck_pauses_mes_pauses`, jeton
+  /// de session) quand elle répond, sinon le journal local. Aucun chiffre
+  /// n'est inventé : sans donnée, la clause est omise.
+  Future<void> _chargerTotauxDuJour() async {
+    final employeId = _totauxEmployeId;
+    if (employeId == null) return;
+    try {
+      final maintenant = PauseService.instantDeConfiance();
+      final debut = await _chercherDebutService(employeId, maintenant);
+      if (debut == null || maintenant.isBefore(debut)) {
+        if (mounted) {
+          setState(() {
+            _totauxPresence = null;
+            _totauxPause = null;
+            _totauxTravaille = null;
+          });
+        }
+        return;
+      }
+      // Fin de journée : le dernier « out » connu du jour, sinon maintenant.
+      final fin = await _finServiceDuJour(employeId, debut) ?? maintenant;
+      final presenceMinutes = fin.difference(debut).inMinutes;
+      if (presenceMinutes < 0) return;
+
+      // Les pauses : la base (lecture scopée par le jeton) quand elle
+      // répond — la vérité complète ; sinon le journal local (hors-ligne).
+      int? pausesServeur;
+      final jeton = TrustedPunchService.jeton;
+      if (jeton != null && jeton.isNotEmpty) {
+        final res = await PauseService.mesPauses(
+            jeton: jeton, du: debut, au: fin.isAfter(debut) ? fin : debut);
+        if (res['ok'] == true) {
+          var total = 0;
+          for (final row in (res['pauses'] as List)) {
+            final r = Map<String, dynamic>.from(row as Map);
+            final d = HeurePointage.instantDe(r['debut']);
+            if (d == null) continue;
+            final f = HeurePointage.instantDe(r['fin']) ?? fin;
+            final min = f.difference(d).inMinutes;
+            if (min > 0) total += min;
+          }
+          pausesServeur = total;
+        }
+      }
+      final int pausesMinutes =
+          pausesServeur ?? await _pauseMinutesLocalDuJour(employeId, fin);
+
+      final entrepriseId = _totauxEntrepriseId;
+      final deduit = entrepriseId == null || entrepriseId.isEmpty
+          ? true
+          : await PauseService.pauseDeduite(entrepriseId);
+
+      if (!mounted) return;
+      setState(() {
+        _totauxPresence = _dureeHM(Duration(minutes: presenceMinutes));
+        if (deduit) {
+          _totauxPauseIncluse = false;
+          _totauxPause = _dureeHM(Duration(minutes: pausesMinutes));
+          final travaille = presenceMinutes - pausesMinutes;
+          // « Travaillé » omis si le calcul est impossible (jamais inventé).
+          _totauxTravaille =
+              travaille < 0 ? null : _dureeHM(Duration(minutes: travaille));
+        } else {
+          _totauxPauseIncluse = true;
+          _totauxPause = null;
+          _totauxTravaille = null;
+        }
+      });
+    } catch (e) {
+      print('⚠️ totaux du jour : $e');
+    }
+  }
+
+  /// Somme des pauses du jour dans le JOURNAL LOCAL (en minutes).
+  Future<int> _pauseMinutesLocalDuJour(
+      String employeId, DateTime borne) async {
+    var total = 0;
+    for (final p in await PauseService.pausesDuJour(employeId)) {
+      final d = HeurePointage.instantDe(p['debut']);
+      if (d == null) continue;
+      final f = HeurePointage.instantDe(p['fin']) ?? borne;
+      final min = f.difference(d).inMinutes;
+      if (min > 0) total += min;
+    }
+    return total;
+  }
+
+  /// Le dernier pointage « out » du jour après [debut] : pending puis
+  /// serveur. `null` = la journée n'est pas encore close.
+  Future<DateTime?> _finServiceDuJour(
+      String employeId, DateTime debut) async {
+    try {
+      final jourNow =
+          HeurePointage.jourDePointage({'check_time': debut.toIso8601String()});
+      DateTime? sortie;
+      final pending = await LocalDatabase.getPointagesPendingParEmploye(employeId);
+      for (final p in pending) {
+        if (p['check_type'] != 'out') continue;
+        final t = HeurePointage.instant(p);
+        if (t == null || !t.isAfter(debut)) continue;
+        final jour =
+            HeurePointage.jourDePointage({'check_time': t.toIso8601String()});
+        if (jour == jourNow && (sortie == null || t.isAfter(sortie))) {
+          sortie = t;
+        }
+      }
+      if (sortie == null && ConnectivityService.isOnline) {
+        final histo =
+            await SupabaseService.getHistoriquePointages(employeId, limite: 100);
+        for (final p in histo) {
+          if (p['check_type'] != 'out') continue;
+          final t = HeurePointage.instant(p);
+          if (t == null || !t.isAfter(debut)) continue;
+          final jour =
+              HeurePointage.jourDePointage({'check_time': t.toIso8601String()});
+          if (jour == jourNow && (sortie == null || t.isAfter(sortie))) {
+            sortie = t;
+          }
+        }
+      }
+      return sortie;
+    } catch (e) {
+      print('⚠️ _finServiceDuJour : $e');
+      return null;
+    }
   }
 
   /// Texte d'état de la journée — carte « Aujourd'hui » ET bandeau téléphone.
@@ -2615,6 +2869,20 @@ class _PointageScreenState extends State<PointageScreen> {
                         ),
                       ),
                     ),
+                    if (_texteTotauxJour() != null) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        _texteTotauxJour()!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          height: 16 / 12.5,
+                          fontWeight: FontWeight.w400,
+                          color: palette.texteSecondaire,
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 4),
                     Align(
                       alignment: Alignment.centerLeft,
@@ -2650,9 +2918,167 @@ class _PointageScreenState extends State<PointageScreen> {
       ),
     );
   }
+  // ═══════════════════════════════════════════════════════════════════════
+  //  ⭐ LOT 2 — « MES PAUSES » ET « À VÉRIFIER » (§2.6/§7.1, texte §3.9)
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /// Charge les pauses de la personne identifiée (jeton de session — jamais
+  /// un identifiant passé par l'écran) pour la feuille « Ma journée » :
+  ///  • `pauses` = celles d'AUJOURD'HUI (la feuille parle de la journée) ;
+  ///  • `a_verifier` = les anomalies de la période (30 jours), en textes
+  ///    FIGÉS : « Pause longue (2:05) le 5/11 — à vérifier » et
+  ///    « Journée du 4/11 non terminée — à vérifier ».
+  /// `etat` : 'ok' | 'vide' | 'sans_session' | 'session_expiree' |
+  /// 'indisponible' — jamais d'erreur brute à l'écran, jamais d'affirmation
+  /// quand on ne sait pas.
+  Future<Map<String, dynamic>> _chargerMesPausesAffichees() async {
+    final sortie = <String, dynamic>{
+      'etat': 'vide',
+      'pauses': <Map<String, dynamic>>[],
+      'a_verifier': <String>[],
+    };
+    final jeton = TrustedPunchService.jeton;
+    if (jeton == null || jeton.isEmpty) {
+      sortie['etat'] = 'sans_session';
+      return sortie;
+    }
+    final res = await PauseService.mesPauses(jeton: jeton);
+    if (res['ok'] != true) {
+      sortie['etat'] =
+          res['erreur'] == 'session' ? 'session_expiree' : 'indisponible';
+      return sortie;
+    }
+    final rows = (res['pauses'] as List)
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+    rows.sort((a, b) => (a['debut']?.toString() ?? '')
+        .compareTo(b['debut']?.toString() ?? ''));
+    final jourNow = _jourCourant();
+    // ⭐ Règle partagée « mes pauses » (adoptée côté web le 23/11) : une
+    //    pause ÉCARTÉE par l'administration n'existe plus pour l'employé —
+    //    elle n'apparaît dans aucune de ses listes. Aligné des deux côtés.
+    final visibles =
+        rows.where((r) => r['statut'] != 'ecartee').toList();
+    sortie['pauses'] =
+        visibles.where((r) => _jourDe(r) == jourNow).toList();
+    sortie['a_verifier'] = _lignesAVerifier(visibles, jourNow);
+    sortie['etat'] = visibles.isEmpty ? 'vide' : 'ok';
+    return sortie;
+  }
+
+  String _jourCourant() => HeurePointage.jourDePointage(
+      {'check_time': PauseService.instantDeConfiance().toIso8601String()});
+
+  String? _jourDe(Map<String, dynamic> row) {
+    final j = row['jour']?.toString();
+    return j == null || j.isEmpty ? null : j.substring(0, 10);
+  }
+
+  /// Les lignes « à vérifier » (§2.6) — textes FIGÉS §3.9 produits par
+  /// `PauseService.lignesAVerifier` (source unique), affichage NON
+  /// BLOQUANT : l'app signale, elle ne répare rien.
+  List<String> _lignesAVerifier(
+      List<Map<String, dynamic>> rows, String jourNow) {
+    return PauseService.lignesAVerifier(rows, jourNow);
+  }
+
+  /// Les sections « MES PAUSES » et « À VÉRIFIER » de la feuille « Ma
+  /// journée » — lecture seule (§7.1).
+  List<Widget> _construireMesPausesEtAVerifier(
+      Map<String, dynamic> mesPauses) {
+    final etat = mesPauses['etat'] as String;
+    final pauses =
+        (mesPauses['pauses'] as List).cast<Map<String, dynamic>>();
+    final aVerifier = (mesPauses['a_verifier'] as List).cast<String>();
+    final couleurTexte =
+        Theme.of(context).textTheme.bodyLarge?.color ?? EnCheckColors.brunProfond;
+
+    final lignesPauses = <Widget>[];
+    if (etat == 'sans_session') {
+      lignesPauses.add(Text(
+        'Identifiez-vous pour voir vos pauses.',
+        style: TextStyle(fontSize: 12.5, color: couleurTexte),
+      ));
+    } else if (etat == 'session_expiree') {
+      lignesPauses.add(Text(
+        'Session expirée — réidentifiez-vous pour voir vos pauses.',
+        style: TextStyle(fontSize: 12.5, color: couleurTexte),
+      ));
+    } else if (etat == 'indisponible') {
+      lignesPauses.add(Text(
+        'Vos pauses sont indisponibles pour le moment.',
+        style: TextStyle(fontSize: 12.5, color: couleurTexte),
+      ));
+    } else if (pauses.isEmpty) {
+      lignesPauses.add(Text(
+        'Aucune pause enregistrée aujourd\'hui.',
+        style: TextStyle(fontSize: 12.5, color: couleurTexte),
+      ));
+    } else {
+      for (final r in pauses) {
+        final debut = r['debut'] == null
+            ? '—'
+            : PauseService.heureCourteDe(r['debut'].toString());
+        final ouverte = r['ouverte'] == true;
+        final fin = ouverte
+            ? '… en cours'
+            : (r['fin'] == null
+                ? '—'
+                : PauseService.heureCourteDe(r['fin'].toString()));
+        final duree = (r['duree_minutes'] as num?)?.toInt();
+        final dureeTxt =
+            duree == null ? '' : ' · ${_dureeHM(Duration(minutes: duree))}';
+        lignesPauses.add(Padding(
+          padding: const EdgeInsets.only(bottom: 4),
+          child: Text(
+            '$debut → $fin$dureeTxt',
+            style: TextStyle(
+                fontSize: 13, fontWeight: FontWeight.w500, color: couleurTexte),
+          ),
+        ));
+      }
+    }
+
+    return [
+      Text('MES PAUSES',
+          style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.4,
+              color: Theme.of(context).textTheme.bodyMedium?.color)),
+      const SizedBox(height: 6),
+      ...lignesPauses,
+      if (aVerifier.isNotEmpty) ...[
+        const SizedBox(height: 12),
+        Text('À VÉRIFIER',
+            style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.4,
+                color: EnCheckColors.terreChaude)),
+        const SizedBox(height: 6),
+        for (final ligne in aVerifier)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Text(
+              ligne,
+              style: const TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w500,
+                  color: EnCheckColors.terreChaude),
+            ),
+          ),
+      ],
+    ];
+  }
+
   /// « Voir ma journée » : la carte complète (statut, noms, pause,
   /// synchronisation) — les mêmes informations qu'avant, en entier.
   Future<void> _ouvrirFeuilleJournee() async {
+    // ⭐ LOT 2 : « mes pauses » (lecture scopée par le jeton, §7.1) et la
+    //    liste « à vérifier » (§2.6) — lecture seule, jamais bloquante.
+    final mesPauses = await _chargerMesPausesAffichees();
+    if (!mounted) return;
     await showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
@@ -2689,6 +3115,8 @@ class _PointageScreenState extends State<PointageScreen> {
               ),
               const SizedBox(height: 6),
               _buildCarteStatutJour(),
+              const SizedBox(height: 12),
+              ..._construireMesPausesEtAVerifier(mesPauses),
               const SizedBox(height: 10),
               // ⭐ PTG-01.6 : on n'affirme jamais « aucun pointage » à la
               // place d'une vérité : la journée personnelle se consulte
@@ -4289,6 +4717,47 @@ class _PointageScreenState extends State<PointageScreen> {
               ),
             ],
           ),
+          if (_texteTotauxJour() != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              _texteTotauxJour()!,
+              style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  color: Theme.of(context).textTheme.bodyMedium?.color),
+            ),
+          ],
+          // ⭐ §3.3/§3.9 (validés 22/11 — postérieurs à la maquette image-4,
+          //    même évolution que la ligne de totaux) : le rappel
+          //    « Toujours en pause ? » sensé à la grille et le texte figé
+          //    « En pause depuis 1:51 · dépassement de 21 min » — ici, dans
+          //    la carte qui porte le « qui est en pause » (contrat UX).
+          for (final pause in _pausesOuvertes) ...[
+            if (pause['rappel'] == true) ...[
+              const SizedBox(height: 6),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: EnCheckColors.erreur.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Text('🕒 Toujours en pause ?',
+                    style: TextStyle(
+                        fontSize: 10, color: EnCheckColors.erreur)),
+              ),
+            ],
+            if (pause['texte_depassement'] != null) ...[
+              const SizedBox(height: 4),
+              Text(
+                pause['texte_depassement'] as String,
+                style: const TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w500,
+                    color: EnCheckColors.erreur),
+              ),
+            ],
+          ],
           if (chips.length > 1) ...[
             const SizedBox(height: 10),
             Wrap(spacing: 8, runSpacing: 8, children: chips),
@@ -4661,6 +5130,17 @@ class _PointageScreenState extends State<PointageScreen> {
     Map<String, dynamic>? ouverte;
     for (final p in liste) {
       if (p['employee_id'] == employeId) ouverte = p;
+    }
+    // ⭐ Choix B : ouverte depuis un autre appareil ? Lecture scopée jeton.
+    if (ouverte == null) {
+      final viaJeton = await PauseService.pauseOuverteJeton();
+      if (viaJeton != null && viaJeton['debut'] != null) {
+        ouverte = {
+          'employee_id': employeId,
+          'debut': viaJeton['debut'].toString(),
+          'motif': viaJeton['motif']?.toString(),
+        };
+      }
     }
     if (ouverte != null) {
       await PauseService.reprendre(
@@ -5576,9 +6056,19 @@ class _PointageScreenState extends State<PointageScreen> {
       if (pauseOuverte != null) {
         final tAvantDialogue = chrono.elapsedMilliseconds;
         if (typePointage == 'out') {
-          final choix = await _dialogueSortiePendantPause(pauseOuverte);
+          var choix = await _dialogueSortiePendantPause(pauseOuverte);
           attenteEmployeMs += chrono.elapsedMilliseconds - tAvantDialogue;
           if (!mounted) return;
+          // ⭐ §3.7 : « Ma pause a duré moins longtemps » — la fin réelle est
+          //    choisie AVANT toute écriture, bornée [début, maintenant], puis
+          //    la journée se termine normalement avec cette fin tracée.
+          DateTime? finCorrigee;
+          if (choix == 'moins_longue') {
+            finCorrigee = await _dialogueCorrectionPause(pauseOuverte);
+            if (!mounted) return;
+            if (finCorrigee == null) return; // annulé : aucune écriture
+            choix = 'terminer';
+          }
           if (choix != 'terminer') {
             // « Rester travailler » — ou fermeture du dialogue sans choix :
             // dans les deux cas, aucun départ n'est écrit. Seul le bouton qui
@@ -5604,6 +6094,7 @@ class _PointageScreenState extends State<PointageScreen> {
             enterpriseId: entrepriseSelectionnee?['id']?.toString(),
             motifFermeture: 'sortie',
             intention: intentionPartagee,
+            finCorrigee: finCorrigee,
           );
           if (mounted) _chargerPausesOuvertes();
         } else {
@@ -5760,6 +6251,20 @@ class _PointageScreenState extends State<PointageScreen> {
           };
         }
       }
+      // ⭐ Choix B (24/11) : pause ouverte depuis un AUTRE appareil — la
+      //    lecture scopée par jeton la retrouve (la fonction réduite du
+      //    bandeau n'expose plus d'identité). La personne vient de
+      //    s'identifier : le jeton la désigne.
+      final viaJeton = await PauseService.pauseOuverteJeton();
+      if (viaJeton != null && viaJeton['debut'] != null) {
+        return {
+          'employee_id': employeId,
+          'enterprise_id': entrepriseSelectionnee?['id']?.toString(),
+          'debut': viaJeton['debut'].toString(),
+          'prevue_minutes': viaJeton['prevue_minutes'],
+          'motif': viaJeton['motif']?.toString(),
+        };
+      }
     } catch (e) {
       print('⚠️ _pauseDeLEmploye : $e');
     }
@@ -5768,10 +6273,8 @@ class _PointageScreenState extends State<PointageScreen> {
 
   /// « 2:05 » — une durée en heures:minutes, exactement comme dans les
   /// textes figés du fondateur (« depuis 2:05 », « prévue 1:30 »).
-  String _dureeHM(Duration d) {
-    final minutes = d.inMinutes < 0 ? 0 : d.inMinutes;
-    return '${minutes ~/ 60}:${HeurePointage.deux(minutes % 60)}';
-  }
+  String _dureeHM(Duration d) =>
+      PauseService.dureeHM(d.inMinutes); // source unique (§3.9, testée)
 
   /// « Travaillé 3:16 » = présence − pauses de la journée, CALCULÉ sur les
   /// seules données connues de la tablette. `null` si le début de service est
@@ -5859,9 +6362,15 @@ class _PointageScreenState extends State<PointageScreen> {
     final direct = (pause['prevue_minutes'] as num?)?.toInt();
     if (direct != null) return direct;
     if (!ConnectivityService.isOnline) return null;
+    // ⭐ Choix B (24/11) : la fonction réduite du bandeau n'expose plus
+    //    d'identité — la prévue n'est calculable que pour les pauses
+    //    connues LOCALEMENT (ouvertes sur cette tablette). Ailleurs, la
+    //    ligne de dépassement est omise et le rappel retombe sur 75 min.
+    final employeId = pause['employee_id'] as String?;
+    if (employeId == null || employeId.isEmpty) return null;
     try {
       final res = await PauseService.pausePrevue(
-        employeeId: pause['employee_id'] as String,
+        employeeId: employeId,
         enterpriseId: pause['enterprise_id'] as String?,
       );
       if (res['trouvee'] == true) return (res['minutes'] as num?)?.toInt();
@@ -5873,8 +6382,10 @@ class _PointageScreenState extends State<PointageScreen> {
   /// « Vous êtes en pause depuis 2:05 (prévue 1:30). Terminer votre journée ?
   ///   Pause clôturée à 18:20 — Travaillé 3:16. »
   ///   [Rester travailler] [Terminer ma journée]
-  /// Renvoie 'rester_travailler' ou 'terminer'. Une fermeture sans choix
-  /// n'écrit rien (le dialogue est non disqualifiable).
+  /// ⭐ §3.7 : en zone SUSPECTE (durée > plafond), un 3e bouton
+  ///   « Ma pause a duré moins longtemps » ouvre la correction bornée.
+  /// Renvoie 'rester_travailler', 'terminer' ou 'moins_longue'. Une
+  /// fermeture sans choix n'écrit rien (dialogue non disqualifiable).
   Future<String?> _dialogueSortiePendantPause(
       Map<String, dynamic> pause) async {
     final debut = HeurePointage.instantDe(pause['debut']);
@@ -5895,6 +6406,14 @@ class _PointageScreenState extends State<PointageScreen> {
     final texte = 'Vous êtes en pause depuis $depuis$dureePrevue. '
         'Terminer votre journée ? '
         'Pause clôturée à $cloture$bilan.';
+
+    // ⭐ Zone suspecte (§3.2/§3.7) : durée > plafond absolu (`encheck_seuil`).
+    //    Seul ce cas ajoute le 3e bouton — jamais ailleurs.
+    final entrepriseId = pause['enterprise_id'] as String?;
+    final plafond = await PauseService.plafondPause(entrepriseId ?? '');
+    final dureeMin =
+        debut == null ? 0 : maintenant.difference(debut).inMinutes;
+    final suspecte = dureeMin > plafond;
 
     return showDialog<String>(
       context: context,
@@ -5919,8 +6438,98 @@ class _PointageScreenState extends State<PointageScreen> {
             ),
             child: const Text('Terminer ma journée'),
           ),
+          if (suspecte)
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, 'moins_longue'),
+              child: const Text('Ma pause a duré moins longtemps',
+                  style: TextStyle(color: EnCheckColors.terreChaude)),
+            ),
         ],
       ),
+    );
+  }
+
+  /// « Ma pause a duré moins longtemps » (§3.7, zone suspecte UNIQUEMENT) :
+  /// l'employé choisit la fin RÉELLE de sa pause, bornée entre le début de
+  /// la pause et maintenant. La correction est TRACÉE (journal
+  /// `correction: true` + fin différente du tap) et jamais bloquante.
+  /// Renvoie la fin choisie, ou `null` = annulé (aucune écriture).
+  Future<DateTime?> _dialogueCorrectionPause(
+      Map<String, dynamic> pause) async {
+    final debut = HeurePointage.instantDe(pause['debut']);
+    final maintenant = PauseService.instantDeConfiance();
+    if (debut == null || !maintenant.isAfter(debut)) return null;
+    final totalMin = maintenant.difference(debut).inMinutes;
+    if (totalMin < 1) return null;
+    final entrepriseId = pause['enterprise_id'] as String?;
+    final plafond = await PauseService.plafondPause(entrepriseId ?? '');
+    // Proposition par défaut : la fin qui reste dans le plafond connu —
+    // l'employé glisse ensuite jusqu'à sa fin réelle.
+    var minutesChoisies = totalMin < plafond ? totalMin : plafond;
+    if (minutesChoisies < 1) minutesChoisies = 1;
+
+    return showDialog<DateTime>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setLocal) {
+            final finChoisie =
+                debut.add(Duration(minutes: minutesChoisies.round()));
+            return AlertDialog(
+              backgroundColor: Theme.of(ctx).cardColor,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20)),
+              title: const Text('Fin réelle de la pause'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Pause commencée à '
+                    '${PauseService.heureCourteDe(debut.toIso8601String())}. '
+                    'Glissez la fin réelle — entre le début et maintenant.',
+                    style: TextStyle(
+                        fontSize: 14,
+                        color: Theme.of(ctx).textTheme.bodyMedium?.color),
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    'Fin choisie : '
+                    '${PauseService.heureCourteDe(finChoisie.toIso8601String())} '
+                    '(durée ${_dureeHM(finChoisie.difference(debut))})',
+                    style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: EnCheckColors.terreChaude),
+                  ),
+                  Slider(
+                    value: minutesChoisies.toDouble(),
+                    min: 1,
+                    max: totalMin.toDouble(),
+                    divisions: totalMin > 1 ? totalMin - 1 : 1,
+                    onChanged: (v) => setLocal(() => minutesChoisies = v.round()),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Annuler'),
+                ),
+                ElevatedButton(
+                  onPressed: () => Navigator.pop(ctx, finChoisie),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: EnCheckColors.terreChaude,
+                    foregroundColor: EnCheckColors.blanc,
+                  ),
+                  child: const Text("C'est la bonne heure"),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 
@@ -6143,14 +6752,24 @@ class _PointageScreenState extends State<PointageScreen> {
       }) {
     // 🧭 Checklist : le premier pointage est fait.
     ChecklistService.marquerPremierPointage();
-    _memoriserEtatPointage(type, horsLigne);
+    _memoriserEtatPointage(type, horsLigne,
+        employeId: employee['id']?.toString(),
+        entrepriseId: (employee['enterprise_id'] ?? entrepriseSelectionnee?['id'])
+            ?.toString());
+    unawaited(_chargerTotauxDuJour());
     final estEntree = type == 'in';
     final horaires = _getEmployeeScheduleInfo();
 
+    // ⭐ §2.5 : « Personne suivante » — le bouton reste visible 8 s (fenêtre
+    //    demandée : 5 à 8 s) puis RETOUR AUTOMATIQUE à l'accueil quand
+    //    l'option est active. Le timer ne touche jamais un autre dialogue.
+    BuildContext? dialogueContext;
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
+      builder: (context) {
+        dialogueContext = context;
+        return AlertDialog(
         backgroundColor: Theme.of(context).cardColor,
         shape:
         RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
@@ -6315,39 +6934,79 @@ class _PointageScreenState extends State<PointageScreen> {
           // page Pointages que ce pointage a été modifié.
           if (attendanceId != null)
             TextButton(
-              onPressed: () => _demanderCorrectionType(
-                  attendanceId, employee, type),
+              onPressed: () {
+                _timerPersonneSuivante?.cancel();
+                _demanderCorrectionType(attendanceId, employee, type);
+              },
               child: const Text('CORRIGER',
                   style: TextStyle(
                       color: EnCheckColors.terreChaude, letterSpacing: 2)),
             ),
           TextButton(
-            onPressed: () => _ouvrirHistoriqueDepuisModale(context, employee),
+            onPressed: () {
+              _timerPersonneSuivante?.cancel();
+              _ouvrirHistoriqueDepuisModale(context, employee);
+            },
             child: Text('HISTORIQUE',
                 style: TextStyle(
                     color: Theme.of(context).textTheme.bodyLarge?.color,
                     letterSpacing: 2)),
           ),
+          if (_personneSuivanteActive)
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(context);
+                _reinitialiserApresPointage();
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: EnCheckColors.succes,
+                foregroundColor: EnCheckColors.blanc,
+              ),
+              child: const Text('Personne suivante'),
+            ),
           TextButton(
             onPressed: () {
               Navigator.pop(context);
-              setState(() {
-                numeroMatricule = '';
-                codePin = '';
-                afficherPin = false;
-                _modeSelectionne = null;
-                _gpsVerifie = false;
-                _currentPosition = null;
-                _verificationZone = null;
-              });
+              _reinitialiserApresPointage();
             },
             child: const Text('FERMER',
                 style: TextStyle(
                     color: EnCheckColors.terreChaude, letterSpacing: 2)),
           ),
         ],
-      ),
+        );
+      },
     );
+    if (_personneSuivanteActive) {
+      _timerPersonneSuivante?.cancel();
+      _timerPersonneSuivante = Timer(const Duration(seconds: 8), () {
+        if (!mounted || !_personneSuivanteActive) return;
+        final ctx = dialogueContext;
+        if (ctx == null) return;
+        final route = ModalRoute.of(ctx);
+        if (route != null && route.isCurrent) {
+          Navigator.of(ctx).pop();
+          _reinitialiserApresPointage();
+        }
+      });
+    }
+  }
+
+  /// Retour à l'accueil après un pointage : champ nettoyés, aucun changement
+  /// de logique métier (partagé par [FERMER], [Personne suivante] et le
+  /// retour automatique).
+  void _reinitialiserApresPointage() {
+    _timerPersonneSuivante?.cancel();
+    if (!mounted) return;
+    setState(() {
+      numeroMatricule = '';
+      codePin = '';
+      afficherPin = false;
+      _modeSelectionne = null;
+      _gpsVerifie = false;
+      _currentPosition = null;
+      _verificationZone = null;
+    });
   }
 
   // ═══════════════════════════════════════════════════════════

@@ -8,6 +8,7 @@ import '../services/local_database.dart';
 import '../services/connectivity_service.dart';
 import '../services/heure_pointage.dart'; // ⭐ LIVRAISON 19 — conversion d'heure
 import '../services/pause_service.dart'; // ⏸ LOT D — les pauses
+import '../services/trusted_punch_service.dart'; // ⭐ jeton de session (mes pauses)
 import '../services/geofencing_service.dart'; // ⏸ LOT D — mention « Hors site »
 import '../services/motif_service.dart';
 import '../services/historique_periode.dart';
@@ -77,6 +78,17 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
   Timer? _rappelTimer;
   bool _rappelAffiche = false;
 
+  // ⭐ LOT 2 (§7.1) : « mes pauses » — lecture SCOPÉE par le jeton de
+  //    session (`encheck_pauses_mes_pauses`), lecture seule. Plus la liste
+  //    « à vérifier » (§2.6, textes figés §3.9), non bloquante.
+  List<Map<String, dynamic>> _mesPauses = [];
+  List<String> _mesPausesAVerifier = [];
+  String _mesPausesEtat = 'vide';
+
+  /// Seuil de rappel en minutes : dépassement du créneau (prévue + tolérance)
+  /// quand la grille est connue, sinon l'ancien délai de 75 min (§3.3).
+  int? _rappelSeuilMinutes;
+
   /// Les pointages de la journée EN COURS, du plus ancien au plus récent.
   ///
   /// Le découpage se fait sur minuit LOCAL (HeurePointage), pas sur minuit
@@ -101,6 +113,7 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
     _dateSelectionnee = HistoriquePeriode.jour(HeurePointage.maintenant());
     _chargerHistorique();
     _chargerPause();
+    _chargerMesPauses();
     _rafraichirProfil();
     _chargerNomEntreprise();
   }
@@ -200,17 +213,67 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
         // Pas de GPS / permission refusée : on n'affiche simplement rien.
       }
 
+      // ⭐ §3.3 : le rappel suit la GRILLE (dépassement du créneau =
+      // prévue + tolérance) plutôt qu'un délai fixe de 75 min.
+      int? rappelSeuil;
+      if (prevue != null && prevue['trouvee'] == true) {
+        final minutes = (prevue['minutes'] as num?)?.toInt();
+        if (minutes != null && minutes > 0) {
+          final tolerance =
+              await PauseService.tolerancePause(entrepriseId ?? '');
+          rappelSeuil = minutes + tolerance;
+        }
+      }
+
       if (!mounted) return;
       setState(() {
         _pauseEtat = etat;
         _pausePrevue = prevue;
         _horsSite = horsSite;
         _pausePret = true;
+        _rappelSeuilMinutes = rappelSeuil;
       });
       _programmerRappel();
     } catch (e) {
       print('⚠️ chargement de la pause : $e');
       if (mounted) setState(() => _pausePret = true);
+    }
+  }
+
+  /// « Mes pauses » (§7.1) : lecture scopée par le jeton de session — jamais
+  /// un identifiant passé par l'écran, jamais `encheck_pauses_lire` (admin).
+  /// `etat` : 'ok' | 'vide' | 'sans_session' | 'session_expiree' |
+  /// 'indisponible' — jamais d'erreur brute à l'écran.
+  Future<void> _chargerMesPauses() async {
+    try {
+      final jeton = TrustedPunchService.jeton;
+      if (jeton == null || jeton.isEmpty) {
+        if (mounted) setState(() => _mesPausesEtat = 'sans_session');
+        return;
+      }
+      final res = await PauseService.mesPauses(jeton: jeton);
+      if (!mounted) return;
+      if (res['ok'] != true) {
+        setState(() => _mesPausesEtat =
+            res['erreur'] == 'session' ? 'session_expiree' : 'indisponible');
+        return;
+      }
+      final rows = (res['pauses'] as List)
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .where((r) => r['statut'] != 'ecartee') // règle partagée : une
+          .toList(); // pause écartée n'existe plus pour l'employé (23/11)
+      rows.sort((a, b) => (b['debut']?.toString() ?? '')
+          .compareTo(a['debut']?.toString() ?? '')); // du plus récent
+      final jourNow = HeurePointage.jourDePointage(
+          {'check_time': PauseService.instantDeConfiance().toIso8601String()});
+      setState(() {
+        _mesPauses = rows;
+        _mesPausesAVerifier = PauseService.lignesAVerifier(rows, jourNow);
+        _mesPausesEtat = rows.isEmpty ? 'vide' : 'ok';
+      });
+    } catch (e) {
+      print('⚠️ mes pauses : $e');
+      if (mounted) setState(() => _mesPausesEtat = 'indisponible');
     }
   }
 
@@ -356,12 +419,17 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
       ));
     }
 
-    if (PauseService.rappelDepasse(debut)) {
+    // ⭐ §3.3 : « sensé à la grille » — le seuil est le dépassement du
+    //    créneau quand la grille est connue ; sans grille, l'ancien délai
+    //    de 75 min (LOT D) reste la seule règle honnête.
+    final seuilMinutes = _rappelSeuilMinutes ?? PauseService.rappelMinutes;
+    final dureeMinutes =
+        DateTime.now().toUtc().difference(debut).inMinutes;
+    if (dureeMinutes >= seuilMinutes) {
       afficher();
       return;
     }
-    final echeance =
-        debut.add(const Duration(minutes: PauseService.rappelMinutes));
+    final echeance = debut.add(Duration(minutes: seuilMinutes));
     _rappelTimer = Timer(echeance.difference(DateTime.now().toUtc()), afficher);
   }
 
@@ -380,6 +448,116 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
           style: TextStyle(fontSize: 11, color: _accentAmbre),
         ),
       );
+
+  /// « En pause depuis 1:51 · dépassement de 21 min » (§3.3/§3.9) quand le
+  /// créneau est dépassé — sinon `null` (rien n'est affirmé).
+  String? _texteDepassement() {
+    final etat = _pauseEtat;
+    if (etat == null || etat['debut'] == null) return null;
+    final prevue = _pausePrevue;
+    if (prevue == null || prevue['trouvee'] != true) return null;
+    final minutes = (prevue['minutes'] as num?)?.toInt();
+    if (minutes == null || minutes <= 0) return null;
+    final debut = HeurePointage.instantDe(etat['debut'] as String);
+    if (debut == null) return null;
+    final dureeMin =
+        PauseService.instantDeConfiance().difference(debut).inMinutes;
+    final ecart = dureeMin - minutes;
+    if (ecart <= 0) return null;
+    final seuil = _rappelSeuilMinutes;
+    // Frontière STRICTE, comme `zonePause` : à exactement prévue + tolérance,
+    // ce n'est pas encore un dépassement (test pauses_zones_test).
+    if (seuil == null || dureeMin <= seuil) return null; // pas encore dépassé
+    return 'En pause depuis ${PauseService.dureeHM(dureeMin < 0 ? 0 : dureeMin)}'
+        ' · dépassement de $ecart min';
+  }
+
+  /// ⭐ LOT 2 (§7.1) : « mes pauses » + « à vérifier » — lecture seule,
+  /// scopée par le jeton de session, jamais bloquante (§2.6).
+  Widget _construireCarteMesPauses() {
+    final etat = _mesPausesEtat;
+    final lignes = <Widget>[];
+    if (etat == 'sans_session') {
+      lignes.add(const Text('Identifiez-vous pour voir vos pauses.',
+          style: TextStyle(fontSize: 12.5)));
+    } else if (etat == 'session_expiree') {
+      lignes.add(const Text('Session expirée — réidentifiez-vous pour voir vos pauses.',
+          style: TextStyle(fontSize: 12.5)));
+    } else if (etat == 'indisponible') {
+      lignes.add(const Text('Vos pauses sont indisponibles pour le moment.',
+          style: TextStyle(fontSize: 12.5)));
+    } else if (_mesPauses.isEmpty) {
+      lignes.add(const Text('Aucune pause enregistrée sur la période.',
+          style: TextStyle(fontSize: 12.5)));
+    } else {
+      for (final r in _mesPauses) {
+        final debut = r['debut'] == null
+            ? '—'
+            : PauseService.heureCourteDe(r['debut'].toString());
+        final ouverte = r['ouverte'] == true;
+        final fin = ouverte
+            ? '… en cours'
+            : (r['fin'] == null
+                ? '—'
+                : PauseService.heureCourteDe(r['fin'].toString()));
+        final duree = (r['duree_minutes'] as num?)?.toInt();
+        final jour = r['jour']?.toString();
+        final dureeTxt =
+            duree == null ? '' : ' · ${PauseService.dureeHM(duree)}';
+        lignes.add(Padding(
+          padding: const EdgeInsets.only(bottom: 4),
+          child: Text(
+            '${PauseService.dateCourte(jour)} — $debut → $fin$dureeTxt',
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+          ),
+        ));
+      }
+    }
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 20),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _palette.bordure.withOpacity(0.5)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('MES PAUSES',
+              style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.4,
+                  color: EnCheckColors.gris)),
+          const SizedBox(height: 8),
+          ...lignes,
+          if (_mesPausesAVerifier.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            const Text('À VÉRIFIER',
+                style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.4,
+                    color: EnCheckColors.terreChaude)),
+            const SizedBox(height: 6),
+            for (final ligne in _mesPausesAVerifier)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(
+                  ligne,
+                  style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w500,
+                      color: EnCheckColors.terreChaude),
+                ),
+              ),
+          ],
+        ],
+      ),
+    );
+  }
 
   Widget _construireCartePause() {
     // Variables locales non-nulles : pas de promotion hasardeuse.
@@ -440,6 +618,20 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
                   fontSize: 12,
                   color: _palette.texteSecondaire,
                   fontStyle: FontStyle.italic,
+                ),
+              ),
+            ],
+
+            // ⭐ §3.3 : « En pause depuis 1:51 · dépassement de 21 min » —
+            //    dès que le créneau est dépassé (texte figé §3.9).
+            if (_texteDepassement() != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                _texteDepassement()!,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w500,
+                  color: _accentAmbre,
                 ),
               ),
             ],
@@ -892,6 +1084,12 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
             _construireCartePause(),
             const SizedBox(height: 16),
           ],
+
+          // ⭐ LOT 2 (§7.1) : « mes pauses » (lecture seule) et la liste
+          //    « à vérifier » (§2.6) — dans l'Historique comme dans
+          //    « Voir ma journée ».
+          _construireCarteMesPauses(),
+          const SizedBox(height: 16),
 
           const SizedBox(height: 12),
 
