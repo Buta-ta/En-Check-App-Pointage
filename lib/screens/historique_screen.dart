@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/app_theme.dart';
+import '../widgets/mes_pauses_lignes.dart';
 import '../services/supabase_service.dart';
 import '../services/local_database.dart';
 import '../services/connectivity_service.dart';
@@ -477,11 +478,13 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
   Widget _construireCarteMesPauses() {
     final etat = _mesPausesEtat;
     final lignes = <Widget>[];
+    String? resume;
     if (etat == 'sans_session') {
       lignes.add(const Text('Identifiez-vous pour voir vos pauses.',
           style: TextStyle(fontSize: 12.5)));
     } else if (etat == 'session_expiree') {
-      lignes.add(const Text('Session expirée — réidentifiez-vous pour voir vos pauses.',
+      lignes.add(const Text(
+          'Session expirée — réidentifiez-vous pour voir vos pauses.',
           style: TextStyle(fontSize: 12.5)));
     } else if (etat == 'indisponible') {
       lignes.add(const Text('Vos pauses sont indisponibles pour le moment.',
@@ -490,7 +493,20 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
       lignes.add(const Text('Aucune pause enregistrée sur la période.',
           style: TextStyle(fontSize: 12.5)));
     } else {
+      // Résumé réel : nombre de lignes et somme des durées connues.
+      var totalMinutes = 0;
       for (final r in _mesPauses) {
+        final d = (r['duree_minutes'] as num?)?.toInt();
+        if (d != null) totalMinutes += d;
+      }
+      final pluriel = _mesPauses.length > 1 ? 's' : '';
+      final total = PauseService.dureeHM(totalMinutes);
+      resume = '${_mesPauses.length} pause$pluriel · $total';
+
+      lignes.add(const MesPausesColonnes());
+      String? jourPrecedent;
+      for (var i = 0; i < _mesPauses.length; i++) {
+        final r = _mesPauses[i];
         final debut = r['debut'] == null
             ? '—'
             : PauseService.heureCourteDe(r['debut'].toString());
@@ -501,15 +517,18 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
                 ? '—'
                 : PauseService.heureCourteDe(r['fin'].toString()));
         final duree = (r['duree_minutes'] as num?)?.toInt();
+        final dureeTxt = duree == null ? '' : PauseService.dureeHM(duree);
         final jour = r['jour']?.toString();
-        final dureeTxt =
-            duree == null ? '' : ' · ${PauseService.dureeHM(duree)}';
-        lignes.add(Padding(
-          padding: const EdgeInsets.only(bottom: 4),
-          child: Text(
-            '${PauseService.dateCourte(jour)} — $debut → $fin$dureeTxt',
-            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
-          ),
+        final memeJour = jour != null && jour == jourPrecedent;
+        jourPrecedent = jour;
+        lignes.add(MesPausesLigne(
+          palette: _palette,
+          date: memeJour ? '' : PauseService.dateCourte(jour),
+          debut: debut,
+          fin: fin,
+          enCours: ouverte,
+          dureeTxt: dureeTxt,
+          avecFilet: i > 0,
         ));
       }
     }
@@ -525,34 +544,15 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('MES PAUSES',
-              style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.4,
-                  color: EnCheckColors.gris)),
+          MesPausesEnTete(resume: resume),
           const SizedBox(height: 8),
           ...lignes,
           if (_mesPausesAVerifier.isNotEmpty) ...[
             const SizedBox(height: 12),
-            const Text('À VÉRIFIER',
-                style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 1.4,
-                    color: EnCheckColors.terreChaude)),
+            const MesPausesAlertesEnTete(),
             const SizedBox(height: 6),
             for (final ligne in _mesPausesAVerifier)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 4),
-                child: Text(
-                  ligne,
-                  style: const TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w500,
-                      color: EnCheckColors.terreChaude),
-                ),
-              ),
+              MesPausesAlerte(texte: ligne),
           ],
         ],
       ),
