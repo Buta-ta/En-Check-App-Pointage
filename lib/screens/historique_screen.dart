@@ -478,20 +478,16 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
   Widget _construireCarteMesPauses() {
     final etat = _mesPausesEtat;
     final lignes = <Widget>[];
+    String? message;
     String? resume;
     if (etat == 'sans_session') {
-      lignes.add(const Text('Identifiez-vous pour voir vos pauses.',
-          style: TextStyle(fontSize: 12.5)));
+      message = 'Identifiez-vous pour voir vos pauses.';
     } else if (etat == 'session_expiree') {
-      lignes.add(const Text(
-          'Session expirée — réidentifiez-vous pour voir vos pauses.',
-          style: TextStyle(fontSize: 12.5)));
+      message = 'Session expirée — réidentifiez-vous pour voir vos pauses.';
     } else if (etat == 'indisponible') {
-      lignes.add(const Text('Vos pauses sont indisponibles pour le moment.',
-          style: TextStyle(fontSize: 12.5)));
+      message = 'Vos pauses sont indisponibles pour le moment.';
     } else if (_mesPauses.isEmpty) {
-      lignes.add(const Text('Aucune pause enregistrée sur la période.',
-          style: TextStyle(fontSize: 12.5)));
+      message = 'Aucune pause enregistrée sur la période.';
     } else {
       // Résumé réel : nombre de lignes et somme des durées connues.
       var totalMinutes = 0;
@@ -503,10 +499,8 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
       final total = PauseService.dureeHM(totalMinutes);
       resume = '${_mesPauses.length} pause$pluriel · $total';
 
-      lignes.add(const MesPausesColonnes());
       String? jourPrecedent;
-      for (var i = 0; i < _mesPauses.length; i++) {
-        final r = _mesPauses[i];
+      for (final r in _mesPauses) {
         final debut = r['debut'] == null
             ? '—'
             : PauseService.heureCourteDe(r['debut'].toString());
@@ -528,7 +522,7 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
           fin: fin,
           enCours: ouverte,
           dureeTxt: dureeTxt,
-          avecFilet: i > 0,
+          avecFilet: lignes.isNotEmpty,
         ));
       }
     }
@@ -544,9 +538,7 @@ class _HistoriqueScreenState extends State<HistoriqueScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          MesPausesEnTete(resume: resume),
-          const SizedBox(height: 8),
-          ...lignes,
+          MesPausesListe(lignes: lignes, resume: resume, message: message),
           if (_mesPausesAVerifier.isNotEmpty) ...[
             const SizedBox(height: 12),
             const MesPausesAlertesEnTete(),

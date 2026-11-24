@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../services/pause_service.dart';
 import '../theme/app_theme.dart';
 import '../theme/accueil_palette.dart';
 
@@ -8,9 +7,20 @@ import '../theme/accueil_palette.dart';
 /// (« 14 pauses · 13:37 », somme des durées affichées ; jamais inventé).
 /// `resume` reste absent quand on ne sait pas (session absente, liste vide).
 class MesPausesEnTete extends StatelessWidget {
-  const MesPausesEnTete({super.key, required this.resume});
+  const MesPausesEnTete({
+    super.key,
+    required this.resume,
+    this.deplie,
+    this.avecChevron = false,
+  });
 
   final String? resume;
+
+  /// Liste affichée (true) ou repliée (false) — pilote la flèche.
+  final bool? deplie;
+
+  /// true = l'en-tête sert de bascule et affiche la flèche.
+  final bool avecChevron;
 
   @override
   Widget build(BuildContext context) {
@@ -36,6 +46,14 @@ class MesPausesEnTete extends StatelessWidget {
               color: Theme.of(context).textTheme.bodyMedium?.color,
             ),
           ),
+        if (avecChevron) ...[
+          const SizedBox(width: 8),
+          Icon(
+            deplie == true ? Icons.expand_less : Icons.expand_more,
+            size: 18,
+            color: EnCheckColors.gris,
+          ),
+        ],
       ],
     );
   }
@@ -228,6 +246,69 @@ class MesPausesAlerte extends StatelessWidget {
           color: EnCheckColors.terreChaude,
         ),
       ),
+    );
+  }
+}
+
+/// La section « MES PAUSES » pliable : tapez l'en-tête (ou la flèche) pour
+/// plier ou déplier la table. Au-delà de [seuilDeploiement] lignes, la table
+/// démarre repliée — sinon elle démarre dépliée.
+class MesPausesListe extends StatefulWidget {
+  const MesPausesListe({
+    super.key,
+    required this.lignes,
+    required this.resume,
+    required this.message,
+    this.avecDate = true,
+    this.seuilDeploiement = 3,
+  });
+
+  /// Lignes de la table (des [MesPausesLigne]).
+  final List<Widget> lignes;
+
+  /// Résumé réel de l'en-tête (« 15 pauses · 14:37 »), null = sans résumé.
+  final String? resume;
+
+  /// Message d'état (aucune pause, session expirée…) — alors pas de table.
+  final String? message;
+
+  /// Colonne DATE (faux pour la feuille « Ma journée »).
+  final bool avecDate;
+
+  /// Au-delà de ce nombre de lignes, la table démarre repliée.
+  final int seuilDeploiement;
+
+  @override
+  State<MesPausesListe> createState() => _MesPausesListeState();
+}
+
+class _MesPausesListeState extends State<MesPausesListe> {
+  late bool _deplie = widget.lignes.length <= widget.seuilDeploiement;
+
+  @override
+  Widget build(BuildContext context) {
+    final pliable = widget.lignes.isNotEmpty;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        InkWell(
+          onTap: pliable ? () => setState(() => _deplie = !_deplie) : null,
+          child: MesPausesEnTete(
+            resume: widget.resume,
+            deplie: _deplie,
+            avecChevron: pliable,
+          ),
+        ),
+        if (widget.message != null) ...[
+          const SizedBox(height: 8),
+          Text(widget.message!, style: const TextStyle(fontSize: 12.5)),
+        ],
+        if (pliable && _deplie) ...[
+          const SizedBox(height: 8),
+          MesPausesColonnes(avecDate: widget.avecDate),
+          ...widget.lignes,
+        ],
+      ],
     );
   }
 }
