@@ -30,6 +30,7 @@ import '../widgets/web_camera_widget_provider.dart';
 import '../services/supabase_service.dart';
 import '../services/annonces_accueil_service.dart';
 import '../widgets/carrousel_annonces_accueil.dart';
+import '../widgets/mes_pauses_lignes.dart';
 import '../widgets/carte_annonces_accueil.dart';
 import '../widgets/ecran_enrolement_borne.dart';
 import '../widgets/selection_mode_pointage.dart';
@@ -2737,32 +2738,48 @@ class _PointageScreenState extends State<PointageScreen> {
     final pauses =
         (mesPauses['pauses'] as List).cast<Map<String, dynamic>>();
     final aVerifier = (mesPauses['a_verifier'] as List).cast<String>();
-    final couleurTexte =
-        Theme.of(context).textTheme.bodyLarge?.color ?? EnCheckColors.brunProfond;
+    final themeService = Provider.of<ThemeService>(context, listen: false);
+    final palette = AccueilPalette.pour(
+      MotifService.actif.value,
+      themeService.isDarkMode,
+    );
 
     final lignesPauses = <Widget>[];
+    String? resume;
     if (etat == 'sans_session') {
-      lignesPauses.add(Text(
+      lignesPauses.add(const Text(
         'Identifiez-vous pour voir vos pauses.',
-        style: TextStyle(fontSize: 12.5, color: couleurTexte),
+        style: TextStyle(fontSize: 12.5),
       ));
     } else if (etat == 'session_expiree') {
-      lignesPauses.add(Text(
+      lignesPauses.add(const Text(
         'Session expirée — réidentifiez-vous pour voir vos pauses.',
-        style: TextStyle(fontSize: 12.5, color: couleurTexte),
+        style: TextStyle(fontSize: 12.5),
       ));
     } else if (etat == 'indisponible') {
-      lignesPauses.add(Text(
+      lignesPauses.add(const Text(
         'Vos pauses sont indisponibles pour le moment.',
-        style: TextStyle(fontSize: 12.5, color: couleurTexte),
+        style: TextStyle(fontSize: 12.5),
       ));
     } else if (pauses.isEmpty) {
-      lignesPauses.add(Text(
+      lignesPauses.add(const Text(
         'Aucune pause enregistrée aujourd\'hui.',
-        style: TextStyle(fontSize: 12.5, color: couleurTexte),
+        style: TextStyle(fontSize: 12.5),
       ));
     } else {
+      // Résumé réel : nombre de lignes et somme des durées connues.
+      var totalMinutes = 0;
       for (final r in pauses) {
+        final d = (r['duree_minutes'] as num?)?.toInt();
+        if (d != null) totalMinutes += d;
+      }
+      final pluriel = pauses.length > 1 ? 's' : '';
+      final total = PauseService.dureeHM(totalMinutes);
+      resume = '${pauses.length} pause$pluriel · $total';
+
+      lignesPauses.add(const MesPausesColonnes(avecDate: false));
+      for (var i = 0; i < pauses.length; i++) {
+        final r = pauses[i];
         final debut = r['debut'] == null
             ? '—'
             : PauseService.heureCourteDe(r['debut'].toString());
@@ -2773,48 +2790,28 @@ class _PointageScreenState extends State<PointageScreen> {
                 ? '—'
                 : PauseService.heureCourteDe(r['fin'].toString()));
         final duree = (r['duree_minutes'] as num?)?.toInt();
-        final dureeTxt =
-            duree == null ? '' : ' · ${_dureeHM(Duration(minutes: duree))}';
-        lignesPauses.add(Padding(
-          padding: const EdgeInsets.only(bottom: 4),
-          child: Text(
-            '$debut → $fin$dureeTxt',
-            style: TextStyle(
-                fontSize: 13, fontWeight: FontWeight.w500, color: couleurTexte),
-          ),
+        final dureeTxt = duree == null ? '' : PauseService.dureeHM(duree);
+        lignesPauses.add(MesPausesLigne(
+          palette: palette,
+          debut: debut,
+          fin: fin,
+          enCours: ouverte,
+          dureeTxt: dureeTxt,
+          avecDate: false,
+          avecFilet: i > 0,
         ));
       }
     }
 
     return [
-      Text('MES PAUSES',
-          style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 1.4,
-              color: Theme.of(context).textTheme.bodyMedium?.color)),
+      MesPausesEnTete(resume: resume),
       const SizedBox(height: 6),
       ...lignesPauses,
       if (aVerifier.isNotEmpty) ...[
         const SizedBox(height: 12),
-        Text('À VÉRIFIER',
-            style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 1.4,
-                color: EnCheckColors.terreChaude)),
+        const MesPausesAlertesEnTete(),
         const SizedBox(height: 6),
-        for (final ligne in aVerifier)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 4),
-            child: Text(
-              ligne,
-              style: const TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w500,
-                  color: EnCheckColors.terreChaude),
-            ),
-          ),
+        for (final ligne in aVerifier) MesPausesAlerte(texte: ligne),
       ],
     ];
   }
