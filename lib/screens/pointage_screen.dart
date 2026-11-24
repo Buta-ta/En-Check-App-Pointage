@@ -2745,27 +2745,16 @@ class _PointageScreenState extends State<PointageScreen> {
     );
 
     final lignesPauses = <Widget>[];
+    String? message;
     String? resume;
     if (etat == 'sans_session') {
-      lignesPauses.add(const Text(
-        'Identifiez-vous pour voir vos pauses.',
-        style: TextStyle(fontSize: 12.5),
-      ));
+      message = 'Identifiez-vous pour voir vos pauses.';
     } else if (etat == 'session_expiree') {
-      lignesPauses.add(const Text(
-        'Session expirée — réidentifiez-vous pour voir vos pauses.',
-        style: TextStyle(fontSize: 12.5),
-      ));
+      message = 'Session expirée — réidentifiez-vous pour voir vos pauses.';
     } else if (etat == 'indisponible') {
-      lignesPauses.add(const Text(
-        'Vos pauses sont indisponibles pour le moment.',
-        style: TextStyle(fontSize: 12.5),
-      ));
+      message = 'Vos pauses sont indisponibles pour le moment.';
     } else if (pauses.isEmpty) {
-      lignesPauses.add(const Text(
-        'Aucune pause enregistrée aujourd\'hui.',
-        style: TextStyle(fontSize: 12.5),
-      ));
+      message = 'Aucune pause enregistrée aujourd\'hui.';
     } else {
       // Résumé réel : nombre de lignes et somme des durées connues.
       var totalMinutes = 0;
@@ -2777,9 +2766,7 @@ class _PointageScreenState extends State<PointageScreen> {
       final total = PauseService.dureeHM(totalMinutes);
       resume = '${pauses.length} pause$pluriel · $total';
 
-      lignesPauses.add(const MesPausesColonnes(avecDate: false));
-      for (var i = 0; i < pauses.length; i++) {
-        final r = pauses[i];
+      for (final r in pauses) {
         final debut = r['debut'] == null
             ? '—'
             : PauseService.heureCourteDe(r['debut'].toString());
@@ -2798,15 +2785,18 @@ class _PointageScreenState extends State<PointageScreen> {
           enCours: ouverte,
           dureeTxt: dureeTxt,
           avecDate: false,
-          avecFilet: i > 0,
+          avecFilet: lignesPauses.isNotEmpty,
         ));
       }
     }
 
     return [
-      MesPausesEnTete(resume: resume),
-      const SizedBox(height: 6),
-      ...lignesPauses,
+      MesPausesListe(
+        lignes: lignesPauses,
+        resume: resume,
+        message: message,
+        avecDate: false,
+      ),
       if (aVerifier.isNotEmpty) ...[
         const SizedBox(height: 12),
         const MesPausesAlertesEnTete(),
